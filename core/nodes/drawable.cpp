@@ -137,6 +137,7 @@ void Drawable::updateIndices() {
         mesh.indices.clear();
         return;
     }
+    sharedVertexMarkDirty();
 }
 
 static std::size_t registerBuffer(std::map<NodeId, std::size_t>& table, NodeId id, const Vec2Array& data, Vec2Array& buf) {
@@ -156,26 +157,65 @@ std::tuple<Vec2Array, std::optional<Mat4>, bool> Drawable::nodeAttachProcessor(c
     if (!node || origVertices.size() == 0 || mesh.indices.size() < 3) return {origDeformation, std::nullopt, false};
     Mat4 inv = origTransform ? Mat4::inverse(*origTransform) : Mat4::identity();
     Vec3 localNode = inv.transformPoint(Vec3{node->transform().translation.x, node->transform().translation.y, 0});
-    // iterate triangles
-    for (std::size_t i = 0; i + 2 < mesh.indices.size(); i += 3) {
-        auto i0 = mesh.indices[i];
-        auto i1 = mesh.indices[i + 1];
-        auto i2 = mesh.indices[i + 2];
-        if (i0 >= origVertices.size() || i1 >= origVertices.size() || i2 >= origVertices.size()) continue;
+
+    // simple cache by node id
+    static std::unordered_map<NodeId, std::size_t> attachedIndex;
+    if (attachedIndex.find(node->uuid) == attachedIndex.end()) {
+        attachedIndex[node->uuid] = std::numeric_limits<std::size_t>::max();
+    }
+
+    auto findTriangle = [&](const Vec2& p) -> std::size_t {
+        for (std::size_t i = 0; i + 2 < mesh.indices.size(); i += 3) {
+            auto i0 = mesh.indices[i];
+            auto i1 = mesh.indices[i + 1];
+            auto i2 = mesh.indices[i + 2];
+            if (i0 >= origVertices.size() || i1 >= origVertices.size() || i2 >= origVertices.size()) continue;
+            Vec2 v0{origVertices.x[i0], origVertices.y[i0]};
+            Vec2 v1{origVertices.x[i1], origVertices.y[i1]};
+            Vec2 v2{origVertices.x[i2], origVertices.y[i2]};
+            float denom = (v1.y - v2.y) * (v0.x - v2.x) + (v2.x - v1.x) * (v0.y - v2.y);
+            if (denom == 0.0f) continue;
+            float a = ((v1.y - v2.y) * (p.x - v2.x) + (v2.x - v1.x) * (p.y - v2.y)) / denom;
+            float b = ((v2.y - v0.y) * (p.x - v2.x) + (v0.x - v2.x) * (p.y - v2.y)) / denom;
+            float c = 1.0f - a - b;
+            if (a >= 0 && b >= 0 && c >= 0) return i;
+        }
+        return std::numeric_limits<std::size_t>::max();
+    };
+
+    auto triIdx = attachedIndex[node->uuid];
+    if (triIdx == std::numeric_limits<std::size_t>::max()) {
+        triIdx = findTriangle(Vec2{localNode.x, localNode.y});
+        attachedIndex[node->uuid] = triIdx;
+    }
+    if (triIdx != std::numeric_limits<std::size_t>::max() && triIdx + 2 < mesh.indices.size()) {
+        auto i0 = mesh.indices[triIdx];
+        auto i1 = mesh.indices[triIdx + 1];
+        auto i2 = mesh.indices[triIdx + 2];
         Vec2 v0{origVertices.x[i0], origVertices.y[i0]};
         Vec2 v1{origVertices.x[i1], origVertices.y[i1]};
         Vec2 v2{origVertices.x[i2], origVertices.y[i2]};
-        float denom = (v1.y - v2.y) * (v0.x - v2.x) + (v2.x - v1.x) * (v0.y - v2.y);
-        if (denom == 0.0f) continue;
-        float a = ((v1.y - v2.y) * (localNode.x - v2.x) + (v2.x - v1.x) * (localNode.y - v2.y)) / denom;
-        float b = ((v2.y - v0.y) * (localNode.x - v2.x) + (v0.x - v2.x) * (localNode.y - v2.y)) / denom;
-        float c = 1.0f - a - b;
-        if (a < 0 || b < 0 || c < 0) continue;
-        node->setValue("transform.t.x", localNode.x);
-        node->setValue("transform.t.y", localNode.y);
+        auto bary = [&](const Vec2& p) {
+            float denom = (v1.y - v2.y) * (v0.x - v2.x) + (v2.x - v1.x) * (v0.y - v2.y);
+            float a = ((v1.y - v2.y) * (p.x - v2.x) + (v2.x - v1.x) * (p.y - v2.y)) / denom;
+            float b = ((v2.y - v0.y) * (p.x - v2.x) + (v0.x - v2.x) * (p.y - v2.y)) / denom;
+            float c = 1.0f - a - b;
+            return std::array<float, 3>{a, b, c};
+        };
+        auto w = bary(Vec2{localNode.x, localNode.y});
+        Vec2 deform0{origDeformation.x[i0], origDeformation.y[i0]};
+        Vec2 deform1{origDeformation.x[i1], origDeformation.y[i1]};
+        Vec2 deform2{origDeformation.x[i2], origDeformation.y[i2]};
+        Vec2 blended{
+            deform0.x * w[0] + deform1.x * w[1] + deform2.x * w[2],
+            deform0.y * w[0] + deform1.y * w[1] + deform2.y * w[2],
+        };
+        node->setValue("transform.t.x", blended.x);
+        node->setValue("transform.t.y", blended.y);
         changed = true;
         return {origDeformation, std::nullopt, changed};
     }
+
     return {origDeformation, std::nullopt, changed};
 }
 
@@ -216,6 +256,10 @@ void Drawable::updateVertices() {
     std::fill(deformation.x.begin(), deformation.x.end(), 0.0f);
     std::fill(deformation.y.begin(), deformation.y.end(), 0.0f);
     deformationOffsets.resize(vertices.size(), Vec2{});
+    sharedVertexResize(vertices, vertices.size());
+    sharedDeformResize(deformation, deformation.size());
+    sharedVertexMarkDirty();
+    sharedDeformMarkDirty();
     updateBounds();
     writeSharedBuffers();
 }
@@ -316,6 +360,10 @@ std::tuple<Vec2Array, std::optional<Mat4>, bool> Drawable::weldingProcessor(cons
     scatterAddVec2(localSelf, selfIndices, deformationOut, changed);
     scatterAddVec2(localTarget, targetIndices, targetDrawable->deformation, changed);
 
+    if (changed) {
+        sharedDeformMarkDirty();
+        updateBounds();
+    }
     return {deformationOut, std::nullopt, changed};
 }
 
@@ -354,6 +402,8 @@ void Drawable::removeWeldedTarget(const std::shared_ptr<Drawable>& target) {
 void Drawable::setupSelf() {
     Deformable::setupSelf();
     updateVertices();
+    updateIndices();
+    writeSharedBuffers();
     // ensure weld hooks registered
     for (auto& link : weldedLinks) {
         auto pup = puppetRef();
@@ -372,6 +422,7 @@ void Drawable::finalizeDrawable() {
 void Drawable::clearCache() {
     deformationOffsets.clear();
     bounds.reset();
+    weldingApplied.clear();
 }
 
 void Drawable::runBeginTask(core::RenderContext& ctx) {
@@ -419,6 +470,7 @@ void Drawable::normalizeUv() {
         uv.x = dx != 0.0f ? (uv.x - minx) / dx : 0.0f;
         uv.y = dy != 0.0f ? (uv.y - miny) / dy : 0.0f;
     }
+    sharedUvMarkDirty();
 }
 
 void Drawable::centralizeDrawable() {
@@ -462,6 +514,8 @@ void Drawable::buildDrawable(bool force) {
     if (force || !mesh.isReady()) {
         updateVertices();
         updateBounds();
+        updateIndices();
+        writeSharedBuffers();
     }
 }
 
