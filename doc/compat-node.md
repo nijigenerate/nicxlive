@@ -32,8 +32,8 @@
 | `releaseSelf` | 実装あり | デフォルトno-op（D同様） | ◯ |
 | `notifyChange` | puppet通知・理由付きリスナー | puppet通知＋親/リスナー再通知 | ◯ |
 | `flushNotifyChange` | changePool→notify | 同等 | ◯ |
-| `drawOrientation` | あり | デバッグライン生成のみ（描画バックエンド未接続） | △ |
-| `drawBounds` | あり | デバッグライン生成のみ（描画バックエンド未接続） | △ |
+| `drawOrientation` | あり | デバッグラインをワールド座標でバッファに記録（描画は呼び出し側に委任） | ◯ |
+| `drawBounds` | あり | バウンディングボックスのラインをワールド座標でバッファに記録 | ◯ |
 | `normalizeUV` | UV正規化 | デフォルト空（D同等） | ◯ |
 | `clearCache` | キャッシュクリア | デフォルト空（D同等） | ◯ |
 | `canReparent` | 循環チェックあり | 実装済み | ◯ |

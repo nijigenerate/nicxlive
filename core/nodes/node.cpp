@@ -68,6 +68,12 @@ Transform combine(const Transform& a, const Transform& b) {
 
 } // namespace
 
+// Debug line storage (for drawOrientation / drawBounds parity)
+static std::vector<DebugLine> g_debugLines{};
+
+std::vector<DebugLine>& debugDrawBuffer() { return g_debugLines; }
+void clearDebugDrawBuffer() { g_debugLines.clear(); }
+
 bool Node::renderEnabled() const {
     if (auto p = parent.lock()) {
         return p->renderEnabled() && enabled;
@@ -778,13 +784,22 @@ Rect Node::getCombinedBoundsRect(bool reupdate, bool countPuppet) {
 }
 
 void Node::drawOrientation() {
-    // デバッグ描画フック（実際の描画はバックエンド依存）
+    // D 版同様にデバッグラインをバッファへ記録（描画は呼び出し側/バックエンドで処理）
     DebugLine lines[3]{
         {Vec3{0, 0, 0}, Vec3{32, 0, 0}, Vec4{1, 0, 0, 0.7f}},
         {Vec3{0, 0, 0}, Vec3{0, -32, 0}, Vec4{0, 1, 0, 0.7f}},
         {Vec3{0, 0, 0}, Vec3{0, 0, -32}, Vec4{0, 0, 1, 0.7f}},
     };
-    (void)lines;
+    Mat4 m = transform().toMat4();
+    auto& buf = debugDrawBuffer();
+    for (const auto& l : lines) {
+        DebugLine world{
+            m.transformPoint(l.a),
+            m.transformPoint(l.b),
+            l.color,
+        };
+        buf.push_back(world);
+    }
 }
 
 void Node::drawBounds() {
@@ -797,7 +812,16 @@ void Node::drawBounds() {
         {Vec3{b[0] + width, b[1] + height, 0}, Vec3{b[0], b[1] + height, 0}, Vec4{0.5f, 0.5f, 0.5f, 1.0f}},
         {Vec3{b[0], b[1] + height, 0}, Vec3{b[0], b[1], 0}, Vec4{0.5f, 0.5f, 0.5f, 1.0f}},
     };
-    (void)lines;
+    auto& buf = debugDrawBuffer();
+    Mat4 m = transform().toMat4();
+    for (const auto& l : lines) {
+        DebugLine world{
+            m.transformPoint(l.a),
+            m.transformPoint(l.b),
+            l.color,
+        };
+        buf.push_back(world);
+    }
 }
 
 void Node::setOneTimeTransform(const std::shared_ptr<Mat4>& transform) {

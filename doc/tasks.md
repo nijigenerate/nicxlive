@@ -34,8 +34,8 @@ Status: `[ ]` todo, `[>]` in progress, `[x]` done, `[?]` blocked.
 ### ノード階層 1-13 行数トラッカー（◯/△/✗ 評価メモ）
 | # | D (nijilive) | Lines | C++ (nicxlive) | Lines | 評価 |
 | - | --- | ---:| --- | ---:| --- |
-| 1 | nodes/package.d | 1466 | core/nodes/node.cpp | 1156 | △ |
-| 2 | nodes/filter.d | 146 | core/nodes/filter.cpp | 65 | △ |
+| 1 | nodes/package.d | 1466 | core/nodes/node.cpp | 1156 | ◯ |
+| 2 | nodes/filter.d | 146 | core/nodes/filter.cpp | 65 | ◯ |
 | 3 | nodes/deformable.d | 209 | core/nodes/deformable.cpp | 149 | △ |
 | 4 | nodes/drawable.d | 740 | core/nodes/drawable.cpp | 512 | △ |
 | 5 | nodes/part/package.d | 826 | core/nodes/part.cpp | 730 | △ |

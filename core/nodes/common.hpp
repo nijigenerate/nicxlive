@@ -249,4 +249,8 @@ struct DebugLine {
     Vec4 color;
 };
 
+// Debug draw buffer accessors（Node 実装で利用）
+std::vector<DebugLine>& debugDrawBuffer();
+void clearDebugDrawBuffer();
+
 } // namespace nicxlive::core::nodes
