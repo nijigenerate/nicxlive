@@ -60,6 +60,7 @@ public:
     }
     void drawDebugPoints(const nodes::Vec4&, const nodes::Mat4&) override {}
     void drawDebugLines(const nodes::Vec4&, const nodes::Mat4&) override {}
+    void applyMask(const MaskApplyPacket& packet) override { maskPackets.push_back(packet); }
     uint32_t createTexture(const std::vector<uint8_t>& data, int width, int height, int channels, bool stencil);
     void updateTexture(uint32_t id, const std::vector<uint8_t>& data, int width, int height, int channels);
     void setTextureParams(uint32_t id, ::nicxlive::core::Filtering filtering, ::nicxlive::core::Wrapping wrapping, float anisotropy);
@@ -91,6 +92,7 @@ private:
     std::map<RenderResourceHandle, std::size_t> lastDraw{};
     float debugPointSize{1.0f};
     float debugLineWidth{1.0f};
+    std::vector<MaskApplyPacket> maskPackets{};
 };
 
 class QueueCommandEmitter : public RenderCommandEmitter {

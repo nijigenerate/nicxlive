@@ -310,28 +310,12 @@ void Part::serializePartial(::nicxlive::core::serde::InochiSerializer& serialize
 void Part::renderMask(bool /*dodge*/) {
     auto backend = core::getCurrentRenderBackend();
     if (!backend) return;
-    auto qb = std::dynamic_pointer_cast<core::render::QueueRenderBackend>(backend);
-    if (qb) {
-        core::render::QueueCommandEmitter emitter(qb);
-        emitter.beginMask(true);
-        emitter.applyMask(std::dynamic_pointer_cast<Drawable>(shared_from_this()), false);
-        emitter.beginMaskContent();
-        emitter.drawPart(std::dynamic_pointer_cast<Part>(shared_from_this()), true);
-        emitter.endMask();
-        return;
-    }
-    auto unity = std::dynamic_pointer_cast<core::UnityRenderBackend>(backend);
-    if (unity) {
-        PartDrawPacket packet{};
-        fillDrawPacket(*this, packet, true);
-        unity->submitMask(packet);
-        // also submit main draw pass for stencil masks that need content
-        unity->submitPacket(packet);
-        return;
-    }
-    core::RenderContext ctx;
-    ctx.renderBackend = backend.get();
-    enqueueRenderCommands(ctx);
+    PartDrawPacket packet{};
+    fillDrawPacket(*this, packet, true);
+    core::RenderBackend::MaskApplyPacket maskPacket;
+    maskPacket.partPacket = packet;
+    maskPacket.isDodge = false;
+    backend->applyMask(maskPacket);
 }
 
 bool Part::hasParam(const std::string& key) const {

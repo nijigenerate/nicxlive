@@ -19,6 +19,10 @@ struct RenderGpuState {
 class RenderBackend {
 public:
     virtual ~RenderBackend() = default;
+    struct MaskApplyPacket {
+        nodes::PartDrawPacket partPacket{};
+        bool isDodge{false};
+    };
     // Drawable geometry uploads (Unity互換の簡易インターフェース)
     virtual void initializeDrawableResources() {}
     virtual void bindDrawableVao() {}
@@ -33,6 +37,7 @@ public:
     virtual void uploadDebugBuffer(const std::vector<nodes::Vec3>& /*positions*/, const std::vector<uint16_t>& /*indices*/) {}
     virtual void drawDebugPoints(const nodes::Vec4& /*color*/, const nodes::Mat4& /*m*/) {}
     virtual void drawDebugLines(const nodes::Vec4& /*color*/, const nodes::Mat4& /*m*/) {}
+    virtual void applyMask(const MaskApplyPacket& /*packet*/) {}
 };
 class UnityRenderBackend : public RenderBackend {
 public:

@@ -31,6 +31,9 @@ public:
     }
     void drawDebugPoints(const nodes::Vec4&, const nodes::Mat4&) override {}
     void drawDebugLines(const nodes::Vec4&, const nodes::Mat4&) override {}
+    void applyMask(const MaskApplyPacket& packet) override {
+        maskPackets_.push_back(packet.partPacket);
+    }
 
 private:
     std::vector<nodes::PartDrawPacket> drawPackets_{};
