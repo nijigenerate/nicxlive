@@ -49,6 +49,8 @@ public:
     DeformationStack deformStack{this};
 
     Deformable();
+    explicit Deformable(const std::shared_ptr<Node>& parent);
+    Deformable(uint32_t uuid, const std::shared_ptr<Node>& parent = nullptr);
     explicit Deformable(Vec2Array verts);
 
     virtual void updateVertices() {}

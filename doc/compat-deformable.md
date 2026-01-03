@@ -5,7 +5,7 @@
 | フィールド `vertices` | Vec2Array(SoA) | Vec2Array(SoA) | ◯ |
 | フィールド `deformation` | Vec2Array(SoA) | Vec2Array(SoA) | ◯ |
 | フィールド `deformStack` | DeformationStack (push/preUpdate/update) | push/preUpdate/update 実装 | ◯ |
-| コンストラクタ | 親/uuid指定＋タスク登録 | pre/post0 登録のみ | △ |
+| コンストラクタ | 親/uuid指定＋タスク登録 | 親/uuid指定＋タスク登録 | ◯ |
 | `updateVertices` | 抽象 | 抽象 | ◯ |
 | `refresh` | updateVertices 呼び出し | 同等 | ◯ |
 | `refreshDeform` | updateDeform 呼び出し | 同等 | ◯ |
@@ -13,7 +13,7 @@
 | `pushDeformation` | deformStack.push(Deformation) | Deformation push | ◯ |
 | `mustPropagate` | true | true | ◯ |
 | `updateDeform` | deformation 長を vertices に合わせゼロ初期化 | 同等 | ◯ |
-| `remapDeformationBindings` | Puppet 内 deform binding をリマップ | リマップ/置換＋isSet 更新（binding探索簡略） | △ |
+| `remapDeformationBindings` | Puppet 内 deform binding をリマップ | remapOffsets 追加で同等処理 | ◯ |
 | `runBeginTask` | deformStack.preUpdate＋overrideTransform クリア＋super | 同等 | ◯ |
 | `runPreProcessTask` | super 後に deformStack.update | 同等 | ◯ |
 | `runPostTaskImpl` | super 後に updateDeform | 同等 | ◯ |

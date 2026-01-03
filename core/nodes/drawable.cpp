@@ -34,6 +34,12 @@ void writeBuffer(const Vec2Array& src, Vec2Array& dst, std::size_t offset) {
         dst.y[offset + i] = src.y[i];
     }
 }
+
+void clearOffsetsFor(NodeId id) {
+    gVertexOffsets.erase(id);
+    gUvOffsets.erase(id);
+    gDeformOffsets.erase(id);
+}
 } // namespace
 
 bool MeshData::isReady() const {
@@ -85,8 +91,36 @@ void Drawable::updateBounds() {
     bounds = std::array<float, 4>{minx, miny, maxx, maxy};
 }
 
-void Drawable::drawMeshLines() const {}
-void Drawable::drawMeshPoints() const {}
+void Drawable::drawMeshLines() const {
+    auto& buf = debugDrawBuffer();
+    Mat4 m = transform().toMat4();
+    for (std::size_t i = 0; i + 2 < mesh.indices.size(); i += 3) {
+        auto i0 = mesh.indices[i];
+        auto i1 = mesh.indices[i + 1];
+        auto i2 = mesh.indices[i + 2];
+        if (i0 >= mesh.vertices.size() || i1 >= mesh.vertices.size() || i2 >= mesh.vertices.size()) continue;
+        Vec3 a{mesh.vertices[i0].x, mesh.vertices[i0].y, 0};
+        Vec3 b{mesh.vertices[i1].x, mesh.vertices[i1].y, 0};
+        Vec3 c{mesh.vertices[i2].x, mesh.vertices[i2].y, 0};
+        Vec4 col{0.5f, 0.5f, 0.5f, 1.0f};
+        buf.push_back(DebugLine{m.transformPoint(a), m.transformPoint(b), col});
+        buf.push_back(DebugLine{m.transformPoint(b), m.transformPoint(c), col});
+        buf.push_back(DebugLine{m.transformPoint(c), m.transformPoint(a), col});
+    }
+}
+
+void Drawable::drawMeshPoints() const {
+    auto& buf = debugDrawBuffer();
+    Mat4 m = transform().toMat4();
+    Vec4 col{1.0f, 1.0f, 0.0f, 1.0f};
+    for (const auto& v : mesh.vertices) {
+        Vec3 p{v.x, v.y, 0};
+        Vec3 wp = m.transformPoint(p);
+        float s = 2.0f;
+        buf.push_back(DebugLine{Vec3{wp.x - s, wp.y, wp.z}, Vec3{wp.x + s, wp.y, wp.z}, col});
+        buf.push_back(DebugLine{Vec3{wp.x, wp.y - s, wp.z}, Vec3{wp.x, wp.y + s, wp.z}, col});
+    }
+}
 void Drawable::getMesh() {}
 
 void Drawable::updateIndices() {
@@ -195,6 +229,11 @@ void Drawable::reset() {
     weldedLinks.clear();
     weldingApplied.clear();
     bounds.reset();
+    clearOffsetsFor(uuid);
+    vertexOffset = uvOffset = deformOffset = 0;
+    sharedVertexMarkDirty();
+    sharedUvMarkDirty();
+    sharedDeformMarkDirty();
 }
 
 bool Drawable::isWeldedBy(NodeId target) const {
@@ -403,9 +442,6 @@ void Drawable::centralizeDrawable() {
 void Drawable::copyFromDrawable(const Drawable& src) {
     mesh = src.mesh;
     deformationOffsets = src.deformationOffsets;
-    vertexOffset = src.vertexOffset;
-    uvOffset = src.uvOffset;
-    deformOffset = src.deformOffset;
     tint = src.tint;
     screenTint = src.screenTint;
     emissionStrength = src.emissionStrength;
@@ -413,7 +449,10 @@ void Drawable::copyFromDrawable(const Drawable& src) {
     bounds = src.bounds;
     weldedTargets = src.weldedTargets;
     weldedLinks = src.weldedLinks;
-    welded = src.welded;
+    weldingApplied = src.weldingApplied;
+    vertexOffset = uvOffset = deformOffset = 0; // offsets will be re-registered
+    updateVertices();
+    updateIndices();
 }
 
 void Drawable::setupChildDrawable() {}

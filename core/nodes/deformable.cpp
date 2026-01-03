@@ -87,6 +87,19 @@ Deformable::Deformable() {
     requirePostTask(0);
 }
 
+Deformable::Deformable(const std::shared_ptr<Node>& parent) {
+    requirePreProcessTask();
+    requirePostTask(0);
+    setParent(parent);
+}
+
+Deformable::Deformable(uint32_t uuidVal, const std::shared_ptr<Node>& parent) {
+    requirePreProcessTask();
+    requirePostTask(0);
+    uuid = uuidVal;
+    setParent(parent);
+}
+
 Deformable::Deformable(Vec2Array verts)
     : vertices(std::move(verts)), deformation(vertices.size()), deformStack(this) {
     requirePreProcessTask();
@@ -124,7 +137,7 @@ void Deformable::remapDeformationBindings(const std::vector<std::size_t>& remap,
         if (!param) continue;
         auto deformBinding = std::dynamic_pointer_cast<DeformationParameterBinding>(param->getBinding(shared_from_this(), "deform"));
         if (!deformBinding) continue;
-        // Protected storage; skipping detailed remap in this C++ port.
+        deformBinding->remapOffsets(remap, replacement, newLength);
     }
 }
 

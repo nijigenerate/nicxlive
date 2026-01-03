@@ -797,6 +797,36 @@ public:
         (void)other;
         return true;
     }
+
+    void remapOffsets(const std::vector<std::size_t>& remap, const ::nicxlive::core::common::Vec2Array& replacement, std::size_t newLength) {
+        for (std::size_t x = 0; x < values.size(); ++x) {
+            for (std::size_t y = 0; y < values[x].size(); ++y) {
+                auto& offsets = values[x][y].vertexOffsets;
+                if (!remap.empty() && remap.size() == offsets.size()) {
+                    ::nicxlive::core::common::Vec2Array reordered;
+                    reordered.resize(remap.size());
+                    for (std::size_t oldIdx = 0; oldIdx < remap.size(); ++oldIdx) {
+                        auto newIdx = remap[oldIdx];
+                        if (newIdx < reordered.size()) {
+                            reordered.x[newIdx] = offsets.x[oldIdx];
+                            reordered.y[newIdx] = offsets.y[oldIdx];
+                        }
+                    }
+                    offsets = reordered;
+                    if (x < isSetFlags.size() && y < isSetFlags[x].size()) isSetFlags[x][y] = !offsets.empty();
+                } else if (replacement.size() == newLength && newLength > 0) {
+                    offsets = replacement;
+                    if (x < isSetFlags.size() && y < isSetFlags[x].size()) isSetFlags[x][y] = true;
+                } else {
+                    offsets.resize(newLength);
+                    std::fill(offsets.x.begin(), offsets.x.end(), 0.0f);
+                    std::fill(offsets.y.begin(), offsets.y.end(), 0.0f);
+                    if (x < isSetFlags.size() && y < isSetFlags[x].size()) isSetFlags[x][y] = false;
+                }
+            }
+        }
+        reInterpolate();
+    }
 };
 
 inline std::shared_ptr<ParameterBinding> Parameter::getBinding(const std::shared_ptr<Node>& /*self*/, const std::string& key) const {
