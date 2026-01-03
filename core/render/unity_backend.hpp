@@ -32,6 +32,12 @@ public:
     void drawDebugPoints(const nodes::Vec4&, const nodes::Mat4&) override {}
     void drawDebugLines(const nodes::Vec4&, const nodes::Mat4&) override {}
     void applyMask(const MaskApplyPacket& packet) override { maskPackets_.push_back(packet.partPacket); }
+    void beginDynamicComposite(const DynamicCompositePass& pass) override { dynamicStack_.push_back(pass); }
+    void endDynamicComposite(const DynamicCompositePass& pass) override {
+        lastDynamic_ = pass;
+        if (!dynamicStack_.empty()) dynamicStack_.pop_back();
+    }
+    void destroyDynamicComposite(const std::shared_ptr<DynamicCompositeSurface>&) override {}
 
 private:
     std::vector<nodes::PartDrawPacket> drawPackets_{};
@@ -46,6 +52,8 @@ private:
     std::map<RenderResourceHandle, std::size_t> lastDraw_{};
     float debugPointSize_{1.0f};
     float debugLineWidth_{1.0f};
+    std::vector<DynamicCompositePass> dynamicStack_{};
+    std::optional<DynamicCompositePass> lastDynamic_{};
 };
 
 } // namespace nicxlive::core::render

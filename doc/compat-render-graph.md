@@ -2,13 +2,11 @@
 
 | 項目 | D 実装 | C++ 現状 | 互換性評価 |
 | --- | --- | --- | --- |
-| method `empty()` | タスク有無を返す | 同等 | ◯ |
-| method `beginFrame()` | フレーム初期化 | No-Op | △ |
-| method `playback()` | キューをEmitterへ再生 | タスクを順次実行（同等） | ◯ |
-| method `addTask()` | コマンドを積む | 同等 | ◯ |
-| method `pushDynamicComposite()` | DynamicCompositeをスタックしレンダーキューへ登録 | トークン採番のみ（Queueへの追加なし） | ✗ |
-| method `popDynamicComposite()` | スタックから取り出し終了コマンドを積む | タスク追加でEmitterに委譲 | △ |
-| method `applyMask()` | Mask命令をキューに積む | QueueEmitterに委譲（記録のみ） | △ |
-| method `drawPart()` | Part描画命令をキューに積む | QueueEmitterに委譲（記録のみ） | △ |
-| field `tasks_` | コマンドキュー | 同等 | ◯ |
-| field `tokenCounter_` | DynamicComposite用トークン | 同等 | ◯ |
+| method `beginFrame()` | dynamic frame 前進＋スタック初期化 | projectableFrame前進＋スタック初期化 | ◯ |
+| method `clear()` | パススタックとトークン初期化 | 同等 | ◯ |
+| method `empty()` | root以外無し＆items空を判定 | 同等 | ◯ |
+| method `enqueueItem(zSort, scopeHint, builder)` | scope解決し zSort/sequence ソートで積む | scopeHint.skip対応・zSort/sequence整列で同等 | ◯ |
+| method `pushDynamicComposite()` | DynamicCompositeパスをpushしtoken発行 | 同等（Projectableのスコープフラグも更新） | ◯ |
+| method `popDynamicComposite()` | token検証し finalize | 同等（多重popも順次finalize） | ◯ |
+| method `finalizeDynamicCompositePass()` | begin/end DynamicCompositeで子itemsをラップ | 同等 | ◯ |
+| method `playback()` | スタック整合性検証後にitems再生 | 同等 | ◯ |

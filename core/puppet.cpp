@@ -2,6 +2,7 @@
 #include "render/common.hpp"
 #include "render/graph_builder.hpp"
 #include "render/scheduler.hpp"
+#include "nodes/projectable.hpp"
 
 #include <algorithm>
 #include <limits>
@@ -180,7 +181,6 @@ void Puppet::update() {
     renderContext.renderGraph = &renderGraph;
     renderContext.renderBackend = renderBackend.get();
     renderContext.gpuState = RenderGpuState::init();
-    renderContext.frameId++;
 
     bool pendingStructure = pendingFrameChanges.structureDirty;
     if (forceFullRebuild || !schedulerCacheValid || pendingStructure) {
@@ -199,6 +199,7 @@ void Puppet::update() {
     }
 
     renderGraph.beginFrame();
+    renderContext.frameId = nodes::currentProjectableFrame();
     renderScheduler.executeRange(renderContext, TaskOrder::PreProcess, TaskOrder::Final);
 }
 

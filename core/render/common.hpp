@@ -5,14 +5,31 @@
 #include "../nodes/part.hpp"
 #include "../nodes/projectable.hpp"
 
+#include <array>
+#include <cstdint>
 #include <memory>
 #include <vector>
 
 namespace nicxlive::core {
 
 using RenderResourceHandle = uint32_t;
+struct DynamicCompositePass;
+
+// Offscreen surface bundle (D: DynamicCompositeSurface)
+struct DynamicCompositeSurface {
+    std::array<std::shared_ptr<::nicxlive::core::Texture>, 3> textures{};
+    std::size_t textureCount{0};
+    std::shared_ptr<::nicxlive::core::Texture> stencil{};
+    RenderResourceHandle framebuffer{0};
+};
 
 struct RenderGpuState {
+    RenderResourceHandle framebuffer{0};
+    RenderResourceHandle drawBuffers[8]{};
+    uint8_t drawBufferCount{0};
+    bool colorMask[4]{true, true, true, true};
+    bool blendEnabled{false};
+
     static RenderGpuState init() { return RenderGpuState{}; }
 };
 
@@ -40,7 +57,14 @@ public:
     virtual void uploadDebugBuffer(const std::vector<nodes::Vec3>& /*positions*/, const std::vector<uint16_t>& /*indices*/) {}
     virtual void drawDebugPoints(const nodes::Vec4& /*color*/, const nodes::Mat4& /*m*/) {}
     virtual void drawDebugLines(const nodes::Vec4& /*color*/, const nodes::Mat4& /*m*/) {}
+    virtual void beginMask(bool /*useStencil*/) {}
     virtual void applyMask(const MaskApplyPacket& /*packet*/) {}
+    virtual void beginMaskContent() {}
+    virtual void endMask() {}
+    virtual void beginDynamicComposite(const DynamicCompositePass& /*pass*/) {}
+    virtual void endDynamicComposite(const DynamicCompositePass& /*pass*/) {}
+    virtual void destroyDynamicComposite(const std::shared_ptr<DynamicCompositeSurface>& /*surface*/) {}
+    virtual void drawPartPacket(const nodes::PartDrawPacket& /*packet*/) {}
 };
 class UnityRenderBackend : public RenderBackend {
 public:
@@ -69,6 +93,8 @@ public:
     virtual void beginMaskContent() {}
     virtual void endMask() {}
     virtual void drawPartPacket(const nodes::PartDrawPacket& /*packet*/) {}
+    virtual void beginDynamicComposite(const std::shared_ptr<nodes::Projectable>& /*composite*/, const DynamicCompositePass& /*pass*/) {}
+    virtual void endDynamicComposite(const std::shared_ptr<nodes::Projectable>& /*composite*/, const DynamicCompositePass& /*pass*/) {}
     virtual void drawPart(const std::shared_ptr<nodes::Part>& part, bool isMask) {
         if (!part) return;
         nodes::PartDrawPacket packet{};
@@ -82,7 +108,11 @@ struct DynamicCompositePass {
     std::shared_ptr<::nicxlive::core::Texture> stencil{};
     nodes::Vec2 scale{1.0f, 1.0f};
     float rotationZ{0.0f};
+    std::shared_ptr<DynamicCompositeSurface> surface{};
+    RenderResourceHandle origBuffer{0};
+    int origViewport[4]{0, 0, 0, 0};
     bool autoScaled{false};
+    bool beginScene{false};
 };
 
 // Global backend accessors (lightweight placeholder)

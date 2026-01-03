@@ -3,10 +3,10 @@
 Status: `[ ]` todo, `[>]` in progress, `[x]` done, `[?]` blocked.
 
 ## レンダリング基盤（Projectable互換の前提）
-- [ ] R1: RenderGraph 相当の API を実装（dynamicComposite push/pop、applyMask、drawPart などのコマンドキュー）
-- [ ] R2: RenderBackend に MaskApply/DynamicComposite begin/end/playback を追加し、RenderCommandEmitter から呼び出せるようにする
-- [ ] R3: Offscreen テクスチャ/ステンシルの生成・破棄・再利用（Texture 管理と reuseCachedTextureThisFrame の裏付け）
-- [ ] R4: RenderContext への renderGraph/renderBackend 配線と frame 管理（currentDynamicCompositeFrame 等）
+- [x] R1: RenderGraph 相当の API を実装（dynamicComposite push/pop、applyMask、drawPart などのコマンドキュー）
+- [x] R2: RenderBackend に MaskApply/DynamicComposite begin/end/playback を追加し、RenderCommandEmitter から呼び出せるようにする
+- [x] R3: Offscreen テクスチャ/ステンシルの生成・破棄・再利用（Texture 管理と reuseCachedTextureThisFrame の裏付け）
+- [x] R4: RenderContext への renderGraph/renderBackend 配線と frame 管理（currentDynamicCompositeFrame 等）
 - [ ] R5: Projectable/Composite の serialize/deserialize で textureOffset/offsreen 状態・maxBoundsStartFrame など固有フィールドを保存/復元する
 
 ## パラメータ / フィルタ基盤（優先）
@@ -21,7 +21,7 @@ Status: `[ ]` todo, `[>]` in progress, `[x]` done, `[?]` blocked.
 - [>] 4: `drawable.d` → `core/nodes/drawable.hpp/.cpp`（shared buffer / welding / serialization）
 - [>] 5: `part/package.d` → `core/nodes/part.hpp`
 - [>] 6: `mask/package.d` → `core/nodes/mask.hpp`
-- [>] 7: `composite/projectable.d` → `core/nodes/projectable.hpp`
+- [x] 7: `composite/projectable.d` → `core/nodes/projectable.hpp`
 - [>] 8: `composite/package.d` → `core/nodes/composite.hpp`
 - [>] 9: `composite/dcomposite.d` → `core/nodes/dynamic_composite.hpp`
 - [>] 10: `meshgroup/package.d` → `core/nodes/mesh_group.hpp`（パラメータ連動の deform 反映まで実装済）
@@ -40,7 +40,7 @@ Status: `[ ]` todo, `[>]` in progress, `[x]` done, `[?]` blocked.
 | 4 | nodes/drawable.d | 740 | core/nodes/drawable.cpp | 829 | ◯ |
 | 5 | nodes/part/package.d | 826 | core/nodes/part.cpp | 715 | ◯ |
 | 6 | nodes/mask/package.d | 140 | core/nodes/mask.cpp | 49 | ◯ |
-| 7 | nodes/composite/projectable.d | 1229 | core/nodes/projectable.cpp | 390 | △ |
+| 7 | nodes/composite/projectable.d | 1229 | core/nodes/projectable.cpp | 779 | ◯ |
 | 8 | nodes/composite/package.d | 334 | core/nodes/composite.cpp | 195 | △ |
 | 9 | nodes/composite/dcomposite.d | 41 | core/nodes/dynamic_composite.cpp | 15 | △ |
 | 10 | nodes/meshgroup/package.d | 611 | core/nodes/mesh_group.cpp | 545 | △ |

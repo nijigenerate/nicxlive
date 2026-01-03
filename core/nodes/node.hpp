@@ -2,6 +2,7 @@
 
 #include "common.hpp"
 #include "../serde.hpp"
+#include "../render/render_pass.hpp"
 
 #include <array>
 #include <functional>
@@ -79,15 +80,7 @@ enum class NotifyReason {
 
 class Drawable;
 
-struct RenderScopeHint {
-    enum class Kind { Root, Skip, Dynamic };
-    Kind kind{Kind::Root};
-    std::size_t token{static_cast<std::size_t>(-1)};
-
-    static RenderScopeHint root() { return RenderScopeHint{Kind::Root, static_cast<std::size_t>(-1)}; }
-    static RenderScopeHint skipHint() { return RenderScopeHint{Kind::Skip, static_cast<std::size_t>(-1)}; }
-    static RenderScopeHint forDynamic(std::size_t t) { return RenderScopeHint{Kind::Dynamic, t}; }
-};
+using RenderScopeHint = ::nicxlive::core::RenderScopeHint;
 
 class Node : public std::enable_shared_from_this<Node> {
 public:

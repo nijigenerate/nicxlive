@@ -616,80 +616,59 @@ std::size_t Part::dodgeCount() const {
 }
 
 void Part::enqueueRenderCommands(core::RenderContext& ctx, const std::function<void(::nicxlive::core::RenderCommandEmitter&)>& post /*= {}*/) {
-    if (!renderEnabled()) return;
-    auto self = std::dynamic_pointer_cast<Part>(shared_from_this());
-    auto maskBindings = dedupMasks(masks);
+    if (!renderEnabled() || ctx.renderGraph == nullptr) return;
+
+    auto dedupMaskBindings = [&]() {
+        std::vector<MaskBinding> result;
+        std::set<uint64_t> seen;
+        for (const auto& m : masks) {
+            if (!m.maskSrc) continue;
+            uint64_t key = (static_cast<uint64_t>(m.maskSrcUUID) << 32) | static_cast<uint32_t>(m.mode);
+            if (seen.count(key)) continue;
+            seen.insert(key);
+            result.push_back(m);
+        }
+        return result;
+    };
+
+    auto maskBindings = dedupMaskBindings();
     bool useStencil = false;
     for (const auto& m : maskBindings) {
         if (m.mode == MaskingMode::Mask) { useStencil = true; break; }
     }
-    if (ctx.renderGraph) {
-        ctx.renderGraph->addTask([self, maskBindings, useStencil, post](core::RenderCommandEmitter& emitter) {
-            auto part = self;
-            if (!part) return;
-            if (!part->renderEnabled()) return;
-            if (!maskBindings.empty()) {
-                emitter.beginMask(useStencil);
-                for (auto m : maskBindings) {
-                    auto maskPtr = m.maskSrc;
-                    if (!maskPtr) {
-                        if (auto pup = part->puppetRef()) {
-                            auto node = pup->findNodeById(m.maskSrcUUID);
-                            maskPtr = std::dynamic_pointer_cast<Drawable>(node);
-                        }
-                    }
-                    if (!maskPtr) continue;
-                    bool dodge = m.mode == MaskingMode::DodgeMask;
-                    emitter.applyMask(maskPtr, dodge);
-                }
-                emitter.beginMaskContent();
-            }
-            emitter.drawPart(part, false);
-            if (!maskBindings.empty()) {
-                emitter.endMask();
-            }
-            if (post) post(emitter);
-        });
-    } else if (ctx.renderBackend) {
-        // Immediate emission for queue backend
-        auto qb = std::dynamic_pointer_cast<core::render::QueueRenderBackend>(core::getCurrentRenderBackend());
-        auto emitter = qb ? std::make_shared<core::render::QueueCommandEmitter>(qb) : nullptr;
-        auto unity = std::dynamic_pointer_cast<core::UnityRenderBackend>(core::getCurrentRenderBackend());
-        if (emitter) {
-            if (!maskBindings.empty()) {
-                emitter->beginMask(useStencil);
-                for (auto m : maskBindings) {
-                    auto maskPtr = m.maskSrc;
-                    if (!maskPtr) {
-                        if (auto pup = puppetRef()) {
-                            auto node = pup->findNodeById(m.maskSrcUUID);
-                            maskPtr = std::dynamic_pointer_cast<Drawable>(node);
-                        }
-                    }
-                    if (!maskPtr) continue;
-                    emitter->applyMask(maskPtr, m.mode == MaskingMode::DodgeMask);
-                }
-                emitter->beginMaskContent();
-            }
-            emitter->drawPart(self, false);
-            if (!maskBindings.empty()) emitter->endMask();
-            if (post) post(*emitter);
-        } else if (unity) {
-            // submit packets directly
-            if (!maskBindings.empty()) {
-                for (auto m : maskBindings) {
-                    PartDrawPacket maskPacket{};
-                    if (auto maskPtr = m.maskSrc) {
-                        maskPtr->fillDrawPacket(*maskPtr, maskPacket, true);
-                        unity->submitMask(maskPacket);
+
+    auto scopeHint = determineRenderScopeHint();
+    if (scopeHint.skip) return;
+    auto self = std::dynamic_pointer_cast<Part>(shared_from_this());
+    auto cleanup = post;
+    ctx.renderGraph->enqueueItem(zSort(), scopeHint, [self, maskBindings, useStencil, cleanup](core::RenderCommandEmitter& emitter) {
+        auto part = self;
+        if (!part || !part->renderEnabled()) return;
+        if (!maskBindings.empty()) {
+            emitter.beginMask(useStencil);
+            for (auto binding : maskBindings) {
+                auto maskPtr = binding.maskSrc;
+                if (!maskPtr) {
+                    if (auto pup = part->puppetRef()) {
+                        auto node = pup->findNodeById(binding.maskSrcUUID);
+                        maskPtr = std::dynamic_pointer_cast<Drawable>(node);
                     }
                 }
+                if (!maskPtr) continue;
+                bool isDodge = binding.mode == MaskingMode::DodgeMask;
+                emitter.applyMask(maskPtr, isDodge);
             }
-            PartDrawPacket pkt{};
-            fillDrawPacket(*this, pkt, false);
-            unity->submitPacket(pkt);
+            emitter.beginMaskContent();
         }
-    }
+
+        emitter.drawPart(part, false);
+
+        if (!maskBindings.empty()) {
+            emitter.endMask();
+        }
+
+        if (cleanup) cleanup(emitter);
+    });
 }
 
 void Part::copyFrom(const Node& src, bool clone, bool deepCopy) {

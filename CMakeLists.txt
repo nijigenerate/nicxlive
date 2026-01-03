@@ -13,7 +13,6 @@ set(NICXLIVE_SOURCES
     core/texture.cpp
     core/puppet.cpp
     core/render/common.cpp
-    core/render/backend_queue.cpp
     core/nodes/node.cpp
     core/nodes/part.cpp
     core/nodes/mask.cpp
