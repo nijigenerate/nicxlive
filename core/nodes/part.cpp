@@ -307,14 +307,15 @@ void Part::serializePartial(::nicxlive::core::serde::InochiSerializer& serialize
     serializer.listEnd(arr);
 }
 
-void Part::renderMask(bool /*dodge*/) {
+void Part::renderMask(bool dodge) {
     auto backend = core::getCurrentRenderBackend();
     if (!backend) return;
     PartDrawPacket packet{};
     fillDrawPacket(*this, packet, true);
     core::RenderBackend::MaskApplyPacket maskPacket;
+    maskPacket.kind = core::RenderBackend::MaskDrawableKind::Part;
     maskPacket.partPacket = packet;
-    maskPacket.isDodge = false;
+    maskPacket.isDodge = dodge;
     backend->applyMask(maskPacket);
 }
 

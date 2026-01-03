@@ -38,8 +38,8 @@ Status: `[ ]` todo, `[>]` in progress, `[x]` done, `[?]` blocked.
 | 2 | nodes/filter.d | 146 | core/nodes/filter.cpp | 65 | ◯ |
 | 3 | nodes/deformable.d | 209 | core/nodes/deformable.cpp | 162 | ◯ |
 | 4 | nodes/drawable.d | 740 | core/nodes/drawable.cpp | 829 | ◯ |
-| 5 | nodes/part/package.d | 826 | core/nodes/part.cpp | 730 | △ |
-| 6 | nodes/mask/package.d | 140 | core/nodes/mask.cpp | 49 | △ |
+| 5 | nodes/part/package.d | 826 | core/nodes/part.cpp | 715 | ◯ |
+| 6 | nodes/mask/package.d | 140 | core/nodes/mask.cpp | 49 | ◯ |
 | 7 | nodes/composite/projectable.d | 1229 | core/nodes/projectable.cpp | 390 | △ |
 | 8 | nodes/composite/package.d | 334 | core/nodes/composite.cpp | 195 | △ |
 | 9 | nodes/composite/dcomposite.d | 41 | core/nodes/dynamic_composite.cpp | 15 | △ |

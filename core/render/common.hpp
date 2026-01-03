@@ -19,8 +19,11 @@ struct RenderGpuState {
 class RenderBackend {
 public:
     virtual ~RenderBackend() = default;
+    enum class MaskDrawableKind { Part, Drawable, Mask };
     struct MaskApplyPacket {
+        MaskDrawableKind kind{MaskDrawableKind::Part};
         nodes::PartDrawPacket partPacket{};
+        nodes::PartDrawPacket maskPacket{};
         bool isDodge{false};
     };
     // Drawable geometry uploads (Unity互換の簡易インターフェース)

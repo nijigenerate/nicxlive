@@ -17,14 +17,14 @@
 | フィールド `offset*` | mask/opacity/tint/screenTint/emission オフセット | 追加 | ◯ |
 | フィールド `offscreenModelMatrix` 等 | offscreen用行列 | 追加 | ◯ |
 | コンストラクタ(MeshData, textures, uuid, parent) | タスク登録＋UV更新 | Mesh/tex受取＋タスク登録・UV更新 | ◯ |
-| `initPartTasks` | RenderTask登録 | RenderTask登録のみ | △ |
-| `updateUVs` | shared UV resize＋dirty | sharedUvResize/MarkDirtyのみ | △ |
+| `initPartTasks` | RenderTask登録 | RenderTask登録 | ◯ |
+| `updateUVs` | shared UV resize＋dirty | sharedUvResize/MarkDirty | ◯ |
 | `drawSelf` | backendへ描画パケット | RenderGraph/Queue/Unityへパケット発行 | ◯ |
 | `typeId` | "Part" | 実装 | ◯ |
 | `serializeSelfImpl` | textures/masks/blend/tint/screenTint/emission 等 | tint/screenTint/ignorePuppet/textureUUID/masked_by/maskList 保存 | ◯ |
 | `deserializeFromFghj` | 同等復元 | 上記全て復元＋puppetでtexture解決 | ◯ |
 | `serializePartial` | textureUUIDs 部分シリアライズ | textureUUIDs のみ | ◯ |
-| `renderMask` | MaskApplyPacket 生成 | Queue/Unityへマスクパケット発行 | △ |
+| `renderMask` | MaskApplyPacket 生成 | backendへMaskApplyPacket発行 | ◯ |
 | `hasParam` | alphaThreshold/opacity/tint/screenTint/emission 対応 | 実装 | ◯ |
 | `getDefaultValue` | 上記パラメータ既定値 | 実装 | ◯ |
 | `setValue` | パラメータ応じてoffset更新 | 実装 | ◯ |
