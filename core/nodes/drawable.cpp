@@ -4,9 +4,13 @@
 #include "../puppet.hpp"
 
 #include "../serde.hpp"
+#include "../render/common.hpp"
 
 #include <algorithm>
+#include <cmath>
+#include <limits>
 #include <map>
+#include <optional>
 
 namespace nicxlive::core::nodes {
 
@@ -20,6 +24,7 @@ std::map<NodeId, std::size_t> gDeformOffsets;
 bool gSharedVerticesDirty = false;
 bool gSharedUvsDirty = false;
 bool gSharedDeformDirty = false;
+bool gDoGenerateBounds = false;
 
 void ensureCapacity(Vec2Array& buf, std::size_t offset, std::size_t count) {
     if (buf.size() < offset + count) {
@@ -39,6 +44,125 @@ void clearOffsetsFor(NodeId id) {
     gVertexOffsets.erase(id);
     gUvOffsets.erase(id);
     gDeformOffsets.erase(id);
+}
+
+std::array<float, 3> barycentric(const Vec2& p, const Vec2& v0, const Vec2& v1, const Vec2& v2) {
+    float denom = (v1.y - v2.y) * (v0.x - v2.x) + (v2.x - v1.x) * (v0.y - v2.y);
+    if (denom == 0.0f) return {-1.0f, -1.0f, -1.0f};
+    float a = ((v1.y - v2.y) * (p.x - v2.x) + (v2.x - v1.x) * (p.y - v2.y)) / denom;
+    float b = ((v2.y - v0.y) * (p.x - v2.x) + (v0.x - v2.x) * (p.y - v2.y)) / denom;
+    float c = 1.0f - a - b;
+    return {a, b, c};
+}
+
+bool pointInTriangle(const Vec2& p, const Vec2& v0, const Vec2& v1, const Vec2& v2) {
+    auto w = barycentric(p, v0, v1, v2);
+    return w[0] >= 0.0f && w[1] >= 0.0f && w[2] >= 0.0f;
+}
+
+struct Mat3x3 {
+    float m[3][3]{
+        {1, 0, 0},
+        {0, 1, 0},
+        {0, 0, 1},
+    };
+    float* operator[](int r) { return m[r]; }
+    const float* operator[](int r) const { return m[r]; }
+};
+
+Mat3x3 multiply(const Mat3x3& a, const Mat3x3& b) {
+    Mat3x3 out{};
+    for (int r = 0; r < 3; ++r) {
+        for (int c = 0; c < 3; ++c) {
+            out.m[r][c] = a.m[r][0] * b.m[0][c] + a.m[r][1] * b.m[1][c] + a.m[r][2] * b.m[2][c];
+        }
+    }
+    return out;
+}
+
+Mat3x3 inverse(const Mat3x3& m) {
+    Mat3x3 inv{};
+    float det = m[0][0] * (m[1][1] * m[2][2] - m[2][1] * m[1][2]) -
+                m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0]) +
+                m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
+    if (det == 0.0f) return Mat3x3{};
+    float invDet = 1.0f / det;
+    inv[0][0] = (m[1][1] * m[2][2] - m[2][1] * m[1][2]) * invDet;
+    inv[0][1] = (m[0][2] * m[2][1] - m[0][1] * m[2][2]) * invDet;
+    inv[0][2] = (m[0][1] * m[1][2] - m[0][2] * m[1][1]) * invDet;
+    inv[1][0] = (m[1][2] * m[2][0] - m[1][0] * m[2][2]) * invDet;
+    inv[1][1] = (m[0][0] * m[2][2] - m[0][2] * m[2][0]) * invDet;
+    inv[1][2] = (m[1][0] * m[0][2] - m[0][0] * m[1][2]) * invDet;
+    inv[2][0] = (m[1][0] * m[2][1] - m[2][0] * m[1][1]) * invDet;
+    inv[2][1] = (m[2][0] * m[0][1] - m[0][0] * m[2][1]) * invDet;
+    inv[2][2] = (m[0][0] * m[1][1] - m[1][0] * m[0][1]) * invDet;
+    return inv;
+}
+
+Vec2 applyAffine(const Mat3x3& m, const Vec2& p) {
+    Vec2 out{};
+    out.x = m[0][0] * p.x + m[0][1] * p.y + m[0][2];
+    out.y = m[1][0] * p.x + m[1][1] * p.y + m[1][2];
+    return out;
+}
+
+std::optional<std::array<std::size_t, 3>> findSurroundingTriangle(const Vec2& pt, const MeshData& mesh) {
+    if (mesh.indices.size() < 3) return std::nullopt;
+    for (std::size_t i = 0; i + 2 < mesh.indices.size(); i += 3) {
+        auto i0 = mesh.indices[i];
+        auto i1 = mesh.indices[i + 1];
+        auto i2 = mesh.indices[i + 2];
+        if (i0 >= mesh.vertices.size() || i1 >= mesh.vertices.size() || i2 >= mesh.vertices.size()) continue;
+        Vec2 p0 = mesh.vertices[i0];
+        Vec2 p1 = mesh.vertices[i1];
+        Vec2 p2 = mesh.vertices[i2];
+        if (pointInTriangle(pt, p0, p1, p2)) {
+            return std::array<std::size_t, 3>{i0, i1, i2};
+        }
+    }
+    return std::nullopt;
+}
+
+bool calculateTransformInTriangle(const MeshData& mesh, const std::array<std::size_t, 3>& tri, const Vec2Array& deform,
+                                   const Vec2& target, Vec2& targetPrime, float& rotVert, float& rotHorz) {
+    Vec2 p0 = mesh.vertices[tri[0]];
+    Vec2 p1 = mesh.vertices[tri[1]];
+    Vec2 p2 = mesh.vertices[tri[2]];
+    Mat3x3 original{};
+    original[0][0] = p0.x; original[0][1] = p1.x; original[0][2] = p2.x;
+    original[1][0] = p0.y; original[1][1] = p1.y; original[1][2] = p2.y;
+    original[2][0] = 1.0f; original[2][1] = 1.0f; original[2][2] = 1.0f;
+
+    Vec2 p3{p0.x + (tri[0] < deform.size() ? deform.x[tri[0]] : 0.0f), p0.y + (tri[0] < deform.size() ? deform.y[tri[0]] : 0.0f)};
+    Vec2 p4{p1.x + (tri[1] < deform.size() ? deform.x[tri[1]] : 0.0f), p1.y + (tri[1] < deform.size() ? deform.y[tri[1]] : 0.0f)};
+    Vec2 p5{p2.x + (tri[2] < deform.size() ? deform.x[tri[2]] : 0.0f), p2.y + (tri[2] < deform.size() ? deform.y[tri[2]] : 0.0f)};
+
+    Mat3x3 transformed{};
+    transformed[0][0] = p3.x; transformed[0][1] = p4.x; transformed[0][2] = p5.x;
+    transformed[1][0] = p3.y; transformed[1][1] = p4.y; transformed[1][2] = p5.y;
+    transformed[2][0] = 1.0f; transformed[2][1] = 1.0f; transformed[2][2] = 1.0f;
+
+    Mat3x3 affine = multiply(transformed, inverse(original));
+    targetPrime = applyAffine(affine, target);
+
+    Vec2 vert{target.x, target.y + 1.0f};
+    Vec2 vertPrime = applyAffine(affine, vert);
+    Vec2 horz{target.x + 1.0f, target.y};
+    Vec2 horzPrime = applyAffine(affine, horz);
+
+    auto angle = [](const Vec2& a, const Vec2& b) {
+        return std::atan2(b.y - a.y, b.x - a.x);
+    };
+
+    float originalVert = angle(target, vert);
+    float transformedVert = angle(targetPrime, vertPrime);
+    rotVert = transformedVert - originalVert;
+
+    float originalHorz = angle(target, horz);
+    float transformedHorz = angle(targetPrime, horzPrime);
+    rotHorz = transformedHorz - originalHorz;
+
+    return true;
 }
 } // namespace
 
@@ -64,8 +188,11 @@ void sharedDeformResize(Vec2Array& target, std::size_t newLength) { target.resiz
 void sharedVertexMarkDirty() { gSharedVerticesDirty = true; }
 void sharedUvMarkDirty() { gSharedUvsDirty = true; }
 void sharedDeformMarkDirty() { gSharedDeformDirty = true; }
+void inSetUpdateBounds(bool state) { gDoGenerateBounds = state; }
+bool inGetUpdateBounds() { return gDoGenerateBounds; }
 
 void Drawable::updateBounds() {
+    if (!gDoGenerateBounds) return;
     if (mesh.vertices.empty()) {
         bounds.reset();
         return;
@@ -92,52 +219,65 @@ void Drawable::updateBounds() {
 }
 
 void Drawable::drawMeshLines() const {
-    auto& buf = debugDrawBuffer();
-    Mat4 m = transform().toMat4();
+    if (mesh.vertices.empty() || mesh.indices.empty()) return;
+    Mat4 trans = getDynamicMatrix();
+    if (auto ot = getOneTimeTransform()) trans = Mat4::multiply(*ot, trans);
+    std::vector<Vec3> pts;
+    pts.reserve(mesh.vertices.size());
+    for (std::size_t i = 0; i < mesh.vertices.size(); ++i) {
+        pts.push_back(Vec3{mesh.vertices[i].x - mesh.origin.x + deformation[i].x, mesh.vertices[i].y - mesh.origin.y + deformation[i].y, 0});
+    }
+    std::vector<uint16_t> idx;
+    idx.reserve(mesh.indices.size() * 2);
     for (std::size_t i = 0; i + 2 < mesh.indices.size(); i += 3) {
         auto i0 = mesh.indices[i];
         auto i1 = mesh.indices[i + 1];
         auto i2 = mesh.indices[i + 2];
-        if (i0 >= mesh.vertices.size() || i1 >= mesh.vertices.size() || i2 >= mesh.vertices.size()) continue;
-        Vec3 a{mesh.vertices[i0].x, mesh.vertices[i0].y, 0};
-        Vec3 b{mesh.vertices[i1].x, mesh.vertices[i1].y, 0};
-        Vec3 c{mesh.vertices[i2].x, mesh.vertices[i2].y, 0};
-        Vec4 col{0.5f, 0.5f, 0.5f, 1.0f};
-        buf.push_back(DebugLine{m.transformPoint(a), m.transformPoint(b), col});
-        buf.push_back(DebugLine{m.transformPoint(b), m.transformPoint(c), col});
-        buf.push_back(DebugLine{m.transformPoint(c), m.transformPoint(a), col});
+        if (i0 >= pts.size() || i1 >= pts.size() || i2 >= pts.size()) continue;
+        idx.push_back(static_cast<uint16_t>(i0));
+        idx.push_back(static_cast<uint16_t>(i1));
+        idx.push_back(static_cast<uint16_t>(i1));
+        idx.push_back(static_cast<uint16_t>(i2));
+        idx.push_back(static_cast<uint16_t>(i2));
+        idx.push_back(static_cast<uint16_t>(i0));
+    }
+    if (auto backend = core::getCurrentRenderBackend()) {
+        backend->setDebugLineWidth(1.0f);
+        backend->uploadDebugBuffer(pts, idx);
+        backend->drawDebugLines(Vec4{0.5f, 0.5f, 0.5f, 1.0f}, trans);
     }
 }
 
 void Drawable::drawMeshPoints() const {
-    auto& buf = debugDrawBuffer();
-    Mat4 m = transform().toMat4();
-    Vec4 col{1.0f, 1.0f, 0.0f, 1.0f};
-    for (const auto& v : mesh.vertices) {
-        Vec3 p{v.x, v.y, 0};
-        Vec3 wp = m.transformPoint(p);
-        float s = 2.0f;
-        buf.push_back(DebugLine{Vec3{wp.x - s, wp.y, wp.z}, Vec3{wp.x + s, wp.y, wp.z}, col});
-        buf.push_back(DebugLine{Vec3{wp.x, wp.y - s, wp.z}, Vec3{wp.x, wp.y + s, wp.z}, col});
+    if (mesh.vertices.empty()) return;
+    Mat4 trans = getDynamicMatrix();
+    if (auto ot = getOneTimeTransform()) trans = Mat4::multiply(*ot, trans);
+    std::vector<Vec3> pts;
+    pts.reserve(mesh.vertices.size());
+    for (std::size_t i = 0; i < mesh.vertices.size(); ++i) {
+        pts.push_back(Vec3{mesh.vertices[i].x - mesh.origin.x + deformation[i].x, mesh.vertices[i].y - mesh.origin.y + deformation[i].y, 0});
+    }
+    std::vector<uint16_t> idx;
+    idx.reserve(mesh.vertices.size());
+    for (std::size_t i = 0; i < mesh.vertices.size(); ++i) idx.push_back(static_cast<uint16_t>(i));
+    if (auto backend = core::getCurrentRenderBackend()) {
+        backend->setDebugPointSize(4.0f);
+        backend->uploadDebugBuffer(pts, idx);
+        backend->drawDebugPoints(Vec4{1, 1, 1, 1}, trans);
     }
 }
-void Drawable::getMesh() {}
+MeshData& Drawable::getMesh() { return mesh; }
 
 void Drawable::updateIndices() {
-    // Validate indices; in absence of backend, ensure consistency
-    if (mesh.indices.empty() || (mesh.indices.size() % 3) != 0) {
-        mesh.indices.clear();
-        return;
+    auto backend = core::getCurrentRenderBackend();
+    if (!backend) return;
+    if (mesh.indices.empty()) return;
+    backend->initializeDrawableResources();
+    backend->bindDrawableVao();
+    if (ibo == 0) {
+        backend->createDrawableBuffers(ibo);
     }
-    uint16_t maxIdx = 0;
-    for (auto v : mesh.indices) {
-        if (v > maxIdx) maxIdx = v;
-    }
-    if (maxIdx >= mesh.vertices.size()) {
-        mesh.indices.clear();
-        return;
-    }
-    sharedVertexMarkDirty();
+    backend->uploadDrawableIndices(ibo, mesh.indices);
 }
 
 static std::size_t registerBuffer(std::map<NodeId, std::size_t>& table, NodeId id, const Vec2Array& data, Vec2Array& buf) {
@@ -154,69 +294,34 @@ std::tuple<Vec2Array, std::optional<Mat4>, bool> Drawable::nodeAttachProcessor(c
                                                                                const Vec2Array& origDeformation,
                                                                                const Mat4* origTransform) {
     bool changed = false;
-    if (!node || origVertices.size() == 0 || mesh.indices.size() < 3) return {origDeformation, std::nullopt, false};
-    Mat4 inv = origTransform ? Mat4::inverse(*origTransform) : Mat4::identity();
+    if (!node || mesh.indices.size() < 3) return {origDeformation, std::nullopt, false};
+    Mat4 inv = Mat4::inverse(transform().toMat4());
     Vec3 localNode = inv.transformPoint(Vec3{node->transform().translation.x, node->transform().translation.y, 0});
+    Vec2 nodeOrigin{localNode.x, localNode.y};
 
-    // simple cache by node id
-    static std::unordered_map<NodeId, std::size_t> attachedIndex;
-    if (attachedIndex.find(node->uuid) == attachedIndex.end()) {
-        attachedIndex[node->uuid] = std::numeric_limits<std::size_t>::max();
+    auto triIt = attachedIndex.find(node->uuid);
+    std::array<std::size_t, 3> tri{};
+    if (triIt == attachedIndex.end()) {
+        auto triFound = findSurroundingTriangle(nodeOrigin, mesh);
+        if (!triFound) return {origDeformation, std::nullopt, false};
+        tri = *triFound;
+        attachedIndex[node->uuid] = tri;
+    } else {
+        tri = triIt->second;
     }
 
-    auto findTriangle = [&](const Vec2& p) -> std::size_t {
-        for (std::size_t i = 0; i + 2 < mesh.indices.size(); i += 3) {
-            auto i0 = mesh.indices[i];
-            auto i1 = mesh.indices[i + 1];
-            auto i2 = mesh.indices[i + 2];
-            if (i0 >= origVertices.size() || i1 >= origVertices.size() || i2 >= origVertices.size()) continue;
-            Vec2 v0{origVertices.x[i0], origVertices.y[i0]};
-            Vec2 v1{origVertices.x[i1], origVertices.y[i1]};
-            Vec2 v2{origVertices.x[i2], origVertices.y[i2]};
-            float denom = (v1.y - v2.y) * (v0.x - v2.x) + (v2.x - v1.x) * (v0.y - v2.y);
-            if (denom == 0.0f) continue;
-            float a = ((v1.y - v2.y) * (p.x - v2.x) + (v2.x - v1.x) * (p.y - v2.y)) / denom;
-            float b = ((v2.y - v0.y) * (p.x - v2.x) + (v0.x - v2.x) * (p.y - v2.y)) / denom;
-            float c = 1.0f - a - b;
-            if (a >= 0 && b >= 0 && c >= 0) return i;
-        }
-        return std::numeric_limits<std::size_t>::max();
-    };
-
-    auto triIdx = attachedIndex[node->uuid];
-    if (triIdx == std::numeric_limits<std::size_t>::max()) {
-        triIdx = findTriangle(Vec2{localNode.x, localNode.y});
-        attachedIndex[node->uuid] = triIdx;
+    Vec2 targetPrime{};
+    float rotVert = 0.0f, rotHorz = 0.0f;
+    if (!calculateTransformInTriangle(mesh, tri, deformation, nodeOrigin, targetPrime, rotVert, rotHorz)) {
+        return {origDeformation, std::nullopt, false};
     }
-    if (triIdx != std::numeric_limits<std::size_t>::max() && triIdx + 2 < mesh.indices.size()) {
-        auto i0 = mesh.indices[triIdx];
-        auto i1 = mesh.indices[triIdx + 1];
-        auto i2 = mesh.indices[triIdx + 2];
-        Vec2 v0{origVertices.x[i0], origVertices.y[i0]};
-        Vec2 v1{origVertices.x[i1], origVertices.y[i1]};
-        Vec2 v2{origVertices.x[i2], origVertices.y[i2]};
-        auto bary = [&](const Vec2& p) {
-            float denom = (v1.y - v2.y) * (v0.x - v2.x) + (v2.x - v1.x) * (v0.y - v2.y);
-            float a = ((v1.y - v2.y) * (p.x - v2.x) + (v2.x - v1.x) * (p.y - v2.y)) / denom;
-            float b = ((v2.y - v0.y) * (p.x - v2.x) + (v0.x - v2.x) * (p.y - v2.y)) / denom;
-            float c = 1.0f - a - b;
-            return std::array<float, 3>{a, b, c};
-        };
-        auto w = bary(Vec2{localNode.x, localNode.y});
-        Vec2 deform0{origDeformation.x[i0], origDeformation.y[i0]};
-        Vec2 deform1{origDeformation.x[i1], origDeformation.y[i1]};
-        Vec2 deform2{origDeformation.x[i2], origDeformation.y[i2]};
-        Vec2 blended{
-            deform0.x * w[0] + deform1.x * w[1] + deform2.x * w[2],
-            deform0.y * w[0] + deform1.y * w[1] + deform2.y * w[2],
-        };
-        node->setValue("transform.t.x", blended.x);
-        node->setValue("transform.t.y", blended.y);
-        changed = true;
-        return {origDeformation, std::nullopt, changed};
-    }
-
-    return {origDeformation, std::nullopt, changed};
+    Vec2 delta{targetPrime.x - nodeOrigin.x, targetPrime.y - nodeOrigin.y};
+    node->setValue("transform.t.x", delta.x);
+    node->setValue("transform.t.y", delta.y);
+    node->setValue("transform.r.z", (rotVert + rotHorz) / 2.0f);
+    node->transformChanged();
+    changed = true;
+    return {Vec2Array{}, std::nullopt, changed};
 }
 
 void Drawable::writeSharedBuffers() {
@@ -226,15 +331,23 @@ void Drawable::writeSharedBuffers() {
         }
         writeBuffer(vertices, gSharedVertices, vertexOffset);
         gSharedVerticesDirty = true;
+        if (auto backend = core::getCurrentRenderBackend()) {
+            backend->uploadSharedVertexBuffer(gSharedVertices);
+        }
     }
     if (!mesh.uvs.empty()) {
         if (uvOffset == 0 && uuid != 0 && gUvOffsets.count(uuid) == 0) {
-            uvOffset = static_cast<uint32_t>(registerBuffer(gUvOffsets, uuid, vertices, gSharedUvs));
+            Vec2Array uva(mesh.uvs.size());
+            for (std::size_t i = 0; i < mesh.uvs.size(); ++i) { uva.x[i] = mesh.uvs[i].x; uva.y[i] = mesh.uvs[i].y; }
+            uvOffset = static_cast<uint32_t>(registerBuffer(gUvOffsets, uuid, uva, gSharedUvs));
         }
         Vec2Array uva(mesh.uvs.size());
         for (std::size_t i = 0; i < mesh.uvs.size(); ++i) { uva.x[i] = mesh.uvs[i].x; uva.y[i] = mesh.uvs[i].y; }
         writeBuffer(uva, gSharedUvs, uvOffset);
         gSharedUvsDirty = true;
+        if (auto backend = core::getCurrentRenderBackend()) {
+            backend->uploadSharedUvBuffer(gSharedUvs);
+        }
     }
     if (deformation.size() > 0) {
         if (deformOffset == 0 && uuid != 0 && gDeformOffsets.count(uuid) == 0) {
@@ -242,6 +355,9 @@ void Drawable::writeSharedBuffers() {
         }
         writeBuffer(deformation, gSharedDeform, deformOffset);
         gSharedDeformDirty = true;
+        if (auto backend = core::getCurrentRenderBackend()) {
+            backend->uploadSharedDeformBuffer(gSharedDeform);
+        }
     }
 }
 
@@ -260,11 +376,14 @@ void Drawable::updateVertices() {
     sharedDeformResize(deformation, deformation.size());
     sharedVertexMarkDirty();
     sharedDeformMarkDirty();
-    updateBounds();
-    writeSharedBuffers();
+    updateDeform();
 }
 
-void Drawable::rebufferMesh() { updateVertices(); updateIndices(); }
+void Drawable::rebufferMesh(const MeshData& data) {
+    mesh = data;
+    updateIndices();
+    updateVertices();
+}
 
 void Drawable::updateDeform() {
     Deformable::updateDeform();
@@ -274,21 +393,16 @@ void Drawable::updateDeform() {
 }
 
 void Drawable::reset() {
-    mesh = MeshData{};
-    deformationOffsets.clear();
-    weldedTargets.clear();
-    weldedLinks.clear();
-    weldingApplied.clear();
-    bounds.reset();
-    clearOffsetsFor(uuid);
-    vertexOffset = uvOffset = deformOffset = 0;
+    vertices.resize(mesh.vertices.size());
+    for (std::size_t i = 0; i < mesh.vertices.size(); ++i) {
+        vertices.x[i] = mesh.vertices[i].x;
+        vertices.y[i] = mesh.vertices[i].y;
+    }
     sharedVertexMarkDirty();
-    sharedUvMarkDirty();
-    sharedDeformMarkDirty();
 }
 
 bool Drawable::isWeldedBy(NodeId target) const {
-    return std::find(weldedTargets.begin(), weldedTargets.end(), target) != weldedTargets.end();
+    return std::any_of(weldedLinks.begin(), weldedLinks.end(), [&](const WeldingLink& l) { return l.target == target; });
 }
 
 std::tuple<Vec2Array, std::optional<Mat4>, bool> Drawable::weldingProcessor(const std::shared_ptr<Node>& target,
@@ -329,8 +443,8 @@ std::tuple<Vec2Array, std::optional<Mat4>, bool> Drawable::weldingProcessor(cons
     Vec2Array selfDelta = gatherVec2(deformation, selfIndices);
     selfLocal += selfDelta;
 
-    Vec2Array targetLocal = gatherVec2(targetDrawable->vertices, targetIndices);
-    Vec2Array targetDelta = gatherVec2(targetDrawable->deformation, targetIndices);
+    Vec2Array targetLocal = gatherVec2(origVertices, targetIndices);
+    Vec2Array targetDelta = gatherVec2(origDeformation, targetIndices);
     targetLocal += targetDelta;
 
     Mat4 selfMatrix = overrideTransformMatrix ? *overrideTransformMatrix : transform().toMat4();
@@ -363,15 +477,20 @@ std::tuple<Vec2Array, std::optional<Mat4>, bool> Drawable::weldingProcessor(cons
     Vec2Array localTarget = common::makeZeroVecArray(targetIndices.size());
     transformAdd(localTarget, deltaTarget, targetInv);
 
-    Vec2Array deformationOut = origDeformation;
-    scatterAddVec2(localSelf, selfIndices, deformationOut, changed);
-    scatterAddVec2(localTarget, targetIndices, targetDrawable->deformation, changed);
+    Vec2Array selfDeformOut = deformation;
+    scatterAddVec2(localSelf, selfIndices, selfDeformOut, changed);
+    Vec2Array targetDeformOut = origDeformation;
+    scatterAddVec2(localTarget, targetIndices, targetDeformOut, changed);
+    if (changed) {
+        deformation = selfDeformOut;
+        targetDrawable->deformation = targetDeformOut;
+    }
 
     if (changed) {
         sharedDeformMarkDirty();
         updateBounds();
     }
-    return {deformationOut, std::nullopt, changed};
+    return {selfDeformOut, std::nullopt, changed};
 }
 
 void Drawable::addWeldedTarget(const std::shared_ptr<Drawable>& target,
@@ -387,10 +506,15 @@ void Drawable::addWeldedTarget(const std::shared_ptr<Drawable>& target,
     }
     auto reciprocal = std::find_if(target->weldedLinks.begin(), target->weldedLinks.end(), [&](const WeldingLink& l) { return l.target == uuid; });
     if (reciprocal == target->weldedLinks.end()) {
-        target->weldedLinks.push_back(WeldingLink{uuid, std::vector<std::ptrdiff_t>(target->mesh.vertices.size(), NOINDEX), 1.0f - weight});
+        std::vector<std::ptrdiff_t> counter(target->mesh.vertices.size(), NOINDEX);
+        for (std::size_t i = 0; i < indices.size() && i < counter.size(); ++i) {
+            auto ind = indices[i];
+            if (ind != NOINDEX && ind >= 0) counter[static_cast<std::size_t>(ind)] = static_cast<std::ptrdiff_t>(i);
+        }
+        target->weldedLinks.push_back(WeldingLink{uuid, counter, 1.0f - weight});
     }
-    weldedTargets.push_back(target->uuid);
-    target->weldedTargets.push_back(uuid);
+    if (!isWeldedBy(target->uuid)) weldedTargets.push_back(target->uuid);
+    if (!target->isWeldedBy(uuid)) target->weldedTargets.push_back(uuid);
     welded = target->welded = true;
     registerWeldFilter(target);
     target->registerWeldFilter(std::dynamic_pointer_cast<Drawable>(shared_from_this()));
@@ -408,10 +532,6 @@ void Drawable::removeWeldedTarget(const std::shared_ptr<Drawable>& target) {
 
 void Drawable::setupSelf() {
     Deformable::setupSelf();
-    updateVertices();
-    updateIndices();
-    writeSharedBuffers();
-    // ensure weld hooks registered
     for (auto& link : weldedLinks) {
         auto pup = puppetRef();
         if (!pup) continue;
@@ -421,15 +541,30 @@ void Drawable::setupSelf() {
 }
 
 void Drawable::finalizeDrawable() {
-    updateIndices();
-    updateVertices();
-    writeSharedBuffers();
+    for (auto& child : children) {
+        if (child && child->pinToMesh) {
+            setupChild(child);
+        }
+    }
+    std::vector<WeldingLink> valid;
+    if (auto pup = puppetRef()) {
+        for (auto& link : weldedLinks) {
+            auto tgt = std::dynamic_pointer_cast<Drawable>(pup->findNodeById(link.target));
+            if (tgt) {
+                valid.push_back(link);
+                registerWeldFilter(tgt);
+            }
+        }
+    }
+    weldedLinks = valid;
+    buildDrawable(true);
 }
 
 void Drawable::clearCache() {
     deformationOffsets.clear();
     bounds.reset();
     weldingApplied.clear();
+    attachedIndex.clear();
     sharedVertexMarkDirty();
     sharedUvMarkDirty();
     sharedDeformMarkDirty();
@@ -437,9 +572,6 @@ void Drawable::clearCache() {
 
 void Drawable::runBeginTask(core::RenderContext& ctx) {
     weldingApplied.clear();
-    for (const auto& link : weldedLinks) {
-        weldingApplied.insert(link.target);
-    }
     Deformable::runBeginTask(ctx);
     writeSharedBuffers();
     gSharedVerticesDirty = gSharedUvsDirty = gSharedDeformDirty = false;
@@ -455,7 +587,7 @@ void Drawable::runPostTaskImpl(std::size_t priority, core::RenderContext& ctx) {
             auto tgtDrawable = std::dynamic_pointer_cast<Drawable>(tgtNode);
             if (!tgtDrawable) continue;
             Mat4 tmat = tgtDrawable->transform().toMat4();
-            auto res = weldingProcessor(tgtDrawable, vertices, deformation, &tmat);
+            auto res = weldingProcessor(tgtDrawable, tgtDrawable->vertices, tgtDrawable->deformation, &tmat);
             if (std::get<0>(res).size() == deformation.size()) {
                 deformation = std::get<0>(res);
             }
@@ -469,44 +601,47 @@ void Drawable::runPostTaskImpl(std::size_t priority, core::RenderContext& ctx) {
 
 void Drawable::normalizeUv() {
     if (mesh.uvs.empty()) return;
-    float minx = mesh.uvs[0].x, maxx = mesh.uvs[0].x;
-    float miny = mesh.uvs[0].y, maxy = mesh.uvs[0].y;
-    for (const auto& uv : mesh.uvs) {
-        minx = std::min(minx, uv.x);
-        maxx = std::max(maxx, uv.x);
-        miny = std::min(miny, uv.y);
-        maxy = std::max(maxy, uv.y);
+    float minX = mesh.uvs[0].x;
+    float maxX = minX;
+    float minY = mesh.uvs[0].y;
+    float maxY = minY;
+    for (std::size_t i = 1; i < mesh.uvs.size(); ++i) {
+        const auto& uv = mesh.uvs[i];
+        minX = std::min(minX, uv.x);
+        maxX = std::max(maxX, uv.x);
+        minY = std::min(minY, uv.y);
+        maxY = std::max(maxY, uv.y);
     }
-    float dx = maxx - minx;
-    float dy = maxy - miny;
+    float width = maxX - minX;
+    float height = maxY - minY;
+    float centerX = width != 0.0f ? (minX + maxX) / (2.0f * width) : 0.0f;
+    float centerY = height != 0.0f ? (minY + maxY) / (2.0f * height) : 0.0f;
     for (auto& uv : mesh.uvs) {
-        uv.x = dx != 0.0f ? (uv.x - minx) / dx : 0.0f;
-        uv.y = dy != 0.0f ? (uv.y - miny) / dy : 0.0f;
+        if (width != 0.0f) uv.x /= width;
+        if (height != 0.0f) uv.y /= height;
+        uv.x += (0.5f - centerX);
+        uv.y += (0.5f - centerY);
     }
     sharedUvMarkDirty();
 }
 
 void Drawable::centralizeDrawable() {
-    if (mesh.vertices.empty()) return;
-    Vec2 center{0, 0};
-    for (auto& v : mesh.vertices) {
-        center.x += v.x;
-        center.y += v.y;
+    for (auto& c : children) {
+        if (c) {
+            auto drawableChild = std::dynamic_pointer_cast<Drawable>(c);
+            if (drawableChild) drawableChild->centralizeDrawable();
+        }
     }
-    center.x /= static_cast<float>(mesh.vertices.size());
-    center.y /= static_cast<float>(mesh.vertices.size());
-    for (auto& v : mesh.vertices) {
-        v.x -= center.x;
-        v.y -= center.y;
-    }
-    mesh.origin.x += center.x;
-    mesh.origin.y += center.y;
     updateBounds();
 }
 
 void Drawable::copyFromDrawable(const Drawable& src) {
-    mesh = src.mesh;
-    deformationOffsets = src.deformationOffsets;
+    mesh.vertices = src.mesh.vertices;
+    mesh.uvs = src.mesh.uvs.empty() ? src.mesh.vertices : src.mesh.uvs;
+    mesh.indices = src.mesh.indices;
+    mesh.origin = src.mesh.origin;
+    mesh.gridAxes = src.mesh.gridAxes;
+    deformation = src.deformation;
     tint = src.tint;
     screenTint = src.screenTint;
     emissionStrength = src.emissionStrength;
@@ -515,28 +650,104 @@ void Drawable::copyFromDrawable(const Drawable& src) {
     weldedTargets = src.weldedTargets;
     weldedLinks = src.weldedLinks;
     weldingApplied = src.weldingApplied;
-    vertexOffset = uvOffset = deformOffset = 0; // offsets will be re-registered
+    vertexOffset = uvOffset = deformOffset = 0;
     updateVertices();
     updateIndices();
 }
 
-void Drawable::setupChildDrawable() {}
-void Drawable::releaseChildDrawable() {}
+void Drawable::setupChildDrawable() {
+    for (auto& child : children) {
+        if (!child) continue;
+        if (!child->pinToMesh) continue;
+        bool exists = std::any_of(child->preProcessFilters.begin(), child->preProcessFilters.end(), [](const FilterHook& h) { return h.stage == 0; });
+        if (exists) continue;
+        std::weak_ptr<Drawable> weakSelf = std::dynamic_pointer_cast<Drawable>(shared_from_this());
+        FilterHook hook;
+        hook.stage = 0;
+        hook.func = [weakSelf](std::shared_ptr<Node> self, const std::vector<Vec2>&, const std::vector<Vec2>&, const Mat4* mat) {
+            auto owner = weakSelf.lock();
+            if (!owner) return std::make_tuple(std::vector<Vec2>{}, std::optional<Mat4>{}, false);
+            Vec2Array verts = owner->vertices;
+            Vec2Array deform = owner->deformation;
+            auto res = owner->nodeAttachProcessor(self, verts, deform, mat);
+            std::vector<Vec2> out;
+            const auto& def = std::get<0>(res);
+            if (!def.empty()) {
+                out.push_back(Vec2{def.x[0], def.y[0]});
+            }
+            return std::make_tuple(out, std::optional<Mat4>{}, std::get<2>(res));
+        };
+        child->preProcessFilters.push_back(std::move(hook));
+    }
+}
+
+void Drawable::releaseChildDrawable() {
+    for (auto& child : children) {
+        if (!child) continue;
+        child->preProcessFilters.erase(std::remove_if(child->preProcessFilters.begin(), child->preProcessFilters.end(), [](const FilterHook& h) {
+            return h.stage == 0;
+        }), child->preProcessFilters.end());
+        attachedIndex.erase(child->uuid);
+    }
+}
+
+void Drawable::build(bool force) {
+    (void)force;
+    setupChildDrawable();
+    setupSelf();
+    Node::build(force);
+}
 
 void Drawable::buildDrawable(bool force) {
+    auto backend = core::getCurrentRenderBackend();
     if (force || !mesh.isReady()) {
-        updateVertices();
-        updateBounds();
+        if (backend) {
+            backend->initializeDrawableResources();
+            backend->bindDrawableVao();
+        }
         updateIndices();
+        updateVertices();
         writeSharedBuffers();
+    }
+    if (backend && ibo != 0 && !mesh.indices.empty()) {
+        backend->drawDrawableElements(ibo, mesh.indices.size());
     }
 }
 
 bool Drawable::mustPropagateDrawable() const { return true; }
 
 void Drawable::fillDrawPacket(const Node& header, PartDrawPacket& packet, bool /*isMask*/) const {
+    packet.renderable = header.enabled && mesh.isReady();
     packet.modelMatrix = header.transform().toMat4();
-    packet.renderable = mesh.isReady();
+    if (auto pup = puppetRef()) {
+        packet.puppetMatrix = pup->transform.toMat4();
+    }
+    packet.ignorePuppet = false;
+    packet.opacity = 1.0f;
+    packet.emissionStrength = emissionStrength;
+    packet.blendMode = BlendMode::Normal;
+    packet.useMultistageBlend = useMultistageBlend(packet.blendMode);
+    packet.hasEmissionOrBumpmap = (textures.size() > 1 && textures[1]) || (textures.size() > 2 && textures[2]);
+    packet.maskThreshold = 0.0f;
+    packet.clampedTint = tint;
+    packet.clampedScreen = screenTint;
+    packet.origin = mesh.origin;
+    packet.vertexOffset = vertexOffset;
+    packet.uvOffset = uvOffset;
+    packet.deformOffset = deformOffset;
+    packet.vertexAtlasStride = sharedVertexBufferData().size();
+    packet.uvAtlasStride = sharedUvBufferData().size();
+    packet.deformAtlasStride = sharedDeformBufferData().size();
+    packet.vertexCount = static_cast<uint32_t>(mesh.vertices.size());
+    packet.indexCount = static_cast<uint32_t>(mesh.indices.size());
+    for (std::size_t i = 0; i < textures.size() && i < 3; ++i) {
+        packet.textureUUIDs[i] = textures[i] ? textures[i]->getRuntimeUUID() : 0;
+    }
+    packet.vertices = mesh.vertices;
+    packet.uvs = mesh.uvs;
+    packet.indices = mesh.indices;
+    packet.deformation = deformation;
+    packet.node.reset();
 }
 
 void Drawable::registerWeldFilter(const std::shared_ptr<Drawable>& target) {

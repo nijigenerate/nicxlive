@@ -47,6 +47,7 @@ const TextureHandle* QueueRenderBackend::getTexture(uint32_t id) const {
 }
 
 void QueueCommandEmitter::beginFrame(RenderBackend* backend, RenderGpuState&) {
+    (void)backend;
     if (auto qb = std::dynamic_pointer_cast<QueueRenderBackend>(backend_)) {
         qb->clear();
     }

@@ -10,6 +10,8 @@
 
 namespace nicxlive::core {
 
+using RenderResourceHandle = uint32_t;
+
 struct RenderGpuState {
     static RenderGpuState init() { return RenderGpuState{}; }
 };
@@ -17,6 +19,20 @@ struct RenderGpuState {
 class RenderBackend {
 public:
     virtual ~RenderBackend() = default;
+    // Drawable geometry uploads (Unity互換の簡易インターフェース)
+    virtual void initializeDrawableResources() {}
+    virtual void bindDrawableVao() {}
+    virtual void createDrawableBuffers(RenderResourceHandle& /*outHandle*/) {}
+    virtual void uploadDrawableIndices(RenderResourceHandle /*id*/, const std::vector<uint16_t>& /*indices*/) {}
+    virtual void uploadSharedVertexBuffer(const ::nicxlive::core::common::Vec2Array&) {}
+    virtual void uploadSharedUvBuffer(const ::nicxlive::core::common::Vec2Array&) {}
+    virtual void uploadSharedDeformBuffer(const ::nicxlive::core::common::Vec2Array&) {}
+    virtual void drawDrawableElements(RenderResourceHandle /*id*/, std::size_t /*count*/) {}
+    virtual void setDebugPointSize(float) {}
+    virtual void setDebugLineWidth(float) {}
+    virtual void uploadDebugBuffer(const std::vector<nodes::Vec3>& /*positions*/, const std::vector<uint16_t>& /*indices*/) {}
+    virtual void drawDebugPoints(const nodes::Vec4& /*color*/, const nodes::Mat4& /*m*/) {}
+    virtual void drawDebugLines(const nodes::Vec4& /*color*/, const nodes::Mat4& /*m*/) {}
 };
 class UnityRenderBackend : public RenderBackend {
 public:

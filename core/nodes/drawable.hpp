@@ -2,11 +2,14 @@
 
 #include "deformable.hpp"
 #include "filter.hpp"
+#include "../texture.hpp"
 #include "../common/utils.hpp"
 
 #include <algorithm>
 #include <unordered_set>
+#include <unordered_map>
 #include <optional>
+#include <array>
 
 namespace nicxlive::core::nodes {
 
@@ -21,6 +24,8 @@ void sharedDeformResize(Vec2Array& target, std::size_t newLength);
 void sharedVertexMarkDirty();
 void sharedUvMarkDirty();
 void sharedDeformMarkDirty();
+void inSetUpdateBounds(bool state);
+bool inGetUpdateBounds();
 
 struct MeshData {
     std::vector<Vec2> vertices{};
@@ -47,28 +52,31 @@ public:
     uint32_t vertexOffset{0};
     uint32_t uvOffset{0};
     uint32_t deformOffset{0};
+    uint32_t ibo{0};
     Vec3 tint{};
     Vec3 screenTint{};
     float emissionStrength{0.0f};
-    std::vector<int32_t> textures{};
+    std::array<std::shared_ptr<::nicxlive::core::Texture>, 3> textures{};
     std::optional<std::array<float, 4>> bounds{};
 
     std::vector<NodeId> weldedTargets{};
     bool welded{false};
     std::vector<WeldingLink> weldedLinks{};
     std::unordered_set<NodeId> weldingApplied{};
+    std::unordered_map<NodeId, std::array<std::size_t, 3>> attachedIndex{};
 
     Drawable() = default;
 
     virtual void updateIndices();
 
     virtual void updateVertices() override;
+    virtual void updateDeform() override;
 
     virtual void updateBounds() override;
 
     virtual void drawMeshLines() const;
     virtual void drawMeshPoints() const;
-    virtual void getMesh();
+    virtual MeshData& getMesh();
 
     virtual std::tuple<Vec2Array, std::optional<Mat4>, bool> nodeAttachProcessor(const std::shared_ptr<Node>& node,
                                                                                   const Vec2Array& origVertices,
@@ -80,7 +88,7 @@ public:
                                                                               const Vec2Array& origDeformation,
                                                                               const Mat4* origTransform);
 
-    virtual void rebufferMesh();
+    virtual void rebufferMesh(const MeshData& data);
 
     virtual void reset();
 
@@ -107,6 +115,7 @@ public:
     virtual void setupChildDrawable();
     virtual void releaseChildDrawable();
 
+    virtual void build(bool force) override;
     virtual void buildDrawable(bool force);
 
     virtual bool mustPropagateDrawable() const;

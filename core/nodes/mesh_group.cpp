@@ -470,8 +470,7 @@ void MeshGroup::build(bool force) {
     for (auto& c : children) {
         setupChild(c);
     }
-    setupSelf();
-    Drawable::buildDrawable(force);
+    Drawable::build(force);
 }
 
 void MeshGroup::serializeSelfImpl(::nicxlive::core::serde::InochiSerializer& serializer, bool recursive, SerializeNodeFlags flags) const {
