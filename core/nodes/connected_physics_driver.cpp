@@ -90,6 +90,35 @@ void ConnectedPendulumDriver::update(PathDeformer* deformer, core::common::Vec2A
     }
 }
 
+void ConnectedPendulumDriver::getState(PhysicsDriverState& out) const {
+    out.type = "Pendulum";
+    out.angles = angles_;
+    out.angularVelocities = angularVelocities_;
+    out.lengths = lengths_;
+    out.base = base_;
+    out.externalForce = externalForce_;
+    out.damping = damping_;
+    out.restore = restore_;
+    out.timeStep = timeStep_;
+    out.gravity = gravity_;
+    out.inputScale = inputScale_;
+    out.worldAngle = worldAngle_;
+}
+
+void ConnectedPendulumDriver::setState(const PhysicsDriverState& state) {
+    angles_ = state.angles;
+    angularVelocities_ = state.angularVelocities;
+    lengths_ = state.lengths;
+    base_ = state.base;
+    externalForce_ = state.externalForce;
+    damping_ = state.damping;
+    restore_ = state.restore;
+    timeStep_ = state.timeStep;
+    gravity_ = state.gravity;
+    inputScale_ = state.inputScale;
+    worldAngle_ = state.worldAngle;
+}
+
 ConnectedSpringPendulumDriver::ConnectedSpringPendulumDriver(PathDeformer* deformer) : deformer_(deformer) {}
 
 void ConnectedSpringPendulumDriver::setup(PathDeformer* deformer) {
@@ -151,6 +180,35 @@ void ConnectedSpringPendulumDriver::update(PathDeformer* deformer, core::common:
         outOffsets.x[i] = cur.x - deformer->vertices[i].x;
         outOffsets.y[i] = cur.y - deformer->vertices[i].y;
     }
+}
+
+void ConnectedSpringPendulumDriver::getState(PhysicsDriverState& out) const {
+    out.type = "SpringPendulum";
+    out.angles = angles_;
+    out.angularVelocities = angularVelocities_;
+    out.lengths = lengths_;
+    out.base = base_;
+    out.externalForce = externalForce_;
+    out.damping = damping_;
+    out.restore = restore_;
+    out.timeStep = timeStep_;
+    out.gravity = gravity_;
+    out.inputScale = inputScale_;
+    out.worldAngle = worldAngle_;
+}
+
+void ConnectedSpringPendulumDriver::setState(const PhysicsDriverState& state) {
+    angles_ = state.angles;
+    angularVelocities_ = state.angularVelocities;
+    lengths_ = state.lengths;
+    base_ = state.base;
+    externalForce_ = state.externalForce;
+    damping_ = state.damping;
+    restore_ = state.restore;
+    timeStep_ = state.timeStep;
+    gravity_ = state.gravity;
+    inputScale_ = state.inputScale;
+    worldAngle_ = state.worldAngle;
 }
 
 } // namespace nicxlive::core::nodes

@@ -50,6 +50,7 @@ public:
     bool precalculated{false};
 
     MeshGroup();
+    explicit MeshGroup(const std::shared_ptr<Node>& parent);
 
     const std::string& typeId() const override {
         static const std::string k = "MeshGroup";

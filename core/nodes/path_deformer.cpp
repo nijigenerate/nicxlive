@@ -708,14 +708,17 @@ DeformResult PathDeformer::deformChildren(const std::shared_ptr<Node>& target,
     res.transform = std::nullopt;
     res.changed = false;
 
-    if (!physicsEnabled) return res;
-    if (!origTransform) return res;
-    if (!originalCurve || !deformedCurve) return res;
-    if (controlPoints.size() < 2) return res;
-    if (!origDeformation.empty() && origDeformation.size() < origVertices.size()) return res;
+    bool diagStarted = beginDiagnosticFrame();
+
+    if (!physicsEnabled) { if (diagStarted) endDiagnosticFrame(); return res; }
+    if (!origTransform) { if (diagStarted) endDiagnosticFrame(); return res; }
+    if (!originalCurve || !deformedCurve) { if (diagStarted) endDiagnosticFrame(); return res; }
+    if (controlPoints.size() < 2) { if (diagStarted) endDiagnosticFrame(); return res; }
+    if (!origDeformation.empty() && origDeformation.size() < origVertices.size()) { if (diagStarted) endDiagnosticFrame(); return res; }
     if (!isFiniteMatrix(inverseMatrix) || !isFiniteMatrix(*origTransform)) {
         recordInvalid("inverseMatrix", 0, Vec2{});
         disablePhysicsDriver("inverseMatrix");
+        if (diagStarted) endDiagnosticFrame();
         return res;
     }
 
@@ -723,6 +726,7 @@ DeformResult PathDeformer::deformChildren(const std::shared_ptr<Node>& target,
     if (!isFiniteMatrix(center)) {
         recordInvalid("centerMatrix", 0, Vec2{});
         disablePhysicsDriver("centerMatrix");
+        if (diagStarted) endDiagnosticFrame();
         return res;
     }
 
@@ -749,6 +753,7 @@ DeformResult PathDeformer::deformChildren(const std::shared_ptr<Node>& target,
     int invalidCenter = firstNonFiniteIndex(sample);
     if (invalidCenter >= 0) {
         markInvalidOffset("cVertexNaN", static_cast<std::size_t>(invalidCenter), Vec2{});
+        if (diagStarted) endDiagnosticFrame();
         return res;
     }
 
@@ -777,6 +782,7 @@ DeformResult PathDeformer::deformChildren(const std::shared_ptr<Node>& target,
     int invalidDef = firstNonFiniteIndex(closestDef);
     if (invalidDef >= 0) {
         markInvalidOffset("closestPointDeformedNaN", static_cast<std::size_t>(invalidDef), Vec2{});
+        if (diagStarted) endDiagnosticFrame();
         return res;
     }
 
@@ -815,9 +821,15 @@ DeformResult PathDeformer::deformChildren(const std::shared_ptr<Node>& target,
         lastMaxOffset = std::max(lastMaxOffset, mag);
     }
     if (offsetLocal.size() > 0) lastAvgOffset = sumOffset / static_cast<float>(offsetLocal.size());
-    if (!anyChanged) return res;
+    if (!anyChanged) { if (diagStarted) endDiagnosticFrame(); return res; }
 
     Mat4 inv = Mat4::inverse(center);
+    if (!isFiniteMatrix(inv)) {
+        recordInvalid("centerInverse", 0, Vec2{});
+        disablePhysicsDriver("centerInverse");
+        if (diagStarted) endDiagnosticFrame();
+        return res;
+    }
     inv[0][3] = inv[1][3] = inv[2][3] = 0.0f;
     Vec2Array deformOut;
     deformOut.resize(std::max<std::size_t>(deformInput.size(), offsetLocal.size()));
@@ -845,6 +857,7 @@ DeformResult PathDeformer::deformChildren(const std::shared_ptr<Node>& target,
     if (consecutiveInvalidFrames > 10) {
         disablePhysicsDriver("consecutiveInvalid");
     }
+    if (diagStarted) endDiagnosticFrame();
     return res;
 }
 
@@ -971,6 +984,7 @@ void PathDeformer::switchDynamic(bool enablePhysics) {
     driverInitialized = false;
     prevRootSet = false;
     physicsOnly = !physicsEnabled;
+    dynamicDeformation = !physicsEnabled;
 }
 
 void PathDeformer::notifyChange(const std::shared_ptr<Node>& target, NotifyReason reason) {
@@ -993,7 +1007,14 @@ bool PathDeformer::setupChild(const std::shared_ptr<Node>& child) {
     auto& post = child->postProcessFilters;
     pre.erase(std::remove_if(pre.begin(), pre.end(), [](const auto& h) { return h.stage == kPathFilterStage; }), pre.end());
     post.erase(std::remove_if(post.begin(), post.end(), [](const auto& h) { return h.stage == kPathFilterStage; }), post.end());
-    if (physicsEnabled) {
+    auto deformable = std::dynamic_pointer_cast<Deformable>(child);
+    if (deformable) {
+        if (dynamicDeformation) {
+            post.push_back(hook);
+        } else {
+            pre.push_back(hook);
+        }
+    } else if (translateChildren) {
         pre.push_back(hook);
     }
     // cache closest points for deformables
@@ -1054,11 +1075,17 @@ void PathDeformer::build(bool force) {
     for (auto& c : children) setupChild(c);
     setupSelf();
     refresh();
+    Node::build(force);
 }
 
 void PathDeformer::applyDeformToChildren(const std::vector<std::shared_ptr<core::param::Parameter>>& params, bool recursive) {
+    if (driver) {
+        physicsOnly = true;
+        return;
+    }
     if (!physicsEnabled) return;
     if (dynamicDeformation) return;
+    bool diagStarted = beginDiagnosticFrame();
     std::function<void(const std::shared_ptr<Node>&)> apply;
     apply = [&](const std::shared_ptr<Node>& c) {
         if (auto deformable = std::dynamic_pointer_cast<Deformable>(c)) {
@@ -1118,6 +1145,8 @@ void PathDeformer::applyDeformToChildren(const std::vector<std::shared_ptr<core:
         pathLog("[PathDeformer][Diag] frame=", frameCounter, " invalidFrames=", invalidFrameCount,
                 " totalInvalid=", totalInvalidCount, " lastCtx=", lastInvalidContext);
     }
+    physicsOnly = true;
+    if (diagStarted) endDiagnosticFrame();
 }
 
 void PathDeformer::copyFrom(const Node& src, bool clone, bool deepCopy) {
@@ -1151,6 +1180,7 @@ void PathDeformer::rebuffer(const std::vector<Vec2>& points) {
     deformedCurve = createCurve(vertices, curveType == CurveType::Bezier);
     prevCurve = originalCurve ? createCurve(vertices, curveType == CurveType::Bezier) : nullptr;
     checkBaselineDegeneracy(points);
+    rebuildCurveSamples();
     clearCache();
     driverInitialized = false;
     prevRootSet = false;
@@ -1163,6 +1193,12 @@ void PathDeformer::serializeSelfImpl(::nicxlive::core::serde::InochiSerializer& 
     if (has_flag(flags, SerializeNodeFlags::State)) {
         serializer.putKey("physicsEnabled");
         serializer.putValue(physicsEnabled);
+        serializer.putKey("physics_only");
+        serializer.putValue(physicsOnly);
+        serializer.putKey("dynamic_deformation");
+        serializer.putValue(dynamicDeformation);
+        serializer.putKey("curve_type");
+        serializer.putValue(static_cast<int>(curveType));
         serializer.putKey("strength");
         serializer.putValue(strength);
         serializer.putKey("translateChildren");
@@ -1171,10 +1207,6 @@ void PathDeformer::serializeSelfImpl(::nicxlive::core::serde::InochiSerializer& 
         serializer.putValue(static_cast<int>(curveType));
         serializer.putKey("physicsType");
         serializer.putValue(static_cast<int>(physicsType));
-        serializer.putKey("physics_only");
-        serializer.putValue(physicsOnly);
-        serializer.putKey("dynamic_deformation");
-        serializer.putValue(dynamicDeformation);
     }
     if (has_flag(flags, SerializeNodeFlags::Geometry)) {
         serializer.putKey("controlPoints");
@@ -1187,10 +1219,33 @@ void PathDeformer::serializeSelfImpl(::nicxlive::core::serde::InochiSerializer& 
         serializer.listEnd(arr);
     }
     if (has_flag(flags, SerializeNodeFlags::Links) && driver) {
-        serializer.putKey("physics");
-        serializer.putKey("type");
+        boost::property_tree::ptree phys;
         std::string typeStr = (physicsType == PhysicsType::SpringPendulum) ? "SpringPendulum" : "Pendulum";
-        serializer.putValue(typeStr);
+        phys.put("type", typeStr);
+        if (auto adapter = dynamic_cast<ConnectedDriverAdapter*>(driver.get())) {
+            PhysicsDriverState st;
+            adapter->getState(st);
+            boost::property_tree::ptree angles;
+            for (auto v : st.angles) angles.push_back({"", boost::property_tree::ptree(std::to_string(v))});
+            boost::property_tree::ptree angVel;
+            for (auto v : st.angularVelocities) angVel.push_back({"", boost::property_tree::ptree(std::to_string(v))});
+            boost::property_tree::ptree lens;
+            for (auto v : st.lengths) lens.push_back({"", boost::property_tree::ptree(std::to_string(v))});
+            phys.add_child("angles", angles);
+            phys.add_child("angularVelocities", angVel);
+            phys.add_child("lengths", lens);
+            phys.put("base.x", st.base.x);
+            phys.put("base.y", st.base.y);
+            phys.put("externalForce.x", st.externalForce.x);
+            phys.put("externalForce.y", st.externalForce.y);
+            phys.put("damping", st.damping);
+            phys.put("restore", st.restore);
+            phys.put("timeStep", st.timeStep);
+            phys.put("gravity", st.gravity);
+            phys.put("inputScale", st.inputScale);
+            phys.put("worldAngle", st.worldAngle);
+        }
+        serializer.root.add_child("physics", phys);
     }
 }
 
@@ -1208,6 +1263,9 @@ void PathDeformer::serializeSelfImpl(::nicxlive::core::serde::InochiSerializer& 
     if (auto ct = data.get_child_optional("curveType")) {
         curveType = static_cast<CurveType>(ct->get_value<int>());
     }
+    if (auto ct2 = data.get_child_optional("curve_type")) {
+        curveType = static_cast<CurveType>(ct2->get_value<int>());
+    }
     if (auto pt = data.get_child_optional("physicsType")) {
         physicsType = static_cast<PhysicsType>(pt->get_value<int>());
     }
@@ -1216,6 +1274,8 @@ void PathDeformer::serializeSelfImpl(::nicxlive::core::serde::InochiSerializer& 
     }
     if (auto dd = data.get_child_optional("dynamic_deformation")) {
         dynamicDeformation = dd->get_value<bool>();
+    } else {
+        dynamicDeformation = false;
     }
     if (auto cps = data.get_child_optional("controlPoints")) {
         controlPoints.clear();
@@ -1232,6 +1292,30 @@ void PathDeformer::serializeSelfImpl(::nicxlive::core::serde::InochiSerializer& 
         if (type == "SpringPendulum") physicsType = PhysicsType::SpringPendulum;
         else physicsType = PhysicsType::Pendulum;
         driver = createPhysicsDriver();
+        if (auto adapter = dynamic_cast<ConnectedDriverAdapter*>(driver.get())) {
+            PhysicsDriverState st;
+            st.type = type;
+            if (auto ang = phy->get_child_optional("angles")) {
+                for (const auto& v : *ang) st.angles.push_back(v.second.get_value<float>());
+            }
+            if (auto av = phy->get_child_optional("angularVelocities")) {
+                for (const auto& v : *av) st.angularVelocities.push_back(v.second.get_value<float>());
+            }
+            if (auto lens = phy->get_child_optional("lengths")) {
+                for (const auto& v : *lens) st.lengths.push_back(v.second.get_value<float>());
+            }
+            st.base.x = phy->get<float>("base.x", 0.0f);
+            st.base.y = phy->get<float>("base.y", 0.0f);
+            st.externalForce.x = phy->get<float>("externalForce.x", 0.0f);
+            st.externalForce.y = phy->get<float>("externalForce.y", 0.0f);
+            st.damping = phy->get<float>("damping", st.damping);
+            st.restore = phy->get<float>("restore", st.restore);
+            st.timeStep = phy->get<float>("timeStep", st.timeStep);
+            st.gravity = phy->get<float>("gravity", st.gravity);
+            st.inputScale = phy->get<float>("inputScale", st.inputScale);
+            st.worldAngle = phy->get<float>("worldAngle", st.worldAngle);
+            adapter->setState(st);
+        }
     }
     return std::nullopt;
 }

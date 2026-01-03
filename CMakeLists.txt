@@ -23,6 +23,7 @@ set(NICXLIVE_SOURCES
     core/nodes/mesh_group.cpp
     core/nodes/grid_deformer.cpp
     core/nodes/path_deformer.cpp
+    core/nodes/simple_physics_driver.cpp
     core/nodes/curve.cpp
     core/nodes/deformable.cpp
     core/nodes/filter.cpp

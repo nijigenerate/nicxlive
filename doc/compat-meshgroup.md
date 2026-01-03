@@ -11,7 +11,7 @@
 | フィールド `translateChildren` | 子へ平行移動転送フラグ | 同等 | ◯ |
 | フィールド `dynamic` | 動的モード | 同等 | ◯ |
 | フィールド `precalculated` | プレ計算済みフラグ | 同等 | ◯ |
-| ctor | parent/タスク登録 | デフォルト（preProcess登録のみ） | △ |
+| ctor | parent/タスク登録 | parent付きコンストラクタで super 相当＋preProcess登録 | ◯ |
 | `typeId` | "MeshGroup" | 同等 | ◯ |
 | `preProcess` | super 呼び出し | 同等 | ◯ |
 | `postProcess` | super 呼び出し | 同等 | ◯ |
@@ -35,7 +35,7 @@
 | `getTranslateChildren` | getter | 同等 | ◯ |
 | `setTranslateChildren` | setter＋子再setup | 同等 | ◯ |
 | `clearCache` | precalc/bitMask/triangles クリア | 同等 | ◯ |
-| `centralize` | 子 bounds から中心移動＋頂点オフセット | 子境界を使い平行移動＋子ローカル再計算（縮尺/回転なし） | △ |
+| `centralize` | 子 bounds から中心移動＋頂点オフセット | D同等（子centralize→頂点移動→子ローカル再配置） | ◯ |
 | `copyFrom` | MeshGroup/DynamicComposite/GridDeformer からのコピー | MeshGroup同士で主フィールドコピー | ◯ |
 | `build` | precalc→子setup→super | precalc＋子setup＋Drawable build | ◯ |
 | `coverOthers` | true | 同等 | ◯ |

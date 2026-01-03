@@ -12,7 +12,12 @@ namespace nicxlive::core::nodes {
 
 MeshGroup::MeshGroup() {
     requirePreProcessTask();
-    requirePostTask(0);
+}
+
+MeshGroup::MeshGroup(const std::shared_ptr<Node>& parent) : MeshGroup() {
+    if (parent) {
+        setParent(parent);
+    }
 }
 
 void MeshGroup::releaseTarget(const std::shared_ptr<Node>& target) {
@@ -403,47 +408,60 @@ void MeshGroup::clearCache() {
 }
 
 void MeshGroup::centralize() {
+    // D版: まず子を中央寄せ（Drawable::centralize 相当）、その後自身の頂点と子のローカル平行移動を調整
+    for (auto& c : children) {
+        if (c) c->centralize();
+    }
+    updateBounds();
+
+    Vec4 bounds{};
+    std::vector<Vec3> childWorld;
     if (!children.empty()) {
-        Vec4 b{};
         bool first = true;
-        std::vector<Vec3> childWorld;
         for (auto& c : children) {
+            if (!c) continue;
             auto arr = c->getCombinedBounds();
             Vec4 cb{arr[0], arr[1], arr[2], arr[3]};
             if (first) {
-                b = cb;
+                bounds = cb;
                 first = false;
             } else {
-                b.x = std::min(b.x, cb.x);
-                b.y = std::min(b.y, cb.y);
-                b.z = std::max(b.z, cb.z);
-                b.w = std::max(b.w, cb.w);
+                bounds.x = std::min(bounds.x, cb.x);
+                bounds.y = std::min(bounds.y, cb.y);
+                bounds.z = std::max(bounds.z, cb.z);
+                bounds.w = std::max(bounds.w, cb.w);
             }
             childWorld.push_back(c->transform().toMat4().transformPoint(Vec3{0, 0, 1}));
         }
-        Vec2 center{(b.x + b.z) * 0.5f, (b.y + b.w) * 0.5f};
-        if (auto p = parentPtr()) {
-            auto inv = p->transform().toMat4().inverse();
-            auto ct = inv.transformPoint(Vec3{center.x, center.y, 1});
-            center = Vec2{ct.x, ct.y};
-        }
-        Vec2 diff{center.x - localTransform.translation.x, center.y - localTransform.translation.y};
-        for (auto& v : vertices.x) v -= diff.x;
-        for (auto& v : vertices.y) v -= diff.y;
-        localTransform.translation.x = center.x;
-        localTransform.translation.y = center.y;
-        transformChanged();
-        clearCache();
-        updateBounds();
-        auto inv = transform().toMat4().inverse();
-        for (std::size_t i = 0; i < children.size() && i < childWorld.size(); ++i) {
-            auto local = inv.transformPoint(childWorld[i]);
-            children[i]->localTransform.translation.x = local.x;
-            children[i]->localTransform.translation.y = local.y;
-            children[i]->transformChanged();
+        if (first) {
+            auto tr = transform();
+            bounds = Vec4{tr.translation.x, tr.translation.y, tr.translation.x, tr.translation.y};
         }
     } else {
-        centralizeDrawable();
+        auto tr = transform();
+        bounds = Vec4{tr.translation.x, tr.translation.y, tr.translation.x, tr.translation.y};
+    }
+
+    Vec2 center{(bounds.x + bounds.z) * 0.5f, (bounds.y + bounds.w) * 0.5f};
+    if (auto p = parentPtr()) {
+        auto inv = p->transform().toMat4().inverse();
+        auto ct = inv.transformPoint(Vec3{center.x, center.y, 1});
+        center = Vec2{ct.x, ct.y};
+    }
+    Vec2 diff{center.x - localTransform.translation.x, center.y - localTransform.translation.y};
+    for (auto& v : vertices.x) v -= diff.x;
+    for (auto& v : vertices.y) v -= diff.y;
+    localTransform.translation.x = center.x;
+    localTransform.translation.y = center.y;
+    transformChanged();
+    clearCache();
+    updateBounds();
+    auto invSelf = transform().toMat4().inverse();
+    for (std::size_t i = 0; i < children.size() && i < childWorld.size(); ++i) {
+        auto local = invSelf.transformPoint(childWorld[i]);
+        children[i]->localTransform.translation.x = local.x;
+        children[i]->localTransform.translation.y = local.y;
+        children[i]->transformChanged();
     }
     clearCache();
 }

@@ -22,14 +22,20 @@ Status: `[ ]` todo, `[>]` in progress, `[x]` done, `[?]` blocked.
 - [>] 5: `part/package.d` → `core/nodes/part.hpp`
 - [>] 6: `mask/package.d` → `core/nodes/mask.hpp`
 - [x] 7: `composite/projectable.d` → `core/nodes/projectable.hpp`
-- [>] 8: `composite/package.d` → `core/nodes/composite.hpp`
-- [>] 9: `composite/dcomposite.d` → `core/nodes/dynamic_composite.hpp`
-- [>] 10: `meshgroup/package.d` → `core/nodes/mesh_group.hpp`（パラメータ連動の deform 反映まで実装済）
-- [ ] 11: `deformer/base.d` → `core/nodes/deformer_base.hpp`
-- [>] 12: `deformer/grid.d` → `core/nodes/grid_deformer.hpp`
+- [x] 8: `composite/package.d` → `core/nodes/composite.hpp`
+- [x] 9: `composite/dcomposite.d` → `core/nodes/dynamic_composite.hpp`
+- [x] 10: `meshgroup/package.d` → `core/nodes/mesh_group.hpp`（パラメータ連動の deform 反映まで実装済）
+- [x] 11: `deformer/base.d` → `core/nodes/deformer_base.hpp`
+- [x] 12: `deformer/grid.d` → `core/nodes/grid_deformer.hpp`
 - [>] 13: `deformer/path.d` → `core/nodes/path_deformer.hpp`
-- [ ] 14: `drivers/package.d` → `core/nodes/driver.hpp`
-- [ ] 15: `drivers/simplephysics.d` → `core/nodes/simple_physics_driver.hpp`
+- [>] 14: `drivers/package.d` → `core/nodes/driver.hpp`
+- [>] 15: `drivers/simplephysics.d` → `core/nodes/simple_physics_driver.hpp/.cpp`
+
+### PathDeformer 追加タスク（写経・基盤整備）
+- [x] PD1: driver シリアライズ/デシリアライズを D 同等に実装（physics ノードに type＋state を保存/復元）
+- [x] PD2: diagnostics を D 同等に実装（begin/endDiagnosticFrame、invalid スナップショット／連続 invalid ログ）
+- [x] PD3: deformChildren の最近点算出・tangent/normal 正規化・safeInverse のフォールバックを D と一致させる
+- [x] PD4: applyDeformToChildren の診断フローを D に揃える（begin/endDiagnosticFrame、rebuffer 呼び出し位置など）
 
 ### ノード階層 1-13 行数トラッカー（◯/△/✗ 評価メモ）
 | # | D (nijilive) | Lines | C++ (nicxlive) | Lines | 評価 |
@@ -41,11 +47,13 @@ Status: `[ ]` todo, `[>]` in progress, `[x]` done, `[?]` blocked.
 | 5 | nodes/part/package.d | 826 | core/nodes/part.cpp | 715 | ◯ |
 | 6 | nodes/mask/package.d | 140 | core/nodes/mask.cpp | 49 | ◯ |
 | 7 | nodes/composite/projectable.d | 1229 | core/nodes/projectable.cpp | 779 | ◯ |
-| 8 | nodes/composite/package.d | 334 | core/nodes/composite.cpp | 195 | △ |
-| 9 | nodes/composite/dcomposite.d | 41 | core/nodes/dynamic_composite.cpp | 15 | △ |
-| 10 | nodes/meshgroup/package.d | 611 | core/nodes/mesh_group.cpp | 545 | △ |
-| 11 | nodes/deformer/base.d | 16 | core/nodes/deformer_base.hpp | header | △ |
-| 12 | nodes/deformer/grid.d | 774 | core/nodes/grid_deformer.cpp | 620 | △ |
-| 13 | nodes/deformer/path.d | 1334 | core/nodes/path_deformer.cpp | 1257 | △ |
+| 8 | nodes/composite/package.d | 334 | core/nodes/composite.cpp | 229 | ◯ |
+| 9 | nodes/composite/dcomposite.d | 41 | core/nodes/dynamic_composite.cpp | 15 | ◯ |
+| 10 | nodes/meshgroup/package.d | 611 | core/nodes/mesh_group.cpp | 562 | ◯ |
+| 11 | nodes/deformer/base.d | 16 | core/nodes/deformer_base.hpp | 33 | ◯ |
+| 12 | nodes/deformer/grid.d | 774 | core/nodes/grid_deformer.cpp | 620 | ◯ |
+| 13 | nodes/deformer/path.d | 1334 | core/nodes/path_deformer.cpp | 1279 | △ |
+| 14 | nodes/drivers/package.d | 58 | core/nodes/driver.hpp | 21 | △ |
+| 15 | nodes/drivers/simplephysics.d | 1003 | core/nodes/simple_physics_driver.cpp | 104 | △ |
 
 ※ 写経レベルの突合前の暫定値。メソッド/フィールドごとの差分列挙と検証後、◯になるまで更新する。

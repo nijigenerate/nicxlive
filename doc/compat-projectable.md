@@ -26,10 +26,10 @@
 | method `updateAutoResizedMeshOnce()` | 1フレーム自動サイズ更新 | 同等 | ◯ | - |
 | method `updatePartMeshOnce()` | 1回だけメッシュ更新 | 同等 | ◯ | - |
 | method `autoResizeMeshOnce()` | 1回だけ自動リサイズ | 同等 | ◯ | - |
-| method `dynamicRenderBegin()` | offscreen surface 準備 | DynamicCompositePass生成＋beginDynamicComposite呼び出し | ◯ | - |
-| method `dynamicRenderEnd()` | offスクリーン終了 | endDynamicComposite 呼び出し | ◯ | - |
+| method `dynamicRenderBegin()` | キャッシュ判定・RenderGraphへ pushDynamicComposite＋子/マスクをenqueue | 同等 | ◯ | - |
+| method `dynamicRenderEnd()` | popDynamicCompositeでマスク適用・cleanup、deferred更新 | 同等 | ◯ | - |
 | method `enqueueRenderCommands()` | RenderGraphにマスク/パートを積む | pushDynamicCompositeでオフスクリーン子をキュー化 | ◯ | - |
-| method `runRenderTask()` | offscreen render 実行・頂点更新 | push/popDynamicComposite経由でマスク適用＋後処理 | ◯ | - |
+| method `runRenderTask()` | offscreen render 実行・頂点更新 | D同様に空（dynamicRenderBegin/Endで実処理） | ◯ | - |
 | method `runBeginTask()` | フラグ初期化・親差分チェック | pendingAncestor初期化・差分検知を追加 | ◯ | - |
 | method `runPostTaskImpl()` | dynamicScope/rescope 処理 | priority別処理を実装 | ◯ | - |
 | method `notifyChange()` | 祖先変化を記録し遅延処理 | ancestor変化キュー/autoResize反映を追加 | ◯ | - |

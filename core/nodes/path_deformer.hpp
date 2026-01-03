@@ -26,6 +26,7 @@ public:
         virtual void reset() {}
         virtual void enforce(const Vec2&) {}
         virtual void rotate(float) {}
+        virtual void getState(PhysicsDriverState&) const {}
     };
     class ConnectedDriverAdapter : public PhysicsDriver {
     public:
@@ -36,6 +37,9 @@ public:
         void reset() override;
         void enforce(const Vec2& f) override;
         void rotate(float a) override;
+        void getState(PhysicsDriverState& out) const override { if (impl_) impl_->getState(out); }
+        void setState(const PhysicsDriverState& st) { if (impl_) impl_->setState(st); }
+        ConnectedPhysicsDriver* impl() const { return impl_.get(); }
     private:
         std::unique_ptr<ConnectedPhysicsDriver> impl_{};
         PathDeformer* owner_{nullptr};

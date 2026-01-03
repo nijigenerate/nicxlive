@@ -10,6 +10,21 @@ namespace nicxlive::core::nodes {
 
 class PathDeformer;
 
+struct PhysicsDriverState {
+    std::string type{};
+    std::vector<float> angles{};
+    std::vector<float> angularVelocities{};
+    std::vector<float> lengths{};
+    Vec2 base{};
+    Vec2 externalForce{};
+    float damping{0.0f};
+    float restore{0.0f};
+    float timeStep{0.0f};
+    float gravity{0.0f};
+    float inputScale{0.0f};
+    float worldAngle{0.0f};
+};
+
 class ConnectedPhysicsDriver {
 public:
     virtual ~ConnectedPhysicsDriver() = default;
@@ -19,6 +34,8 @@ public:
     virtual void rotate(float angle) = 0;
     virtual void update(PathDeformer* deformer, core::common::Vec2Array& outOffsets) = 0;
     virtual void updateDefaultShape(PathDeformer* deformer) = 0;
+    virtual void getState(PhysicsDriverState& out) const = 0;
+    virtual void setState(const PhysicsDriverState& state) = 0;
 };
 
 class ConnectedPendulumDriver : public ConnectedPhysicsDriver {
@@ -30,6 +47,8 @@ public:
     void rotate(float angle) override;
     void update(PathDeformer* deformer, core::common::Vec2Array& outOffsets) override;
     void updateDefaultShape(PathDeformer* deformer) override;
+    void getState(PhysicsDriverState& out) const override;
+    void setState(const PhysicsDriverState& state) override;
 
 private:
     PathDeformer* deformer_{nullptr};
@@ -55,6 +74,8 @@ public:
     void rotate(float angle) override;
     void update(PathDeformer* deformer, core::common::Vec2Array& outOffsets) override;
     void updateDefaultShape(PathDeformer* deformer) override;
+    void getState(PhysicsDriverState& out) const override;
+    void setState(const PhysicsDriverState& state) override;
 
 private:
     PathDeformer* deformer_{nullptr};

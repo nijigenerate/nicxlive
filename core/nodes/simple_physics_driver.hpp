@@ -1,8 +1,11 @@
 #pragma once
 
 #include "driver.hpp"
+#include "../serde.hpp"
 
 #include <array>
+#include <vector>
+#include <string>
 
 namespace nicxlive::core::nodes {
 
@@ -20,7 +23,7 @@ enum class ParamMapMode {
 
 class SimplePhysicsDriver : public Driver {
 public:
-    std::string name{};
+    std::string name{"SimplePhysics"};
     bool active{true};
     uint32_t paramRef{0};
     PhysicsModel modelType{PhysicsModel::Pendulum};
@@ -42,10 +45,18 @@ public:
     float offsetLengthDamping{0.5f};
     std::array<float, 2> offsetOutputScale{1.0f, 1.0f};
 
-    SimplePhysicsDriver() = default;
+    SimplePhysicsDriver();
+    explicit SimplePhysicsDriver(uint32_t uuidVal, const std::shared_ptr<Node>& parent = nullptr);
 
-    void updateDriver() override {}
-    void reset() override {}
+    const std::string& typeId() const override;
+    void runBeginTask(core::RenderContext& ctx) override;
+    void runPreProcessTask(core::RenderContext& ctx) override;
+    void runPostTaskImpl(std::size_t priority, core::RenderContext& ctx) override;
+    void serializeSelfImpl(::nicxlive::core::serde::InochiSerializer& serializer, bool recursive, SerializeNodeFlags flags) const override;
+    ::nicxlive::core::serde::SerdeException deserializeFromFghj(const ::nicxlive::core::serde::Fghj& data) override;
+
+    void updateDriver() override;
+    void reset() override;
 
     PhysicsModel model() const { return modelType; }
     void setModel(PhysicsModel m) { modelType = m; }

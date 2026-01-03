@@ -1,4 +1,5 @@
 #include "composite.hpp"
+#include <sstream>
 
 namespace nicxlive::core::nodes {
 
@@ -26,7 +27,11 @@ Transform Composite::transform() const { return Part::transform(); }
 bool Composite::mustPropagate() const { return propagateMeshGroup; }
 
 void Composite::serializeSelfImpl(::nicxlive::core::serde::InochiSerializer& serializer, bool recursive, SerializeNodeFlags flags) const {
-    // Serialize legacy fields only (matches D: Node/Part state, no textures)
+    // Texturesを一時退避して状態のみをシリアライズ（D相当）
+    auto savedTextures = textures;
+    auto savedStencil = stencil;
+    const_cast<Composite*>(this)->textures = {nullptr, nullptr, nullptr};
+    const_cast<Composite*>(this)->stencil.reset();
     Node::serializeSelfImpl(serializer, recursive, flags);
     if (has_flag(flags, SerializeNodeFlags::State)) {
         serializer.putKey("blend_mode");
@@ -52,18 +57,32 @@ void Composite::serializeSelfImpl(::nicxlive::core::serde::InochiSerializer& ser
         }
         serializer.listEnd(state);
     }
+    const_cast<Composite*>(this)->textures = savedTextures;
+    const_cast<Composite*>(this)->stencil = savedStencil;
 }
 
 ::nicxlive::core::serde::SerdeException Composite::deserializeFromFghj(const ::nicxlive::core::serde::Fghj& data) {
     auto result = Node::deserializeFromFghj(data);
     if (auto op = data.get_optional<float>("opacity")) opacity = *op;
     if (auto thr = data.get_optional<float>("mask_threshold")) maskAlphaThreshold = *thr;
-    if (auto tin = data.get_child_optional("tint")) {
+    if (auto tinStr = data.get_optional<std::string>("tint")) {
+        char comma;
+        std::stringstream ss(*tinStr);
+        if (!(ss >> tint.x >> comma >> tint.y >> comma >> tint.z)) {
+            tint = Vec3{};
+        }
+    } else if (auto tin = data.get_child_optional("tint")) {
         tint.x = tin->get<float>("x", tint.x);
         tint.y = tin->get<float>("y", tint.y);
         tint.z = tin->get<float>("z", tint.z);
     }
-    if (auto st = data.get_child_optional("screenTint")) {
+    if (auto stStr = data.get_optional<std::string>("screenTint")) {
+        char comma;
+        std::stringstream ss(*stStr);
+        if (!(ss >> screenTint.x >> comma >> screenTint.y >> comma >> screenTint.z)) {
+            screenTint = Vec3{};
+        }
+    } else if (auto st = data.get_child_optional("screenTint")) {
         screenTint.x = st->get<float>("x", screenTint.x);
         screenTint.y = st->get<float>("y", screenTint.y);
         screenTint.z = st->get<float>("z", screenTint.z);
@@ -83,6 +102,7 @@ void Composite::serializeSelfImpl(::nicxlive::core::serde::InochiSerializer& ser
         for (const auto& e : *ml) {
             MaskBinding mb;
             mb.maskSrcUUID = e.second.get_value<uint32_t>();
+            mb.mode = static_cast<MaskingMode>(e.second.get_value<int>());
             masks.push_back(mb);
         }
     }
@@ -128,8 +148,8 @@ Vec4 Composite::localBoundsFromMatrix(const std::shared_ptr<Part>& child, const 
 }
 
 Vec4 Composite::getChildrenBounds(bool forceUpdate) {
+    auto frameId = currentProjectableFrame();
     if (useMaxChildrenBounds) {
-        auto frameId = 0ULL; // no frame tracking; always reuse if set
         if (frameId - maxBoundsStartFrame < MaxBoundsResetInterval) {
             return maxChildrenBounds;
         }
@@ -170,7 +190,7 @@ Vec4 Composite::getChildrenBounds(bool forceUpdate) {
     if (!useMaxChildrenBounds) {
         maxChildrenBounds = bounds;
         useMaxChildrenBounds = true;
-        maxBoundsStartFrame = 0;
+        maxBoundsStartFrame = frameId;
     }
     return bounds;
 }
@@ -181,14 +201,28 @@ void Composite::enableMaxChildrenBounds(const std::shared_ptr<Node>& target) {
     }
     maxChildrenBounds = getChildrenBounds(true);
     useMaxChildrenBounds = true;
-    maxBoundsStartFrame = 0;
+    maxBoundsStartFrame = currentProjectableFrame();
+    Vec4 b;
+    bool hasB = false;
     if (auto d = std::dynamic_pointer_cast<Drawable>(target)) {
-        if (d->bounds) {
-            maxChildrenBounds.x = std::min(maxChildrenBounds.x, (*d->bounds)[0]);
-            maxChildrenBounds.y = std::min(maxChildrenBounds.y, (*d->bounds)[1]);
-            maxChildrenBounds.z = std::max(maxChildrenBounds.z, (*d->bounds)[2]);
-            maxChildrenBounds.w = std::max(maxChildrenBounds.w, (*d->bounds)[3]);
+        if (autoResizedMesh) {
+            if (auto p = std::dynamic_pointer_cast<Part>(d)) {
+                b = localBoundsFromMatrix(p, childCoreMatrix(p));
+                hasB = true;
+            } else if (d->bounds) {
+                b = Vec4{(*d->bounds)[0], (*d->bounds)[1], (*d->bounds)[2], (*d->bounds)[3]};
+                hasB = true;
+            }
+        } else if (d->bounds) {
+            b = Vec4{(*d->bounds)[0], (*d->bounds)[1], (*d->bounds)[2], (*d->bounds)[3]};
+            hasB = true;
         }
+    }
+    if (hasB) {
+        maxChildrenBounds.x = std::min(maxChildrenBounds.x, b.x);
+        maxChildrenBounds.y = std::min(maxChildrenBounds.y, b.y);
+        maxChildrenBounds.z = std::max(maxChildrenBounds.z, b.z);
+        maxChildrenBounds.w = std::max(maxChildrenBounds.w, b.w);
     }
 }
 

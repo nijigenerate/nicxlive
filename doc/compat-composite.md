@@ -11,16 +11,16 @@
 | method `setPropagateMeshGroup` | propagateMeshGroup setter | 同等 | ◯ |
 | method `threshold` | maskAlphaThreshold を返す | maskAlphaThreshold を返す | ◯ |
 | method `setThreshold` | maskAlphaThreshold を設定 | 同等 | ◯ |
-| method `serializeSelfImpl` | Node/Part状態＋blend/tint/screenTint/opacity/mask_threshold/propagate_meshgroup/masks；textures退避 | 同等フィールド出力だがmask modeを落とす | △ |
-| method `deserializeFromFghj` | 上記フィールド読み込み、textures=null、autoResizedMesh=true | 近似（mask mode未復元） | △ |
-| method `getChildrenBounds` | autoResizedMesh時は行列でbounds、非autoはmergeBounds、frameでmaxBoundsリセット | 近似（frame管理なし・puppet補正なし） | △ |
-| method `enableMaxChildrenBounds` | frame管理しつつmaxChildrenBounds更新、target補正 | frame管理なしの近似 | △ |
-| method `childOffscreenMatrix` | textureOffset考慮で子行列生成 | 近似 | △ |
+| method `serializeSelfImpl` | Node/Part状態＋blend/tint/screenTint/opacity/mask_threshold/propagate_meshgroup/masks；textures退避 | 同等（mask mode保持・tint/screenTint文字列互換保存） | ◯ |
+| method `deserializeFromFghj` | 上記フィールド読み込み、textures=null、autoResizedMesh=true | 同等（mask mode復元・texturesクリア） | ◯ |
+| method `getChildrenBounds` | autoResizedMesh時は行列でbounds、非autoはmergeBounds、frameでmaxBoundsリセット | 同等（frame管理／autoResizedを反映） | ◯ |
+| method `enableMaxChildrenBounds` | frame管理しつつmaxChildrenBounds更新、target補正 | 同等（frame管理＋autoResized時のローカルbounds補正） | ◯ |
+| method `childOffscreenMatrix` | textureOffset考慮で子行列生成 | 同等（transform逆行列ベース） | ◯ |
 | method `childCoreMatrix` | 子transform行列を返す | 同等 | ◯ |
-| method `localBoundsFromMatrix` | 行列適用で子bounds算出 | 近似 | △ |
+| method `localBoundsFromMatrix` | 行列適用で子bounds算出 | 同等 | ◯ |
 | field `propagateMeshGroup` | 有 | 同等 | ◯ |
 | field `autoResizedMesh` | true初期化 | 同等 | ◯ |
 | field `offscreen` | OffscreenState | 同等 | ◯ |
 | field `maxChildrenBounds` | boundsキャッシュ | 同等 | ◯ |
 | field `useMaxChildrenBounds` | キャッシュ使用フラグ | 同等 | ◯ |
-| field `maxBoundsStartFrame` | キャッシュ開始フレーム | フレーム管理なし | △ |
+| field `maxBoundsStartFrame` | キャッシュ開始フレーム | 同等 | ◯ |

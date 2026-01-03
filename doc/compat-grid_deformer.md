@@ -2,7 +2,7 @@
 
 | 項目 | D 実装 | C++ 現状 | 互換性評価 |
 | --- | --- | --- | --- |
-| フィールド vertexBuffer | グリッド頂点 SoA | Deformable.vertices で保持 | ◯ |
+| フィールド vertexBuffer | グリッド頂点 SoA | Deformable.vertices で保持（名前のみ差） | ◯ |
 | フィールド axisX | グリッド軸 X | 実装・正規化あり | ◯ |
 | フィールド axisY | グリッド軸 Y | 実装・正規化あり | ◯ |
 | フィールド formation | GridFormation(Bilinear) | GridFormation(Bilinear) | ◯ |

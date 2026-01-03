@@ -450,20 +450,97 @@ bool Projectable::updateDynamicRenderStateFlags() {
 }
 
 void Projectable::dynamicRenderBegin(core::RenderContext& ctx) {
+    dynamicScopeActive = false;
+    dynamicScopeToken = static_cast<std::size_t>(-1);
     reuseCachedTextureThisFrame = false;
-    hasValidOffscreenContent = false;
-    auto pass = prepareDynamicCompositePass();
-    if (ctx.renderBackend && pass.surface) {
-        ctx.renderBackend->beginDynamicComposite(pass);
+    if (!hasValidOffscreenContent) {
+        textureInvalidated = true;
     }
+    queuedOffscreenParts.clear();
+    if (!renderEnabled() || !ctx.renderGraph) return;
+    if (!updateDynamicRenderStateFlags()) return;
+    bool needsRedraw = textureInvalidated || deferred > 0;
+    if (!needsRedraw) {
+        reuseCachedTextureThisFrame = true;
+        loggedFirstRenderAttempt = true;
+        return;
+    }
+
+    selfSort();
+    auto pass = prepareDynamicCompositePass();
+    if (!pass.surface) {
+        reuseCachedTextureThisFrame = true;
+        loggedFirstRenderAttempt = true;
+        return;
+    }
+
+    enqueueRenderCommands(ctx);
 }
 
 void Projectable::dynamicRenderEnd(core::RenderContext& ctx) {
-    auto pass = prepareDynamicCompositePass();
-    if (ctx.renderBackend && pass.surface) {
-        ctx.renderBackend->endDynamicComposite(pass);
+    if (!ctx.renderGraph) return;
+    bool redrew = dynamicScopeActive;
+    if (dynamicScopeActive) {
+        auto queuedForCleanup = queuedOffscreenParts;
+
+        auto dedupMaskBindings = [&]() {
+            std::vector<MaskBinding> result;
+            std::set<uint64_t> seen;
+            for (const auto& m : masks) {
+                if (!m.maskSrc) continue;
+                uint64_t key = (static_cast<uint64_t>(m.maskSrcUUID) << 32) | static_cast<uint32_t>(m.mode);
+                if (seen.count(key)) continue;
+                seen.insert(key);
+                result.push_back(m);
+            }
+            return result;
+        };
+        auto maskBindings = dedupMaskBindings();
+        bool useStencil = false;
+        for (const auto& m : maskBindings) {
+            if (m.mode == MaskingMode::Mask) { useStencil = true; break; }
+        }
+        auto self = std::dynamic_pointer_cast<Projectable>(shared_from_this());
+        ctx.renderGraph->popDynamicComposite(dynamicScopeToken, [self, queuedForCleanup, maskBindings, useStencil](core::RenderCommandEmitter& emitter) {
+            if (!self) return;
+            if (!maskBindings.empty()) {
+                emitter.beginMask(useStencil);
+                for (auto binding : maskBindings) {
+                    if (!binding.maskSrc) continue;
+                    bool isDodge = binding.mode == MaskingMode::DodgeMask;
+                    emitter.applyMask(binding.maskSrc, isDodge);
+                }
+                emitter.beginMaskContent();
+            }
+
+            emitter.drawPart(self, false);
+
+            if (!maskBindings.empty()) {
+                emitter.endMask();
+            }
+
+            for (auto part : queuedForCleanup) {
+                if (auto p = std::dynamic_pointer_cast<Part>(part)) p->clearOffscreenModelMatrix();
+                else if (auto m = std::dynamic_pointer_cast<Mask>(part)) m->clearOffscreenModelMatrix();
+            }
+        });
+    } else {
+        auto cleanupParts = queuedOffscreenParts;
+        for (auto& part : cleanupParts) {
+            if (auto p = std::dynamic_pointer_cast<Part>(part)) p->clearOffscreenModelMatrix();
+            else if (auto m = std::dynamic_pointer_cast<Mask>(part)) m->clearOffscreenModelMatrix();
+        }
     }
-    hasValidOffscreenContent = true;
+
+    reuseCachedTextureThisFrame = false;
+    queuedOffscreenParts.clear();
+    if (redrew) {
+        textureInvalidated = false;
+        if (deferred > 0) deferred--;
+        hasValidOffscreenContent = true;
+    }
+    dynamicScopeActive = false;
+    dynamicScopeToken = static_cast<std::size_t>(-1);
 }
 
 void Projectable::renderNestedOffscreen(core::RenderContext& ctx) {
@@ -481,8 +558,8 @@ void Projectable::registerRenderTasks(core::TaskScheduler& scheduler) {
 
     bool allowRenderTasks = !hasProjectableAncestor(std::dynamic_pointer_cast<Projectable>(shared_from_this()));
     if (allowRenderTasks) {
-        scheduler.addTask(core::TaskOrder::RenderBegin, core::TaskKind::Render, [this](core::RenderContext& ctx) { runRenderBeginTask(ctx); });
-        scheduler.addTask(core::TaskOrder::Render, core::TaskKind::Render, [this](core::RenderContext& ctx) { runRenderTask(ctx); });
+    scheduler.addTask(core::TaskOrder::RenderBegin, core::TaskKind::Render, [this](core::RenderContext& ctx) { runRenderBeginTask(ctx); });
+    scheduler.addTask(core::TaskOrder::Render, core::TaskKind::Render, [this](core::RenderContext& ctx) { runRenderTask(ctx); });
     }
 
     scheduler.addTask(core::TaskOrder::Final, core::TaskKind::Finalize, [this](core::RenderContext& ctx) { runFinalTask(ctx); });
@@ -553,69 +630,7 @@ void Projectable::enqueueRenderCommands(core::RenderContext& ctx) {
     }
 }
 
-void Projectable::runRenderTask(core::RenderContext& ctx) {
-    if (!updateDynamicRenderStateFlags()) return;
-    if (!ctx.renderGraph) {
-        dynamicRenderBegin(ctx);
-        dynamicRenderEnd(ctx);
-        return;
-    }
-    enqueueRenderCommands(ctx);
-    if (dynamicScopeActive) {
-        auto queuedForCleanup = queuedOffscreenParts;
-
-        auto dedupMaskBindings = [&]() {
-            std::vector<MaskBinding> result;
-            std::set<uint64_t> seen;
-            for (const auto& m : masks) {
-                if (!m.maskSrc) continue;
-                uint64_t key = (static_cast<uint64_t>(m.maskSrcUUID) << 32) | static_cast<uint32_t>(m.mode);
-                if (seen.count(key)) continue;
-                seen.insert(key);
-                result.push_back(m);
-            }
-            return result;
-        };
-        auto maskBindings = dedupMaskBindings();
-        bool useStencil = false;
-        for (const auto& m : maskBindings) {
-            if (m.mode == MaskingMode::Mask) { useStencil = true; break; }
-        }
-        auto self = std::dynamic_pointer_cast<Projectable>(shared_from_this());
-        ctx.renderGraph->popDynamicComposite(dynamicScopeToken, [self, queuedForCleanup, maskBindings, useStencil](core::RenderCommandEmitter& emitter) {
-            if (!self) return;
-            if (!maskBindings.empty()) {
-                emitter.beginMask(useStencil);
-                for (auto binding : maskBindings) {
-                    if (!binding.maskSrc) continue;
-                    bool isDodge = binding.mode == MaskingMode::DodgeMask;
-                    emitter.applyMask(binding.maskSrc, isDodge);
-                }
-                emitter.beginMaskContent();
-            }
-
-            emitter.drawPart(self, false);
-
-            if (!maskBindings.empty()) {
-                emitter.endMask();
-            }
-
-            for (auto part : queuedForCleanup) {
-                if (auto p = std::dynamic_pointer_cast<Part>(part)) p->clearOffscreenModelMatrix();
-                else if (auto m = std::dynamic_pointer_cast<Mask>(part)) m->clearOffscreenModelMatrix();
-            }
-        });
-    }
-    reuseCachedTextureThisFrame = false;
-    queuedOffscreenParts.clear();
-    if (dynamicScopeActive) {
-        textureInvalidated = false;
-        if (deferred > 0) deferred--;
-        hasValidOffscreenContent = true;
-    }
-    dynamicScopeActive = false;
-    dynamicScopeToken = static_cast<std::size_t>(-1);
-}
+void Projectable::runRenderTask(core::RenderContext&) {}
 
 void Projectable::runRenderBeginTask(core::RenderContext& ctx) {
     dynamicRenderBegin(ctx);
