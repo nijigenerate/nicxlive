@@ -266,6 +266,13 @@ void Drawable::updateVertices() {
 
 void Drawable::rebufferMesh() { updateVertices(); updateIndices(); }
 
+void Drawable::updateDeform() {
+    Deformable::updateDeform();
+    sharedDeformMarkDirty();
+    updateBounds();
+    writeSharedBuffers();
+}
+
 void Drawable::reset() {
     mesh = MeshData{};
     deformationOffsets.clear();
@@ -423,10 +430,16 @@ void Drawable::clearCache() {
     deformationOffsets.clear();
     bounds.reset();
     weldingApplied.clear();
+    sharedVertexMarkDirty();
+    sharedUvMarkDirty();
+    sharedDeformMarkDirty();
 }
 
 void Drawable::runBeginTask(core::RenderContext& ctx) {
     weldingApplied.clear();
+    for (const auto& link : weldedLinks) {
+        weldingApplied.insert(link.target);
+    }
     Deformable::runBeginTask(ctx);
     writeSharedBuffers();
     gSharedVerticesDirty = gSharedUvsDirty = gSharedDeformDirty = false;
