@@ -30,3 +30,22 @@ Status: `[ ]` todo, `[>]` in progress, `[x]` done, `[?]` blocked.
 - [>] 13: `deformer/path.d` → `core/nodes/path_deformer.hpp`
 - [ ] 14: `drivers/package.d` → `core/nodes/driver.hpp`
 - [ ] 15: `drivers/simplephysics.d` → `core/nodes/simple_physics_driver.hpp`
+
+### ノード階層 1-13 行数トラッカー（◯/△/✗ 評価メモ）
+| # | D (nijilive) | Lines | C++ (nicxlive) | Lines | 評価 |
+| - | --- | ---:| --- | ---:| --- |
+| 1 | nodes/package.d | 1466 | core/nodes/node.cpp | 1156 | △ |
+| 2 | nodes/filter.d | 146 | core/nodes/filter.cpp | 65 | △ |
+| 3 | nodes/deformable.d | 209 | core/nodes/deformable.cpp | 149 | △ |
+| 4 | nodes/drawable.d | 740 | core/nodes/drawable.cpp | 512 | △ |
+| 5 | nodes/part/package.d | 826 | core/nodes/part.cpp | 730 | △ |
+| 6 | nodes/mask/package.d | 140 | core/nodes/mask.cpp | 49 | △ |
+| 7 | nodes/composite/projectable.d | 1229 | core/nodes/projectable.cpp | 390 | △ |
+| 8 | nodes/composite/package.d | 334 | core/nodes/composite.cpp | 195 | △ |
+| 9 | nodes/composite/dcomposite.d | 41 | core/nodes/dynamic_composite.cpp | 15 | △ |
+| 10 | nodes/meshgroup/package.d | 611 | core/nodes/mesh_group.cpp | 545 | △ |
+| 11 | nodes/deformer/base.d | 16 | core/nodes/deformer_base.hpp | header | △ |
+| 12 | nodes/deformer/grid.d | 774 | core/nodes/grid_deformer.cpp | 620 | △ |
+| 13 | nodes/deformer/path.d | 1334 | core/nodes/path_deformer.cpp | 1257 | △ |
+
+※ 写経レベルの突合前の暫定値。メソッド/フィールドごとの差分列挙と検証後、◯になるまで更新する。
