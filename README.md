@@ -54,16 +54,24 @@ cmake --build build-wasm
 ### Render layer (D → C++)
 | # | nijilive (D) | Lines | nicxlive (C++) | Lines | Compat note |
 | - | --- | ---:| --- | ---:| --- |
-| RQ1 | render/commands.d | 210 | core/render/commands.cpp | 92 | [compat-queue](doc/compat-queue.md) |
-| RQ2 | render/command_emitter.d | 25 | core/render/command_emitter.cpp | 126 | [compat-queue](doc/compat-queue.md) |
-| RQ3 | render/graph_builder.d | 262 | core/render/graph_builder.cpp | 213 | [compat-queue](doc/compat-queue.md) |
-| RQ4 | render/scheduler.d | 98 | core/render/scheduler.cpp | 41 | [compat-queue](doc/compat-queue.md) |
+| RQ1 | render/commands.d | 210 | core/render/commands.cpp | 110 | [compat-commands](doc/compat-commands.md) |
+| RQ2 | render/command_emitter.d | 25 | core/render/command_emitter.cpp | 231 | [compat-command_emitter](doc/compat-command_emitter.md) |
+| RQ3 | render/graph_builder.d | 262 | core/render/graph_builder.cpp | 213 | [compat-render-graph](doc/compat-render-graph.md) |
+| RQ4 | render/scheduler.d | 98 | core/render/scheduler.cpp | 41 | [compat-scheduler](doc/compat-scheduler.md) |
 | RQ5 | render/shared_deform_buffer.d | 234 | core/render/shared_deform_buffer.cpp | 134 | [compat-queue](doc/compat-queue.md) |
 | RQ6 | render/immediate.d | 42 | core/render/immediate.cpp | 28 | [compat-queue](doc/compat-queue.md) |
 | RQ7 | render/passes.d | 39 | core/render/render_pass.hpp | 20 | [compat-queue](doc/compat-queue.md) |
 | RQ8 | render/profiler.d | 111 | core/render/profiler.cpp | 108 | [compat-queue](doc/compat-queue.md) |
-| RQ9 | render/backends/queue/package.d | 393 | core/render/backend_queue.cpp | 148 | [compat-queue](doc/compat-queue.md) |
+| RQ9 | render/backends/queue/package.d | 393 | core/render/backend_queue.cpp | 224 | [compat-queue](doc/compat-queue.md) |
 | RQ10 | render/backends/opengl/* | 4,150 | （未移植） | 0 | (WIP) |
 | RQ11 | render/backends/directx12/* | 2,915 | （未移植） | 0 | (WIP) |
+
+### Math / Common (D → C++)
+| # | nijilive (D) | Lines | nicxlive (C++) | Lines | Compat note |
+| - | --- | ---:| --- | ---:| --- |
+| M1 | math/veca.d | 673 | core/math/veca.hpp | 846 | [compat-vec2array](doc/compat-vec2array.md) |
+| M2 | math/transform.d | 175 | core/math/transform.hpp | 128 | [compat-transform](doc/compat-transform.md) |
+| M3 | math/triangle.d | 165 | core/math/triangle.hpp + triangle.cpp | 42 | [compat-triangle](doc/compat-triangle.md) |
+| C1 | core/nodes/common.d | 290 | core/nodes/common.hpp | 76 | [compat-common](doc/compat-common.md) |
 
 See `doc/compat-*.md` for detailed compatibility notes and remaining gaps.
