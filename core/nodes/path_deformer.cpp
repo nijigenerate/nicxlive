@@ -1022,7 +1022,6 @@ bool PathDeformer::setupChild(const std::shared_ptr<Node>& child) {
         pre.push_back(hook);
     }
     // cache closest points for deformables
-    auto deformable = std::dynamic_pointer_cast<Deformable>(child);
     if (deformable && prevCurve) {
         Mat4 m = child->transform().toMat4();
         Mat4 center = Mat4::multiply(inverseMatrix, m);

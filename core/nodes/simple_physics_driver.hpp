@@ -23,8 +23,11 @@ enum class ParamMapMode {
     YX,
 };
 
+class PhysicsSystem;
+
 class SimplePhysicsDriver : public Driver {
 public:
+    ~SimplePhysicsDriver() override;
     std::string name{"SimplePhysics"};
     bool active{true};
     uint32_t paramRef{0};
@@ -58,6 +61,8 @@ public:
     float angle{0.0f};
     float dAngle{0.0f};
     float lengthVel{0.0f};
+    std::unique_ptr<PhysicsSystem> system{};
+    PhysicsModel systemModel{PhysicsModel::Pendulum};
 
     SimplePhysicsDriver();
     explicit SimplePhysicsDriver(uint32_t uuidVal, const std::shared_ptr<Node>& parent = nullptr);
@@ -77,17 +82,18 @@ public:
 
     void setParameter(const std::shared_ptr<core::param::Parameter>& p) { paramCached = p; }
 
-private:
-    void updateInputs();
-    void updateOutputs();
-    void logPhysicsState(const std::string& context, const std::string& extra = "");
-
+    // helpers used by physics systems (D版互換のため公開)
     float getGravity() const;
     float getLength() const;
     float getFrequency() const;
     float getAngleDamping() const;
     float getLengthDamping() const;
     Vec2 getOutputScale() const;
+    void logPhysicsState(const std::string& context, const std::string& extra = "");
+
+private:
+    void updateInputs();
+    void updateOutputs();
 
     PhysicsModel model() const { return modelType; }
     void setModel(PhysicsModel m) { modelType = m; }

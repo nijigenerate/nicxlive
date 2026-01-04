@@ -22,6 +22,8 @@ bool isFiniteVec(const Vec2& v) {
     return std::isfinite(v.x) && std::isfinite(v.y);
 }
 
+} // namespace
+
 // RK4 integrator that supports floats flattened from vec2 variables.
 class PhysicsSystem {
 public:
@@ -368,7 +370,8 @@ private:
     Vec2 bob{};
     Vec2 dBob{};
 };
-} // namespace
+
+SimplePhysicsDriver::~SimplePhysicsDriver() = default;
 
 SimplePhysicsDriver::SimplePhysicsDriver() = default;
 

@@ -25,7 +25,7 @@ public:
 
     virtual std::vector<std::shared_ptr<core::param::Parameter>> getAffectedParameters() const { return {}; }
 
-    bool affectsParameter(const std::shared_ptr<core::param::Parameter>& param) const {
+    virtual bool affectsParameter(const std::shared_ptr<core::param::Parameter>& param) const {
         if (!param) return false;
         for (auto& p : getAffectedParameters()) {
             if (p && p->uuid == param->uuid) return true;
