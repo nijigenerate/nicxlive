@@ -28,7 +28,7 @@ Status: `[ ]` todo, `[>]` in progress, `[x]` done, `[?]` blocked.
 - [x] 11: `deformer/base.d` → `core/nodes/deformer_base.hpp`
 - [x] 12: `deformer/grid.d` → `core/nodes/grid_deformer.hpp`
 - [>] 13: `deformer/path.d` → `core/nodes/path_deformer.hpp`
-- [>] 14: `drivers/package.d` → `core/nodes/driver.hpp`
+- [x] 14: `drivers/package.d` → `core/nodes/driver.hpp`
 - [>] 15: `drivers/simplephysics.d` → `core/nodes/simple_physics_driver.hpp/.cpp`
 
 ### PathDeformer 追加タスク（写経・基盤整備）
@@ -53,7 +53,7 @@ Status: `[ ]` todo, `[>]` in progress, `[x]` done, `[?]` blocked.
 | 11 | nodes/deformer/base.d | 16 | core/nodes/deformer_base.hpp | 33 | ◯ |
 | 12 | nodes/deformer/grid.d | 774 | core/nodes/grid_deformer.cpp | 620 | ◯ |
 | 13 | nodes/deformer/path.d | 1334 | core/nodes/path_deformer.cpp | 1279 | △ |
-| 14 | nodes/drivers/package.d | 58 | core/nodes/driver.hpp | 21 | △ |
+| 14 | nodes/drivers/package.d | 58 | core/nodes/driver.hpp | 39 | ◯ |
 | 15 | nodes/drivers/simplephysics.d | 1003 | core/nodes/simple_physics_driver.cpp | 104 | △ |
 
 ※ 写経レベルの突合前の暫定値。メソッド/フィールドごとの差分列挙と検証後、◯になるまで更新する。

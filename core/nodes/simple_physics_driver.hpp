@@ -2,10 +2,12 @@
 
 #include "driver.hpp"
 #include "../serde.hpp"
+#include "../param/parameter.hpp"
 
 #include <array>
 #include <vector>
 #include <string>
+#include <memory>
 
 namespace nicxlive::core::nodes {
 
@@ -44,6 +46,13 @@ public:
     float offsetAngleDamping{0.5f};
     float offsetLengthDamping{0.5f};
     std::array<float, 2> offsetOutputScale{1.0f, 1.0f};
+    Vec2 anchor{0.0f, 0.0f};
+    Vec2 output{0.0f, 0.0f};
+    Vec2 prevAnchor{0.0f, 0.0f};
+    Mat4 prevTransMat{Mat4::identity()};
+    bool prevAnchorSet{false};
+    float simPhase{0.0f};
+    std::weak_ptr<core::param::Parameter> paramCached{};
 
     SimplePhysicsDriver();
     explicit SimplePhysicsDriver(uint32_t uuidVal, const std::shared_ptr<Node>& parent = nullptr);
@@ -57,6 +66,13 @@ public:
 
     void updateDriver() override;
     void reset() override;
+
+    void setParameter(const std::shared_ptr<core::param::Parameter>& p) { paramCached = p; }
+
+private:
+    void updateInputs();
+    void updateOutputs();
+    void logPhysicsState(const std::string& context, const std::string& extra = "");
 
     PhysicsModel model() const { return modelType; }
     void setModel(PhysicsModel m) { modelType = m; }

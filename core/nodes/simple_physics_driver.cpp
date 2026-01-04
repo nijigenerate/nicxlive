@@ -4,6 +4,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <iostream>
+#include <chrono>
 
 namespace nicxlive::core::nodes {
 
@@ -30,16 +32,11 @@ void SimplePhysicsDriver::runBeginTask(core::RenderContext& ctx) {
 }
 
 void SimplePhysicsDriver::runPreProcessTask(core::RenderContext&) {
-    // track anchor changes
-    auto anchorPos = localOnly ? Vec2{transform().translation.x, transform().translation.y}
-                               : Vec2{transform().toMat4().transformPoint(Vec3{0, 0, 1}).x,
-                                      transform().toMat4().transformPoint(Vec3{0, 0, 1}).y};
-    prevAnchor = anchor;
-    anchor = anchorPos;
+    updateInputs();
 }
 
 void SimplePhysicsDriver::runPostTaskImpl(std::size_t, core::RenderContext&) {
-    // no-op placeholder for now
+    updateOutputs();
 }
 
 void SimplePhysicsDriver::serializeSelfImpl(::nicxlive::core::serde::InochiSerializer& serializer, bool recursive, SerializeNodeFlags flags) const {
@@ -83,11 +80,18 @@ void SimplePhysicsDriver::serializeSelfImpl(::nicxlive::core::serde::InochiSeria
     if (auto osx = data.get_optional<float>("output_scale_x")) outputScale[0] = *osx;
     if (auto osy = data.get_optional<float>("output_scale_y")) outputScale[1] = *osy;
     if (auto lo = data.get_optional<bool>("local_only")) localOnly = *lo;
+    reset();
     return err;
 }
 
 void SimplePhysicsDriver::updateDriver() {
-    // Placeholder: full physics integration not yet ported
+    // Simple sine-based placeholder to mimic pendulum-ish motion.
+    constexpr float dt = 0.016f;
+    simPhase += frequency * dt;
+    float theta = std::sin(simPhase) * gravity * offsetGravity;
+    float len = std::max(0.0f, length + offsetLength);
+    output.x = anchor.x + std::sin(theta) * len;
+    output.y = anchor.y + std::cos(theta) * len;
 }
 
 void SimplePhysicsDriver::reset() {
@@ -99,6 +103,40 @@ void SimplePhysicsDriver::reset() {
     offsetOutputScale = {1.0f, 1.0f};
     prevAnchor = {0, 0};
     prevAnchorSet = false;
+    simPhase = 0.0f;
+    output = {0, 0};
+}
+
+void SimplePhysicsDriver::updateInputs() {
+    auto mat = transform().toMat4();
+    Vec3 pos = localOnly ? Vec3{localTransform.translation.x, localTransform.translation.y, 1.0f}
+                         : mat.transformPoint(Vec3{0, 0, 1});
+    prevAnchor = anchor;
+    anchor = Vec2{pos.x, pos.y};
+}
+
+void SimplePhysicsDriver::updateOutputs() {
+    auto paramPtr = paramCached.lock();
+    if (!paramPtr && paramRef != 0) {
+        // no registry to resolve by UUID; leave unchanged
+        return;
+    }
+    if (!paramPtr) return;
+    Vec2 disp{output.x - anchor.x, output.y - anchor.y};
+    Vec2 scaled{disp.x * outputScale[0] * offsetOutputScale[0],
+                disp.y * outputScale[1] * offsetOutputScale[1]};
+    if (!std::isfinite(scaled.x) || !std::isfinite(scaled.y)) {
+        logPhysicsState("updateOutputs:nonFinite");
+        return;
+    }
+    paramPtr->value = scaled;
+    paramPtr->latestInternal = scaled;
+}
+
+void SimplePhysicsDriver::logPhysicsState(const std::string& context, const std::string& extra) {
+    std::cerr << "[SimplePhysicsDriver] " << context;
+    if (!extra.empty()) std::cerr << " " << extra;
+    std::cerr << std::endl;
 }
 
 } // namespace nicxlive::core::nodes
