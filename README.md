@@ -9,18 +9,22 @@
 - Replace D-based development to avoid platform/library constraints (graphics backends, toolchains, etc.)
 
 ## Dependencies
-- CMake 3.16+
-- C++17 compiler
-- Boost (uses `property_tree`)
+- CMake 3.20+
+- C++20 compiler
+- Boost headers (uses `property_tree` / `qvm`; header-only is sufficient)
 - stb_image (bundled at `core/third_party/stb_image.h`)
 - (WASM build) Emscripten toolchain + Node.js (Emscripten uses node as emulator) and Boost headers available to the toolchain
 
 ## Build
+### Generic (Unix-like / cross-platform)
 ```bash
 cd nicxlive
 cmake -S . -B build
 cmake --build build
 ```
+
+### Windows (MSVC + vcpkg)
+See `BUILD.md` for a step-by-step guide (vcpkg classic, Boost headers, CMake toolchain file).
 
 ### Build for WASM (Emscripten)
 ```bash
