@@ -29,7 +29,7 @@ Status: `[ ]` todo, `[>]` in progress, `[x]` done, `[?]` blocked.
 - [x] 12: `deformer/grid.d` → `core/nodes/grid_deformer.hpp`
 - [>] 13: `deformer/path.d` → `core/nodes/path_deformer.hpp`
 - [x] 14: `drivers/package.d` → `core/nodes/driver.hpp`
-- [>] 15: `drivers/simplephysics.d` → `core/nodes/simple_physics_driver.hpp/.cpp`
+- [x] 15: `drivers/simplephysics.d` → `core/nodes/simple_physics_driver.hpp/.cpp`
 
 ### PathDeformer 追加タスク（写経・基盤整備）
 - [x] PD1: driver シリアライズ/デシリアライズを D 同等に実装（physics ノードに type＋state を保存/復元）
@@ -54,6 +54,6 @@ Status: `[ ]` todo, `[>]` in progress, `[x]` done, `[?]` blocked.
 | 12 | nodes/deformer/grid.d | 774 | core/nodes/grid_deformer.cpp | 620 | ◯ |
 | 13 | nodes/deformer/path.d | 1334 | core/nodes/path_deformer.cpp | 1279 | △ |
 | 14 | nodes/drivers/package.d | 58 | core/nodes/driver.hpp | 39 | ◯ |
-| 15 | nodes/drivers/simplephysics.d | 1003 | core/nodes/simple_physics_driver.cpp | 104 | △ |
+| 15 | nodes/drivers/simplephysics.d | 1003 | core/nodes/simple_physics_driver.cpp | 781 | ◯ |
 
 ※ 写経レベルの突合前の暫定値。メソッド/フィールドごとの差分列挙と検証後、◯になるまで更新する。

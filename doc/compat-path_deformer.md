@@ -18,7 +18,7 @@
 | `typeId` | "PathDeformer"/alias | 同等 | ◯ |
 | `runPreProcessTask` | transform更新＋安全逆行列＋deform更新 | 有限検証→inverse→Deformable→applyPathDeform＋診断ログ | ◯ |
 | `runRenderTask` | GPUなし | 同等 | ◯ |
-| `deformChildren` | パスへ投影し補間・物理適用・健全性検証 | 最近点→tan/normal射影→逆変換＋invalid記録・診断フレーム連動 | △ |
+| `deformChildren` | パスへ投影し補間・物理適用・健全性検証 | 最近点→tan/normal射影→逆変換＋sanitizeOffsets＋invalid記録＋driver時notifyChange | ◯ |
 | `applyDeformToChildren` | translateChildren/physicsで伝達 | driver存在時 skip・dynamicDeformation skip・診断フレーム連動 | ◯ |
 | `switchDynamic` 相当 | 物理/動的切替 | physicsEnabled切替＋driver再生成・診断リセット・physicsOnly/dynamicDeformation反映 | ◯ |
 | `setupChild/releaseChild` | フィルタ登録/解除 | dynamicDeformation/translateChildrenで pre/post 切替＋キャッシュ解除 | ◯ |

@@ -743,6 +743,7 @@ DeformResult PathDeformer::deformChildren(const std::shared_ptr<Node>& target,
         deformInput.x[i] = origDeformation[i].x;
         deformInput.y[i] = origDeformation[i].y;
     }
+    sanitizeOffsets(deformInput);
 
     Vec2Array sample;
     transformAssign(sample, verts, center);
@@ -848,6 +849,9 @@ DeformResult PathDeformer::deformChildren(const std::shared_ptr<Node>& target,
         }
     }
     res.changed = true;
+    if (driver && target) {
+        target->notifyChange(target);
+    }
     if (invalidThisFrame) {
         ++invalidFrameCount;
         ++consecutiveInvalidFrames;

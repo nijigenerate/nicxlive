@@ -1,15 +1,377 @@
 #include "simple_physics_driver.hpp"
 #include "../serde.hpp"
 #include "../param/parameter.hpp"
+#include "../puppet.hpp"
+#include "../nodes/common.hpp"
 
 #include <algorithm>
 #include <cmath>
 #include <iostream>
-#include <chrono>
+#include <memory>
+#include <limits>
+#include <vector>
 
 namespace nicxlive::core::nodes {
 
+namespace {
+float deltaTime() {
+    return 0.016f; // stub to mirror D版 deltaTime
+}
+
+bool isFiniteVec(const Vec2& v) {
+    return std::isfinite(v.x) && std::isfinite(v.y);
+}
+
+// RK4 integrator that supports floats flattened from vec2 variables.
+class PhysicsSystem {
+public:
+    virtual ~PhysicsSystem() = default;
+    virtual void eval(float t) = 0;
+    virtual void updateAnchor() = 0;
+    virtual void drawDebug(const Mat4& trans = Mat4::identity()) = 0;
+
+    void addVariable(float* v) { refs.push_back(v); }
+    void addVariable(Vec2* v) {
+        refs.push_back(&v->x);
+        refs.push_back(&v->y);
+    }
+    void setD(std::size_t idx, float v) {
+        if (idx >= derivative.size()) derivative.resize(refs.size(), 0.0f);
+        derivative[idx] = v;
+    }
+    void setD(std::size_t idx, const Vec2& v) {
+        if (idx + 1 >= derivative.size()) derivative.resize(refs.size(), 0.0f);
+        derivative[idx] = v.x;
+        derivative[idx + 1] = v.y;
+    }
+
+    void tick(float h) {
+        if (refs.empty()) return;
+        derivative.assign(refs.size(), 0.0f);
+
+        std::vector<float> cur(refs.size(), 0.0f);
+        for (std::size_t i = 0; i < refs.size(); ++i) cur[i] = *refs[i];
+
+        std::vector<float> k1(refs.size()), k2(refs.size()), k3(refs.size()), k4(refs.size());
+
+        eval(t_);
+        k1 = derivative;
+
+        for (std::size_t i = 0; i < refs.size(); ++i) *refs[i] = cur[i] + h * k1[i] * 0.5f;
+        eval(t_ + h * 0.5f);
+        k2 = derivative;
+
+        for (std::size_t i = 0; i < refs.size(); ++i) *refs[i] = cur[i] + h * k2[i] * 0.5f;
+        eval(t_ + h * 0.5f);
+        k3 = derivative;
+
+        for (std::size_t i = 0; i < refs.size(); ++i) *refs[i] = cur[i] + h * k3[i];
+        eval(t_ + h);
+        k4 = derivative;
+
+        for (std::size_t i = 0; i < refs.size(); ++i) {
+            float next = cur[i] + h * (k1[i] + 2 * k2[i] + 2 * k3[i] + k4[i]) / 6.0f;
+            if (!std::isfinite(next)) {
+                for (std::size_t j = 0; j < refs.size(); ++j) *refs[j] = cur[j];
+                return;
+            }
+            *refs[i] = next;
+        }
+
+        t_ += h;
+    }
+
+protected:
+    float t_{0.0f};
+    std::vector<float*> refs{};
+    std::vector<float> derivative{};
+};
+
+class PendulumSystem : public PhysicsSystem {
+public:
+    explicit PendulumSystem(SimplePhysicsDriver* d) : driver(d) {
+        addVariable(&angle);
+        addVariable(&dAngle);
+        bob = {0, 0};
+    }
+
+    void eval(float /*t*/) override {
+        if (!driver) return;
+        derivative.assign(refs.size(), 0.0f);
+        setD(0, dAngle);
+        float gravityVal = driver->getGravity();
+        float lengthVal = driver->getLength();
+        if (!std::isfinite(gravityVal) || !std::isfinite(lengthVal) || std::fabs(lengthVal) <= std::numeric_limits<float>::epsilon()) {
+            driver->logPhysicsState("Pendulum:invalidParams");
+            setD(1, 0.0f);
+            return;
+        }
+
+        float lengthRatio = gravityVal / lengthVal;
+        if (!std::isfinite(lengthRatio) || lengthRatio < 0) {
+            driver->logPhysicsState("Pendulum:lengthRatioInvalid");
+            setD(1, 0.0f);
+            return;
+        }
+
+        float critDamp = 2.0f * std::sqrt(lengthRatio);
+        if (!std::isfinite(critDamp)) {
+            driver->logPhysicsState("Pendulum:critDampInvalid");
+            setD(1, 0.0f);
+            return;
+        }
+
+        float angleDampingVal = driver->getAngleDamping();
+        if (!std::isfinite(angleDampingVal)) {
+            driver->logPhysicsState("Pendulum:angleDampingInvalid");
+            setD(1, 0.0f);
+            return;
+        }
+
+        float dd = -lengthRatio * std::sin(angle);
+        if (!std::isfinite(dd)) {
+            driver->logPhysicsState("Pendulum:ddInitialInvalid");
+            dd = 0;
+        }
+        dd -= dAngle * angleDampingVal * critDamp;
+        if (!std::isfinite(dd)) {
+            driver->logPhysicsState("Pendulum:ddDampedInvalid");
+            dd = 0;
+        }
+        setD(1, dd);
+    }
+
+    void tick(float h) {
+        if (!driver) return;
+        Vec2 dBob{bob.x - driver->anchor.x, bob.y - driver->anchor.y};
+        if (!isFiniteVec(dBob)) {
+            driver->logPhysicsState("Pendulum:dBobNonFinite");
+            return;
+        }
+        angle = std::atan2(-dBob.x, dBob.y);
+        if (!std::isfinite(angle)) {
+            driver->logPhysicsState("Pendulum:angleNonFinite");
+            return;
+        }
+
+        PhysicsSystem::tick(h);
+        if (!std::isfinite(angle) || !std::isfinite(dAngle)) {
+            driver->logPhysicsState("Pendulum:stateAfterTickNonFinite");
+            return;
+        }
+
+        dBob = Vec2{-std::sin(angle), std::cos(angle)};
+        if (!isFiniteVec(dBob)) {
+            driver->logPhysicsState("Pendulum:unitVectorNonFinite");
+            return;
+        }
+        float lengthVal = driver->getLength();
+        if (!std::isfinite(lengthVal) || std::fabs(lengthVal) <= std::numeric_limits<float>::epsilon()) {
+            driver->logPhysicsState("Pendulum:lengthInvalidInTick");
+            return;
+        }
+        bob = Vec2{driver->anchor.x + dBob.x * lengthVal, driver->anchor.y + dBob.y * lengthVal};
+        if (!isFiniteVec(bob)) {
+            driver->logPhysicsState("Pendulum:bobNonFinite");
+            return;
+        }
+
+        driver->output = bob;
+    }
+
+    void updateAnchor() override {
+        bob = Vec2{driver->anchor.x, driver->anchor.y + driver->getLength()};
+    }
+
+    void drawDebug(const Mat4& trans = Mat4::identity()) override {
+        Vec3 a{driver->anchor.x, driver->anchor.y, 0};
+        Vec3 b{bob.x, bob.y, 0};
+        auto& buf = debugDrawBuffer();
+        buf.push_back(DebugLine{a, b, Vec4{1, 0, 1, 1}});
+    }
+
+private:
+    SimplePhysicsDriver* driver{};
+    Vec2 bob{};
+    float angle{0.0f};
+    float dAngle{0.0f};
+};
+
+class SpringPendulumSystem : public PhysicsSystem {
+public:
+    explicit SpringPendulumSystem(SimplePhysicsDriver* d) : driver(d) {
+        addVariable(&bob);
+        addVariable(&dBob);
+        bob = {0, 0};
+        dBob = {0, 0};
+    }
+
+    void eval(float /*t*/) override {
+        if (!driver) return;
+        derivative.assign(refs.size(), 0.0f);
+        setD(0, dBob);
+
+        float frequencyVal = driver->getFrequency();
+        if (!std::isfinite(frequencyVal) || std::fabs(frequencyVal) <= std::numeric_limits<float>::epsilon()) {
+            driver->logPhysicsState("SpringPendulum:frequencyInvalid");
+            setD(2, Vec2{0, 0});
+            return;
+        }
+
+        float springKsqrt = frequencyVal * 2.0f * static_cast<float>(M_PI);
+        if (!std::isfinite(springKsqrt)) {
+            driver->logPhysicsState("SpringPendulum:springKsqrtInvalid");
+            setD(2, Vec2{0, 0});
+            return;
+        }
+
+        float springK = springKsqrt * springKsqrt;
+        if (!std::isfinite(springK) || std::fabs(springK) <= std::numeric_limits<float>::epsilon()) {
+            driver->logPhysicsState("SpringPendulum:springKInvalid");
+            setD(2, Vec2{0, 0});
+            return;
+        }
+
+        float g = driver->getGravity();
+        if (!std::isfinite(g)) {
+            driver->logPhysicsState("SpringPendulum:gravityInvalid");
+            setD(2, Vec2{0, 0});
+            return;
+        }
+
+        float lengthVal = driver->getLength();
+        if (!std::isfinite(lengthVal) || std::fabs(lengthVal) <= std::numeric_limits<float>::epsilon()) {
+            driver->logPhysicsState("SpringPendulum:lengthInvalid");
+            setD(2, Vec2{0, 0});
+            return;
+        }
+
+        float restLength = lengthVal - g / springK;
+        if (!std::isfinite(restLength)) {
+            driver->logPhysicsState("SpringPendulum:restLengthInvalid");
+            setD(2, Vec2{0, 0});
+            return;
+        }
+
+        Vec2 offPos{bob.x - driver->anchor.x, bob.y - driver->anchor.y};
+        if (!isFiniteVec(offPos)) {
+            driver->logPhysicsState("SpringPendulum:offPosNonFinite");
+            setD(2, Vec2{0, 0});
+            return;
+        }
+        float offLen = std::sqrt(offPos.x * offPos.x + offPos.y * offPos.y);
+        Vec2 offPosNorm = (offLen > std::numeric_limits<float>::epsilon()) ? Vec2{offPos.x / offLen, offPos.y / offLen} : Vec2{0, 0};
+        if (!isFiniteVec(offPosNorm)) {
+            driver->logPhysicsState("SpringPendulum:offPosNormNonFinite");
+            setD(2, Vec2{0, 0});
+            return;
+        }
+
+        float lengthRatio = g / lengthVal;
+        if (!std::isfinite(lengthRatio) || lengthRatio < 0) {
+            driver->logPhysicsState("SpringPendulum:lengthRatioInvalid");
+            setD(2, Vec2{0, 0});
+            return;
+        }
+
+        float critDampAngle = 2.0f * std::sqrt(lengthRatio);
+        float critDampLength = 2.0f * springKsqrt;
+        if (!std::isfinite(critDampAngle) || !std::isfinite(critDampLength)) {
+            driver->logPhysicsState("SpringPendulum:critDampInvalid");
+            setD(2, Vec2{0, 0});
+            return;
+        }
+
+        float dist = std::fabs(offLen);
+        if (!std::isfinite(dist)) {
+            driver->logPhysicsState("SpringPendulum:distanceInvalid");
+            setD(2, Vec2{0, 0});
+            return;
+        }
+        Vec2 force{0, g};
+        force.x -= offPosNorm.x * (dist - restLength) * springK;
+        force.y -= offPosNorm.y * (dist - restLength) * springK;
+        Vec2 ddBob = force;
+        if (!isFiniteVec(ddBob)) {
+            driver->logPhysicsState("SpringPendulum:ddBobInvalid");
+            ddBob = Vec2{0, 0};
+        }
+
+        Vec2 dBobRot{
+            dBob.x * offPosNorm.y + dBob.y * offPosNorm.x,
+            dBob.y * offPosNorm.y - dBob.x * offPosNorm.x,
+        };
+
+        float angleDampingVal = driver->getAngleDamping();
+        float lengthDampingVal = driver->getLengthDamping();
+        if (!std::isfinite(angleDampingVal) || !std::isfinite(lengthDampingVal)) {
+            driver->logPhysicsState("SpringPendulum:dampingInvalid");
+            setD(2, Vec2{0, 0});
+            return;
+        }
+
+        Vec2 ddBobRot{
+            -dBobRot.x * angleDampingVal * critDampAngle,
+            -dBobRot.y * lengthDampingVal * critDampLength,
+        };
+        if (!isFiniteVec(ddBobRot)) {
+            driver->logPhysicsState("SpringPendulum:ddBobRotInvalid");
+            ddBobRot = Vec2{0, 0};
+        }
+
+        Vec2 ddBobDamping{
+            ddBobRot.x * offPosNorm.y - dBobRot.y * offPosNorm.x,
+            ddBobRot.y * offPosNorm.y + dBobRot.x * offPosNorm.x,
+        };
+        if (!isFiniteVec(ddBobDamping)) {
+            driver->logPhysicsState("SpringPendulum:ddBobDampingInvalid");
+            ddBobDamping = Vec2{0, 0};
+        }
+
+        ddBob.x += ddBobDamping.x;
+        ddBob.y += ddBobDamping.y;
+        if (!isFiniteVec(ddBob)) {
+            driver->logPhysicsState("SpringPendulum:ddBobAfterDampingInvalid");
+            ddBob = Vec2{0, 0};
+        }
+
+        setD(2, ddBob);
+    }
+
+    void tick(float h) {
+        PhysicsSystem::tick(h);
+        if (!driver) return;
+        if (!isFiniteVec(bob) || !isFiniteVec(dBob)) {
+            driver->logPhysicsState("SpringPendulum:stateAfterTickNonFinite");
+            return;
+        }
+        if (!isFiniteVec(driver->anchor)) {
+            driver->logPhysicsState("SpringPendulum:anchorNonFinite");
+            return;
+        }
+        driver->output = bob;
+    }
+
+    void updateAnchor() override {
+        bob = Vec2{driver->anchor.x, driver->anchor.y + driver->getLength()};
+    }
+
+    void drawDebug(const Mat4& trans = Mat4::identity()) override {
+        Vec3 a{driver->anchor.x, driver->anchor.y, 0};
+        Vec3 b{bob.x, bob.y, 0};
+        auto& buf = debugDrawBuffer();
+        buf.push_back(DebugLine{a, b, Vec4{1, 0, 1, 1}});
+    }
+
+private:
+    SimplePhysicsDriver* driver{};
+    Vec2 bob{};
+    Vec2 dBob{};
+};
+} // namespace
+
 SimplePhysicsDriver::SimplePhysicsDriver() = default;
+
 SimplePhysicsDriver::SimplePhysicsDriver(uint32_t uuidVal, const std::shared_ptr<Node>& parent)
     : Driver(uuidVal, parent) {
     requirePreProcessTask();
@@ -26,16 +388,44 @@ void SimplePhysicsDriver::runBeginTask(core::RenderContext& ctx) {
     offsetGravity = 1.0f;
     offsetLength = 0.0f;
     offsetFrequency = 1.0f;
-    offsetAngleDamping = 0.5f;
-    offsetLengthDamping = 0.5f;
+    offsetAngleDamping = 1.0f;
+    offsetLengthDamping = 1.0f;
     offsetOutputScale = {1.0f, 1.0f};
+    resolveParam();
 }
 
-void SimplePhysicsDriver::runPreProcessTask(core::RenderContext&) {
-    updateInputs();
+void SimplePhysicsDriver::runPreProcessTask(core::RenderContext& ctx) {
+    Vec3 prevPos = (localOnly ? Vec3{transformLocal().translation.x, transformLocal().translation.y, 1.0f}
+                              : transform().toMat4().transformPoint(Vec3{0, 0, 1}));
+    Driver::runPreProcessTask(ctx);
+    Vec3 anchorPos = (localOnly ? Vec3{transformLocal().translation.x, transformLocal().translation.y, 1.0f}
+                                : transform().toMat4().transformPoint(Vec3{0, 0, 1}));
+    if (!std::isfinite(anchorPos.x) || !std::isfinite(anchorPos.y)) {
+        logPhysicsState("preProcess:anchorNonFinite");
+        return;
+    }
+    if (anchorPos.x != prevPos.x || anchorPos.y != prevPos.y) {
+        anchor = Vec2{anchorPos.x, anchorPos.y};
+        prevTransMat = transform().toMat4().inverse();
+        prevAnchorSet = true;
+    }
 }
 
-void SimplePhysicsDriver::runPostTaskImpl(std::size_t, core::RenderContext&) {
+void SimplePhysicsDriver::runPostTaskImpl(std::size_t id, core::RenderContext& ctx) {
+    Vec3 prevPos = (localOnly ? Vec3{transformLocal().translation.x, transformLocal().translation.y, 1.0f}
+                              : transform().toMat4().transformPoint(Vec3{0, 0, 1}));
+    Driver::runPostTaskImpl(id, ctx);
+    Vec3 anchorPos = (localOnly ? Vec3{transformLocal().translation.x, transformLocal().translation.y, 1.0f}
+                                : transform().toMat4().transformPoint(Vec3{0, 0, 1}));
+    if (!std::isfinite(anchorPos.x) || !std::isfinite(anchorPos.y)) {
+        logPhysicsState("postProcess:anchorNonFinite");
+        return;
+    }
+    if (anchorPos.x != prevPos.x || anchorPos.y != prevPos.y) {
+        anchor = Vec2{anchorPos.x, anchorPos.y};
+        prevTransMat = transform().toMat4().inverse();
+        prevAnchorSet = true;
+    }
     updateOutputs();
 }
 
@@ -84,53 +474,175 @@ void SimplePhysicsDriver::serializeSelfImpl(::nicxlive::core::serde::InochiSeria
     return err;
 }
 
+std::shared_ptr<core::param::Parameter> SimplePhysicsDriver::resolveParam() {
+    auto paramPtr = paramCached.lock();
+    if (paramPtr) return paramPtr;
+    if (param_) paramPtr = param_;
+    if (!paramPtr && paramRef != 0) {
+        for (auto n = parentPtr(); n; n = n->parentPtr()) {
+            if (auto pup = std::dynamic_pointer_cast<core::Puppet>(n)) {
+                paramPtr = pup->findParameter(paramRef);
+                break;
+            }
+        }
+    }
+    if (paramPtr) {
+        param_ = paramPtr;
+        paramCached = paramPtr;
+    }
+    return paramPtr;
+}
+
 void SimplePhysicsDriver::updateDriver() {
-    // Simple sine-based placeholder to mimic pendulum-ish motion.
-    constexpr float dt = 0.016f;
-    simPhase += frequency * dt;
-    float theta = std::sin(simPhase) * gravity * offsetGravity;
-    float len = std::max(0.0f, length + offsetLength);
-    output.x = anchor.x + std::sin(theta) * len;
-    output.y = anchor.y + std::cos(theta) * len;
+    if (!system || systemModel != modelType) {
+        if (modelType == PhysicsModel::SpringPendulum) {
+            system = std::make_unique<SpringPendulumSystem>(this);
+        } else {
+            system = std::make_unique<PendulumSystem>(this);
+        }
+        systemModel = modelType;
+    }
+
+    if (!system) return;
+
+    updateInputs();
+
+    float h = std::min(deltaTime(), 10.0f);
+    while (h > 0.01f) {
+        system->tick(0.01f);
+        h -= 0.01f;
+    }
+    system->tick(h);
+    updateOutputs();
+    prevAnchorSet = false;
 }
 
 void SimplePhysicsDriver::reset() {
     offsetGravity = 1.0f;
     offsetLength = 0.0f;
     offsetFrequency = 1.0f;
-    offsetAngleDamping = 0.5f;
-    offsetLengthDamping = 0.5f;
+    offsetAngleDamping = 1.0f;
+    offsetLengthDamping = 1.0f;
     offsetOutputScale = {1.0f, 1.0f};
     prevAnchor = {0, 0};
     prevAnchorSet = false;
     simPhase = 0.0f;
     output = {0, 0};
+    angle = 0.0f;
+    dAngle = 0.0f;
+    lengthVel = 0.0f;
+
+    switch (modelType) {
+    case PhysicsModel::Pendulum:
+        system = std::make_unique<PendulumSystem>(this);
+        break;
+    case PhysicsModel::SpringPendulum:
+        system = std::make_unique<SpringPendulumSystem>(this);
+        break;
+    }
+    systemModel = modelType;
 }
 
 void SimplePhysicsDriver::updateInputs() {
-    auto mat = transform().toMat4();
-    Vec3 pos = localOnly ? Vec3{localTransform.translation.x, localTransform.translation.y, 1.0f}
-                         : mat.transformPoint(Vec3{0, 0, 1});
-    prevAnchor = anchor;
-    anchor = Vec2{pos.x, pos.y};
+    if (prevAnchorSet) return;
+    Vec3 anchorPos = localOnly ? Vec3{transformLocal().translation.x, transformLocal().translation.y, 1.0f}
+                               : transform().toMat4().transformPoint(Vec3{0, 0, 1});
+    if (!std::isfinite(anchorPos.x) || !std::isfinite(anchorPos.y)) {
+        logPhysicsState("updateInputs:anchorNonFinite");
+        return;
+    }
+    anchor = Vec2{anchorPos.x, anchorPos.y};
 }
 
 void SimplePhysicsDriver::updateOutputs() {
-    auto paramPtr = paramCached.lock();
-    if (!paramPtr && paramRef != 0) {
-        // no registry to resolve by UUID; leave unchanged
-        return;
-    }
+    auto paramPtr = resolveParam();
     if (!paramPtr) return;
-    Vec2 disp{output.x - anchor.x, output.y - anchor.y};
-    Vec2 scaled{disp.x * outputScale[0] * offsetOutputScale[0],
-                disp.y * outputScale[1] * offsetOutputScale[1]};
-    if (!std::isfinite(scaled.x) || !std::isfinite(scaled.y)) {
-        logPhysicsState("updateOutputs:nonFinite");
+
+    if (!std::isfinite(output.x) || !std::isfinite(output.y)) {
+        logPhysicsState("updateOutputs:outputNonFinite");
         return;
     }
-    paramPtr->value = scaled;
-    paramPtr->latestInternal = scaled;
+    if (!std::isfinite(anchor.x) || !std::isfinite(anchor.y)) {
+        logPhysicsState("updateOutputs:anchorNonFinite");
+        return;
+    }
+
+    Vec2 oscale = getOutputScale();
+    if (!std::isfinite(oscale.x) || !std::isfinite(oscale.y)) {
+        logPhysicsState("updateOutputs:scaleNonFinite");
+        return;
+    }
+
+    Mat4 inv = prevAnchorSet ? prevTransMat : transform().toMat4().inverse();
+    Vec3 localPos = inv.transformPoint(Vec3{output.x, output.y, 1.0f});
+    Vec2 localAngle{localPos.x, localPos.y};
+    if (!std::isfinite(localAngle.x) || !std::isfinite(localAngle.y)) {
+        logPhysicsState("updateOutputs:localPosNonFinite");
+        return;
+    }
+
+    float localAngleLen = std::sqrt(localAngle.x * localAngle.x + localAngle.y * localAngle.y);
+    if (!std::isfinite(localAngleLen) || std::fabs(localAngleLen) <= std::numeric_limits<float>::epsilon()) {
+        logPhysicsState("updateOutputs:angleLengthInvalid");
+        return;
+    }
+    localAngle.x /= localAngleLen;
+    localAngle.y /= localAngleLen;
+
+    float lengthVal = getLength();
+    if (!std::isfinite(lengthVal) || std::fabs(lengthVal) <= std::numeric_limits<float>::epsilon()) {
+        logPhysicsState("updateOutputs:lengthInvalid");
+        return;
+    }
+    float distanceVal = std::sqrt((output.x - anchor.x) * (output.x - anchor.x) + (output.y - anchor.y) * (output.y - anchor.y));
+    if (!std::isfinite(distanceVal)) {
+        logPhysicsState("updateOutputs:distanceInvalid");
+        return;
+    }
+    float relLength = distanceVal / lengthVal;
+    if (!std::isfinite(relLength)) {
+        logPhysicsState("updateOutputs:relLengthInvalid");
+        return;
+    }
+
+    Vec2 paramVal{};
+    switch (mapMode) {
+    case ParamMapMode::XY: {
+        Vec2 localPosNorm{localAngle.x * relLength, localAngle.y * relLength};
+        paramVal = Vec2{localPosNorm.x, 1.0f - localPosNorm.y};
+        break;
+    }
+    case ParamMapMode::AngleLength: {
+        float a = std::atan2(-localAngle.x, localAngle.y) / static_cast<float>(M_PI);
+        paramVal = Vec2{a, relLength};
+        break;
+    }
+    case ParamMapMode::YX: {
+        Vec2 localPosNorm{localAngle.x * relLength, localAngle.y * relLength};
+        paramVal = Vec2{1.0f - localPosNorm.y, localPosNorm.x};
+        break;
+    }
+    case ParamMapMode::LengthAngle: {
+        float a = std::atan2(-localAngle.x, localAngle.y) / static_cast<float>(M_PI);
+        paramVal = Vec2{relLength, a};
+        break;
+    }
+    }
+
+    if (!std::isfinite(paramVal.x) || !std::isfinite(paramVal.y)) {
+        logPhysicsState("updateOutputs:paramValInvalid");
+        return;
+    }
+
+    Vec2 paramOffset{paramVal.x * oscale.x, paramVal.y * oscale.y};
+    if (!std::isfinite(paramOffset.x) || !std::isfinite(paramOffset.y)) {
+        logPhysicsState("updateOutputs:paramOffsetNonFinite");
+        return;
+    }
+
+    paramPtr->value = paramOffset;
+    paramPtr->latestInternal = paramOffset;
+    paramPtr->previousInternal = paramOffset;
 }
 
 void SimplePhysicsDriver::logPhysicsState(const std::string& context, const std::string& extra) {
@@ -140,13 +652,29 @@ void SimplePhysicsDriver::logPhysicsState(const std::string& context, const std:
 }
 
 void SimplePhysicsDriver::drawDebug() {
-    auto& buf = debugDrawBuffer();
-    DebugLine line{
-        Vec3{anchor.x, anchor.y, 0},
-        Vec3{output.x, output.y, 0},
-        Vec4{0.2f, 0.8f, 1.0f, 0.8f},
-    };
-    buf.push_back(line);
+    if (system) system->drawDebug();
+}
+
+float SimplePhysicsDriver::getGravity() const { return gravity * offsetGravity; }
+float SimplePhysicsDriver::getLength() const { return length + offsetLength; }
+float SimplePhysicsDriver::getFrequency() const { return frequency * offsetFrequency; }
+float SimplePhysicsDriver::getAngleDamping() const { return angleDamping * offsetAngleDamping; }
+float SimplePhysicsDriver::getLengthDamping() const { return lengthDamping * offsetLengthDamping; }
+Vec2 SimplePhysicsDriver::getOutputScale() const { return Vec2{outputScale[0] * offsetOutputScale[0], outputScale[1] * offsetOutputScale[1]}; }
+
+std::vector<std::shared_ptr<core::param::Parameter>> SimplePhysicsDriver::getAffectedParameters() const {
+    std::vector<std::shared_ptr<core::param::Parameter>> out;
+    if (auto p = paramCached.lock()) out.push_back(p);
+    else if (param_) out.push_back(param_);
+    return out;
+}
+
+bool SimplePhysicsDriver::affectsParameter(const std::shared_ptr<core::param::Parameter>& p) const {
+    if (!p) return false;
+    for (auto& ap : getAffectedParameters()) {
+        if (ap && ap->uuid == p->uuid) return true;
+    }
+    return false;
 }
 
 } // namespace nicxlive::core::nodes

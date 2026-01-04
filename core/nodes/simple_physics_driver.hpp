@@ -28,6 +28,7 @@ public:
     std::string name{"SimplePhysics"};
     bool active{true};
     uint32_t paramRef{0};
+    std::shared_ptr<core::param::Parameter> param_{};
     PhysicsModel modelType{PhysicsModel::Pendulum};
     ParamMapMode mapMode{ParamMapMode::AngleLength};
     bool localOnly{false};
@@ -43,8 +44,8 @@ public:
     float offsetGravity{1.0f};
     float offsetLength{0.0f};
     float offsetFrequency{1.0f};
-    float offsetAngleDamping{0.5f};
-    float offsetLengthDamping{0.5f};
+    float offsetAngleDamping{1.0f};
+    float offsetLengthDamping{1.0f};
     std::array<float, 2> offsetOutputScale{1.0f, 1.0f};
     Vec2 anchor{0.0f, 0.0f};
     Vec2 output{0.0f, 0.0f};
@@ -53,6 +54,10 @@ public:
     bool prevAnchorSet{false};
     float simPhase{0.0f};
     std::weak_ptr<core::param::Parameter> paramCached{};
+    // runtime state for physics integration
+    float angle{0.0f};
+    float dAngle{0.0f};
+    float lengthVel{0.0f};
 
     SimplePhysicsDriver();
     explicit SimplePhysicsDriver(uint32_t uuidVal, const std::shared_ptr<Node>& parent = nullptr);
@@ -67,6 +72,8 @@ public:
 
     void updateDriver() override;
     void reset() override;
+    std::vector<std::shared_ptr<core::param::Parameter>> getAffectedParameters() const override;
+    bool affectsParameter(const std::shared_ptr<core::param::Parameter>& p) const override;
 
     void setParameter(const std::shared_ptr<core::param::Parameter>& p) { paramCached = p; }
 
@@ -75,11 +82,20 @@ private:
     void updateOutputs();
     void logPhysicsState(const std::string& context, const std::string& extra = "");
 
+    float getGravity() const;
+    float getLength() const;
+    float getFrequency() const;
+    float getAngleDamping() const;
+    float getLengthDamping() const;
+    Vec2 getOutputScale() const;
+
     PhysicsModel model() const { return modelType; }
     void setModel(PhysicsModel m) { modelType = m; }
 
     ParamMapMode mapping() const { return mapMode; }
     void setMapping(ParamMapMode m) { mapMode = m; }
+
+    std::shared_ptr<core::param::Parameter> resolveParam();
 };
 
 } // namespace nicxlive::core::nodes
