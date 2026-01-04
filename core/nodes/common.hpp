@@ -19,10 +19,14 @@ using math::Vec4;
 using math::Mat4;
 using math::Transform;
 using math::Vec2Array;
+using math::Vec3Array;
+using math::Vec4Array;
 } // namespace nicxlive::core::nodes
 
 namespace nicxlive::core::common {
 using Vec2Array = ::nicxlive::core::math::Vec2Array;
+using Vec3Array = ::nicxlive::core::math::Vec3Array;
+using Vec4Array = ::nicxlive::core::math::Vec4Array;
 }
 
 namespace nicxlive::core::nodes {

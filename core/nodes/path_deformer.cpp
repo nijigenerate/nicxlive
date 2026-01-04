@@ -19,8 +19,6 @@ namespace nicxlive::core::nodes {
 
 using nicxlive::core::common::transformAssign;
 using nicxlive::core::common::transformAdd;
-using nicxlive::core::common::operator+=;
-using nicxlive::core::common::operator-=;
 using nicxlive::core::common::gatherVec2;
 using nicxlive::core::common::scatterAddVec2;
 
