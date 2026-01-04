@@ -31,7 +31,9 @@ cmake --build build-wasm
 ```
 `BUILD_WASM=ON` is only honored when using the Emscripten toolchain. If you need specific exports, uncomment and adjust the `add_link_options` hints in `CMakeLists.txt`.
 
-## Progress (D → C++ line counts with compat docs)
+## Progress
+
+### Node Layer (D → C++ line counts with compat docs)
 | # | nijilive (D) | Lines | nicxlive (C++) | Lines | Compat note |
 | - | --- | ---:| --- | ---:| --- |
 | 1 | nodes/package.d | 1466 | core/nodes/node.cpp | 1180 | [compat-node](doc/compat-node.md) |
@@ -65,13 +67,29 @@ cmake --build build-wasm
 | RQ9 | render/backends/queue/package.d | 393 | core/render/backend_queue.cpp | 224 | [compat-queue](doc/compat-queue.md) |
 | RQ10 | render/backends/opengl/* | 4,150 | （未移植） | 0 | (WIP) |
 | RQ11 | render/backends/directx12/* | 2,915 | （未移植） | 0 | (WIP) |
+| RT1 | core/texture.d | 571 | core/texture.cpp | 193 | [compat-texture](doc/compat-texture.md) |
+
+### fmt layer (D → C++)
+| # | nijilive (D) | Lines | nicxlive (C++) | Lines | Compat note |
+| - | --- | ---:| --- | ---:| --- |
+| F1 | fmt/package.d | 37 | （未移植） | 0 | (WIP) |
+| F2 | fmt/io.d | 118 | （未移植） | 0 | (WIP) |
+| F3 | fmt/serialize.d | 185 | （未移植） | 0 | (WIP) |
+
+### Unity integration (D → C++)
+| # | nijilive (D) | Lines | nicxlive (C++) | Lines | Compat note |
+| - | --- | ---:| --- | ---:| --- |
+| U1 | unity/native.d | n/a | （未移植） | 0 | (WIP) |
+| U2 | unity/interop.d | n/a | （未移植） | 0 | (WIP) |
+| U3 | unity/plugin exports | n/a | （未移植） | 0 | (WIP) |
 
 ### Math / Common (D → C++)
 | # | nijilive (D) | Lines | nicxlive (C++) | Lines | Compat note |
 | - | --- | ---:| --- | ---:| --- |
 | M1 | math/veca.d | 673 | core/math/veca.hpp | 846 | [compat-vec2array](doc/compat-vec2array.md) |
 | M2 | math/transform.d | 175 | core/math/transform.hpp | 128 | [compat-transform](doc/compat-transform.md) |
-| M3 | math/triangle.d | 165 | core/math/triangle.hpp + triangle.cpp | 42 | [compat-triangle](doc/compat-triangle.md) |
+| M3 | math/camera.d | 75 | （未移植） | 0 | (WIP) |
+| M4 | math/triangle.d | 165 | core/math/triangle.hpp + triangle.cpp | 42 | [compat-triangle](doc/compat-triangle.md) |
 | C1 | core/nodes/common.d | 290 | core/nodes/common.hpp | 76 | [compat-common](doc/compat-common.md) |
 
 See `doc/compat-*.md` for detailed compatibility notes and remaining gaps.
