@@ -4,12 +4,14 @@
 #include "filter.hpp"
 #include "../texture.hpp"
 #include "../common/utils.hpp"
+#include "../serde.hpp"
 
 #include <algorithm>
 #include <unordered_set>
 #include <unordered_map>
 #include <optional>
 #include <array>
+#include <memory>
 
 namespace nicxlive::core::nodes {
 
@@ -31,16 +33,29 @@ struct MeshData {
     std::vector<Vec2> vertices{};
     std::vector<Vec2> uvs{};
     std::vector<uint16_t> indices{};
-    Vec2 origin{};
+    Vec2 origin{0.0f, 0.0f};
     std::vector<std::vector<float>> gridAxes{};
 
+    void add(const Vec2& vertex, const Vec2& uv);
+    void clearConnections();
+    void connect(uint16_t first, uint16_t second);
+    int find(const Vec2& vert) const;
     bool isReady() const;
+    bool canTriangulate() const;
+    void fixWinding();
+    int connectionsAtPoint(const Vec2& pt) const;
+    int connectionsAtPoint(uint16_t idx) const;
+    MeshData copy() const;
+
+    void serialize(::nicxlive::core::serde::InochiSerializer& serializer) const;
+    ::nicxlive::core::serde::SerdeException deserializeFromFghj(const ::nicxlive::core::serde::Fghj& data);
 };
 
 static constexpr std::ptrdiff_t NOINDEX = static_cast<std::ptrdiff_t>(-1);
 
 struct WeldingLink {
-    NodeId target{};
+    NodeId targetUUID{};
+    std::weak_ptr<Drawable> target{};
     std::vector<std::ptrdiff_t> indices{};
     float weight{0.0f};
 };

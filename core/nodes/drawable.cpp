@@ -166,6 +166,27 @@ bool calculateTransformInTriangle(const MeshData& mesh, const std::array<std::si
 }
 } // namespace
 
+void MeshData::add(const Vec2& vertex, const Vec2& uv) {
+    vertices.push_back(vertex);
+    uvs.push_back(uv);
+}
+
+void MeshData::clearConnections() {
+    indices.clear();
+}
+
+void MeshData::connect(uint16_t first, uint16_t second) {
+    indices.push_back(first);
+    indices.push_back(second);
+}
+
+int MeshData::find(const Vec2& vert) const {
+    for (std::size_t i = 0; i < vertices.size(); ++i) {
+        if (vertices[i].x == vert.x && vertices[i].y == vert.y) return static_cast<int>(i);
+    }
+    return -1;
+}
+
 bool MeshData::isReady() const {
     if (indices.empty() || indices.size() % 3 != 0) {
         return false;
@@ -175,6 +196,52 @@ bool MeshData::isReady() const {
         if (v > maxIdx) maxIdx = v;
     }
     return static_cast<size_t>(maxIdx) < vertices.size();
+}
+
+bool MeshData::canTriangulate() const {
+    return !indices.empty() && indices.size() % 3 == 0;
+}
+
+void MeshData::fixWinding() {
+    if (!isReady()) return;
+    for (std::size_t j = 0; j + 2 < indices.size(); j += 3) {
+        std::size_t i0 = indices[j + 0];
+        std::size_t i1 = indices[j + 1];
+        std::size_t i2 = indices[j + 2];
+        if (i0 >= vertices.size() || i1 >= vertices.size() || i2 >= vertices.size()) continue;
+        Vec2 a = vertices[i0];
+        Vec2 b = vertices[i1];
+        Vec2 c = vertices[i2];
+        float crossZ = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+        bool cw = crossZ < 0;
+        if (cw) {
+            std::swap(indices[j + 1], indices[j + 2]);
+        }
+    }
+}
+
+int MeshData::connectionsAtPoint(const Vec2& pt) const {
+    int p = find(pt);
+    if (p == -1) return 0;
+    return connectionsAtPoint(static_cast<uint16_t>(p));
+}
+
+int MeshData::connectionsAtPoint(uint16_t idx) const {
+    int found = 0;
+    for (auto v : indices) {
+        if (v == idx) found++;
+    }
+    return found;
+}
+
+MeshData MeshData::copy() const {
+    MeshData out;
+    out.vertices = vertices;
+    out.uvs = uvs;
+    out.indices = indices;
+    out.gridAxes = gridAxes;
+    out.origin = origin;
+    return out;
 }
 
 Vec2Array& sharedVertexBufferData() { return gSharedVertices; }
@@ -190,6 +257,118 @@ void sharedUvMarkDirty() { gSharedUvsDirty = true; }
 void sharedDeformMarkDirty() { gSharedDeformDirty = true; }
 void inSetUpdateBounds(bool state) { gDoGenerateBounds = state; }
 bool inGetUpdateBounds() { return gDoGenerateBounds; }
+
+void MeshData::serialize(::nicxlive::core::serde::InochiSerializer& serializer) const {
+    serializer.putKey("verts");
+    auto arr = serializer.listBegin();
+    for (const auto& v : vertices) {
+        serializer.elemBegin();
+        serializer.putValue(v.x);
+        serializer.elemBegin();
+        serializer.putValue(v.y);
+    }
+    serializer.listEnd(arr);
+
+    if (!uvs.empty()) {
+        serializer.putKey("uvs");
+        auto uarr = serializer.listBegin();
+        for (const auto& uv : uvs) {
+            serializer.elemBegin();
+            serializer.putValue(uv.x);
+            serializer.elemBegin();
+            serializer.putValue(uv.y);
+        }
+        serializer.listEnd(uarr);
+    }
+
+    serializer.putKey("indices");
+    auto iarr = serializer.listBegin();
+    for (auto idx : indices) {
+        serializer.elemBegin();
+        serializer.putValue(static_cast<uint16_t>(idx));
+    }
+    serializer.listEnd(iarr);
+
+    serializer.putKey("origin");
+    auto oarr = serializer.listBegin();
+    serializer.elemBegin();
+    serializer.putValue(origin.x);
+    serializer.elemBegin();
+    serializer.putValue(origin.y);
+    serializer.listEnd(oarr);
+
+    if (!gridAxes.empty()) {
+        serializer.putKey("grid_axes");
+        auto garr = serializer.listBegin();
+        for (const auto& axis : gridAxes) {
+            serializer.elemBegin();
+            auto inner = serializer.listBegin();
+            for (auto v : axis) {
+                serializer.elemBegin();
+                serializer.putValue(v);
+            }
+            serializer.listEnd(inner);
+        }
+        serializer.listEnd(garr);
+    }
+}
+
+::nicxlive::core::serde::SerdeException MeshData::deserializeFromFghj(const ::nicxlive::core::serde::Fghj& data) {
+    vertices.clear();
+    uvs.clear();
+    indices.clear();
+    gridAxes.clear();
+    origin = Vec2{0, 0};
+
+    if (auto verts = data.get_child_optional("verts")) {
+        for (auto it = verts->begin(); it != verts->end();) {
+            float x = it->second.get_value<float>();
+            ++it;
+            if (it == verts->end()) break;
+            float y = it->second.get_value<float>();
+            ++it;
+            vertices.push_back(Vec2{x, y});
+        }
+    }
+
+    if (auto u = data.get_child_optional("uvs")) {
+        for (auto it = u->begin(); it != u->end();) {
+            float x = it->second.get_value<float>();
+            ++it;
+            if (it == u->end()) break;
+            float y = it->second.get_value<float>();
+            ++it;
+            uvs.push_back(Vec2{x, y});
+        }
+    }
+
+    if (auto idx = data.get_child_optional("indices")) {
+        for (const auto& i : *idx) {
+            indices.push_back(i.second.get_value<uint16_t>());
+        }
+    }
+
+    if (auto org = data.get_child_optional("origin")) {
+        auto it = org->begin();
+        if (it != org->end()) {
+            origin.x = it->second.get_value<float>();
+            ++it;
+            if (it != org->end()) origin.y = it->second.get_value<float>();
+        }
+    }
+
+    if (auto ga = data.get_child_optional("grid_axes")) {
+        for (const auto& axis : *ga) {
+            std::vector<float> vals;
+            for (const auto& v : axis.second) {
+                vals.push_back(v.second.get_value<float>());
+            }
+            gridAxes.push_back(std::move(vals));
+        }
+    }
+
+    return std::nullopt;
+}
 
 void Drawable::updateBounds() {
     if (!gDoGenerateBounds) return;
@@ -402,7 +581,7 @@ void Drawable::reset() {
 }
 
 bool Drawable::isWeldedBy(NodeId target) const {
-    return std::any_of(weldedLinks.begin(), weldedLinks.end(), [&](const WeldingLink& l) { return l.target == target; });
+    return std::any_of(weldedLinks.begin(), weldedLinks.end(), [&](const WeldingLink& l) { return l.targetUUID == target; });
 }
 
 std::tuple<Vec2Array, std::optional<Mat4>, bool> Drawable::weldingProcessor(const std::shared_ptr<Node>& target,
@@ -411,7 +590,7 @@ std::tuple<Vec2Array, std::optional<Mat4>, bool> Drawable::weldingProcessor(cons
                                                                             const Mat4* origTransform) {
     auto targetDrawable = std::dynamic_pointer_cast<Drawable>(target);
     if (!targetDrawable) return {origDeformation, std::nullopt, false};
-    auto it = std::find_if(weldedLinks.begin(), weldedLinks.end(), [&](const WeldingLink& l) { return l.target == targetDrawable->uuid; });
+    auto it = std::find_if(weldedLinks.begin(), weldedLinks.end(), [&](const WeldingLink& l) { return l.targetUUID == targetDrawable->uuid; });
     if (it == weldedLinks.end()) return {origDeformation, std::nullopt, false};
     if (postProcessed < 2) return {Vec2Array{}, std::nullopt, false};
     if (weldingApplied.count(targetDrawable->uuid) || targetDrawable->weldingApplied.count(uuid)) {
@@ -497,21 +676,21 @@ void Drawable::addWeldedTarget(const std::shared_ptr<Drawable>& target,
                                const std::vector<std::ptrdiff_t>& indices,
                                float weight) {
     if (!target) return;
-    auto existing = std::find_if(weldedLinks.begin(), weldedLinks.end(), [&](const WeldingLink& l) { return l.target == target->uuid; });
+    auto existing = std::find_if(weldedLinks.begin(), weldedLinks.end(), [&](const WeldingLink& l) { return l.targetUUID == target->uuid; });
     if (existing == weldedLinks.end()) {
-        weldedLinks.push_back(WeldingLink{target->uuid, indices, weight});
+        weldedLinks.push_back(WeldingLink{target->uuid, target, indices, weight});
     } else {
         existing->indices = indices;
         existing->weight = weight;
     }
-    auto reciprocal = std::find_if(target->weldedLinks.begin(), target->weldedLinks.end(), [&](const WeldingLink& l) { return l.target == uuid; });
+    auto reciprocal = std::find_if(target->weldedLinks.begin(), target->weldedLinks.end(), [&](const WeldingLink& l) { return l.targetUUID == uuid; });
     if (reciprocal == target->weldedLinks.end()) {
         std::vector<std::ptrdiff_t> counter(target->mesh.vertices.size(), NOINDEX);
         for (std::size_t i = 0; i < indices.size() && i < counter.size(); ++i) {
             auto ind = indices[i];
             if (ind != NOINDEX && ind >= 0) counter[static_cast<std::size_t>(ind)] = static_cast<std::ptrdiff_t>(i);
         }
-        target->weldedLinks.push_back(WeldingLink{uuid, counter, 1.0f - weight});
+        target->weldedLinks.push_back(WeldingLink{uuid, std::dynamic_pointer_cast<Drawable>(shared_from_this()), counter, 1.0f - weight});
     }
     if (!isWeldedBy(target->uuid)) weldedTargets.push_back(target->uuid);
     if (!target->isWeldedBy(uuid)) target->weldedTargets.push_back(uuid);
@@ -522,9 +701,9 @@ void Drawable::addWeldedTarget(const std::shared_ptr<Drawable>& target,
 
 void Drawable::removeWeldedTarget(const std::shared_ptr<Drawable>& target) {
     if (!target) return;
-    weldedLinks.erase(std::remove_if(weldedLinks.begin(), weldedLinks.end(), [&](const WeldingLink& l) { return l.target == target->uuid; }), weldedLinks.end());
+    weldedLinks.erase(std::remove_if(weldedLinks.begin(), weldedLinks.end(), [&](const WeldingLink& l) { return l.targetUUID == target->uuid; }), weldedLinks.end());
     weldedTargets.erase(std::remove(weldedTargets.begin(), weldedTargets.end(), target->uuid), weldedTargets.end());
-    target->weldedLinks.erase(std::remove_if(target->weldedLinks.begin(), target->weldedLinks.end(), [&](const WeldingLink& l) { return l.target == uuid; }), target->weldedLinks.end());
+    target->weldedLinks.erase(std::remove_if(target->weldedLinks.begin(), target->weldedLinks.end(), [&](const WeldingLink& l) { return l.targetUUID == uuid; }), target->weldedLinks.end());
     target->weldedTargets.erase(std::remove(target->weldedTargets.begin(), target->weldedTargets.end(), uuid), target->weldedTargets.end());
     unregisterWeldFilter(target);
     target->unregisterWeldFilter(std::dynamic_pointer_cast<Drawable>(shared_from_this()));
@@ -535,7 +714,13 @@ void Drawable::setupSelf() {
     for (auto& link : weldedLinks) {
         auto pup = puppetRef();
         if (!pup) continue;
-        auto tgt = std::dynamic_pointer_cast<Drawable>(pup->findNodeById(link.target));
+        std::shared_ptr<Drawable> tgt;
+        if (auto locked = link.target.lock()) {
+            tgt = locked;
+        } else {
+            tgt = std::dynamic_pointer_cast<Drawable>(pup->findNodeById(link.targetUUID));
+            link.target = tgt;
+        }
         registerWeldFilter(tgt);
     }
 }
@@ -549,7 +734,13 @@ void Drawable::finalizeDrawable() {
     std::vector<WeldingLink> valid;
     if (auto pup = puppetRef()) {
         for (auto& link : weldedLinks) {
-            auto tgt = std::dynamic_pointer_cast<Drawable>(pup->findNodeById(link.target));
+            std::shared_ptr<Drawable> tgt;
+            if (auto locked = link.target.lock()) {
+                tgt = locked;
+            } else {
+                tgt = std::dynamic_pointer_cast<Drawable>(pup->findNodeById(link.targetUUID));
+                link.target = tgt;
+            }
             if (tgt) {
                 valid.push_back(link);
                 registerWeldFilter(tgt);
@@ -583,7 +774,7 @@ void Drawable::runPostTaskImpl(std::size_t priority, core::RenderContext& ctx) {
         auto pup = puppetRef();
         for (const auto& link : weldedLinks) {
             std::shared_ptr<Node> tgtNode;
-            if (pup) tgtNode = pup->findNodeById(link.target);
+            if (pup) tgtNode = pup->findNodeById(link.targetUUID);
             auto tgtDrawable = std::dynamic_pointer_cast<Drawable>(tgtNode);
             if (!tgtDrawable) continue;
             Mat4 tmat = tgtDrawable->transform().toMat4();
@@ -784,7 +975,7 @@ void Drawable::serializeSelfImpl(::nicxlive::core::serde::InochiSerializer& seri
     Node::serializeSelfImpl(serializer, recursive, flags);
     if (has_flag(flags, SerializeNodeFlags::Geometry)) {
         serializer.putKey("mesh");
-        serializer.putValue(std::string{"mesh_not_serialized"});
+        mesh.serialize(serializer);
     }
     if (has_flag(flags, SerializeNodeFlags::Links) && !weldedLinks.empty()) {
         serializer.putKey("weldedLinks");
@@ -792,7 +983,7 @@ void Drawable::serializeSelfImpl(::nicxlive::core::serde::InochiSerializer& seri
         for (const auto& link : weldedLinks) {
             serializer.elemBegin();
             serializer.putKey("targetUUID");
-            serializer.putValue(link.target);
+            serializer.putValue(link.targetUUID);
             serializer.putKey("weight");
             serializer.putValue(link.weight);
             serializer.putKey("indices");
@@ -809,11 +1000,20 @@ void Drawable::serializeSelfImpl(::nicxlive::core::serde::InochiSerializer& seri
 
 ::nicxlive::core::serde::SerdeException Drawable::deserializeFromFghj(const ::nicxlive::core::serde::Fghj& data) {
     if (auto err = Node::deserializeFromFghj(data)) return err;
+    if (auto m = data.get_child_optional("mesh")) {
+        if (auto exc = mesh.deserializeFromFghj(*m)) return exc;
+        vertices.resize(mesh.vertices.size());
+        for (std::size_t i = 0; i < mesh.vertices.size(); ++i) {
+            vertices.x[i] = mesh.vertices[i].x;
+            vertices.y[i] = mesh.vertices[i].y;
+        }
+        deformation.resize(mesh.vertices.size());
+    }
     if (auto wl = data.get_child_optional("weldedLinks")) {
         weldedLinks.clear();
         for (const auto& child : *wl) {
             WeldingLink link;
-            link.target = child.second.get<uint32_t>("targetUUID", 0);
+            link.targetUUID = child.second.get<uint32_t>("targetUUID", 0);
             link.weight = child.second.get<float>("weight", 0.0f);
             if (auto idx = child.second.get_child_optional("indices")) {
                 for (const auto& i : *idx) {
