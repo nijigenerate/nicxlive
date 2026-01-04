@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../nodes/common.hpp"
+#include "types.hpp"
 
 namespace nicxlive::core::math {
 
@@ -16,6 +16,6 @@ struct Mat3x3 {
 
 Mat3x3 multiply(const Mat3x3& a, const Mat3x3& b);
 Mat3x3 inverse(const Mat3x3& m);
-::nicxlive::core::nodes::Vec2 applyAffine(const Mat3x3& m, const ::nicxlive::core::nodes::Vec2& p);
+Vec2 applyAffine(const Mat3x3& m, const Vec2& p);
 
 } // namespace nicxlive::core::math

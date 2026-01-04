@@ -2,6 +2,7 @@
 
 #include "binding.hpp"
 #include "../nodes/common.hpp"
+#include "../serde.hpp"
 #include <algorithm>
 #include <limits>
 #include <memory>
@@ -29,11 +30,27 @@ public:
     void setTarget(const std::shared_ptr<Node>& node, const std::string& paramName) override {
         target.node = node;
         target.name = paramName;
+        target.uuid = node ? node->uuid : 0;
+        nodeUuid_ = target.uuid;
     }
     std::string getName() const override { return target.name; }
 
+    ::nicxlive::core::serde::SerdeException serializeSelf(::nicxlive::core::serde::InochiSerializer& serializer) const override;
+    ::nicxlive::core::serde::SerdeException deserializeFromFghj(const ::nicxlive::core::serde::Fghj& data) override;
+
     void apply(const Vec2u& leftKeypoint, const Vec2& offset) override {
         applyToTarget(interpolate(leftKeypoint, offset));
+    }
+
+    void reconstruct(const std::shared_ptr<::nicxlive::core::Puppet>& /*puppet*/) override {
+        if (auto locked = target.node.lock()) {
+            target.uuid = locked->uuid;
+            nodeUuid_ = target.uuid;
+        }
+    }
+
+    void finalize(const std::shared_ptr<::nicxlive::core::Puppet>& puppet) override {
+        reconstruct(puppet);
     }
 
     void clear() override {
@@ -396,8 +413,10 @@ public:
     }
 
     uint32_t getNodeUUID() const override {
-        auto node = target.node.lock();
-        return node ? node->uuid : 0;
+        if (auto node = target.node.lock()) {
+            return node->uuid;
+        }
+        return nodeUuid_;
     }
 
     InterpolateMode interpolateMode() const override { return interpolateMode_; }
@@ -408,6 +427,7 @@ public:
 protected:
     Parameter* parameter{};
     BindTarget target{};
+    uint32_t nodeUuid_{0};
     std::vector<std::vector<T>> values{};
     std::vector<std::vector<bool>> isSetFlags{};
     InterpolateMode interpolateMode_{InterpolateMode::Linear};
@@ -705,6 +725,135 @@ inline void ParameterParameterBinding::clearValue(float& v) {
 
 inline bool ParameterParameterBinding::isCompatibleWithNode(const std::shared_ptr<Node>& /*other*/) const {
     return false;
+}
+
+// --- Serialization helpers (template) ---
+namespace detail {
+inline boost::property_tree::ptree serializeValueNode(const float& v) {
+    boost::property_tree::ptree node;
+    node.put("", v);
+    return node;
+}
+
+inline boost::property_tree::ptree serializeValueNode(const DeformSlot& v) {
+    boost::property_tree::ptree node;
+    boost::property_tree::ptree xs;
+    boost::property_tree::ptree ys;
+    for (std::size_t i = 0; i < v.vertexOffsets.size(); ++i) {
+        boost::property_tree::ptree xv;
+        xv.put("", v.vertexOffsets.x[i]);
+        xs.push_back({"", xv});
+        boost::property_tree::ptree yv;
+        yv.put("", v.vertexOffsets.y[i]);
+        ys.push_back({"", yv});
+    }
+    node.add_child("x", xs);
+    node.add_child("y", ys);
+    return node;
+}
+
+inline void deserializeValueNode(const boost::property_tree::ptree& node, float& out) {
+    out = node.get_value<float>();
+}
+
+inline void deserializeValueNode(const boost::property_tree::ptree& node, DeformSlot& out) {
+    static const boost::property_tree::ptree empty{};
+    const auto xsIt = node.find("x");
+    const auto ysIt = node.find("y");
+    const auto& xs = xsIt != node.not_found() ? xsIt->second : empty;
+    const auto& ys = ysIt != node.not_found() ? ysIt->second : empty;
+    std::size_t n = std::min(xs.size(), ys.size());
+    out.vertexOffsets.resize(n);
+    std::size_t idx = 0;
+    for (auto it = xs.begin(); it != xs.end() && idx < n; ++it, ++idx) {
+        out.vertexOffsets.x[idx] = it->second.get_value<float>();
+    }
+    idx = 0;
+    for (auto it = ys.begin(); it != ys.end() && idx < n; ++it, ++idx) {
+        out.vertexOffsets.y[idx] = it->second.get_value<float>();
+    }
+}
+} // namespace detail
+
+template <typename T>
+::nicxlive::core::serde::SerdeException ParameterBindingImpl<T>::serializeSelf(::nicxlive::core::serde::InochiSerializer& serializer) const {
+    serializer.putKey("node");
+    serializer.putValue(getNodeUUID());
+    serializer.putKey("param_name");
+    serializer.putValue(target.name);
+    serializer.putKey("interpolate_mode");
+    serializer.putValue(static_cast<int>(interpolateMode_));
+
+    boost::property_tree::ptree valuesTree;
+    for (const auto& row : values) {
+        boost::property_tree::ptree rowNode;
+        for (const auto& v : row) {
+            rowNode.push_back({"", detail::serializeValueNode(v)});
+        }
+        valuesTree.push_back({"", rowNode});
+    }
+    serializer.root.add_child("values", valuesTree);
+
+    boost::property_tree::ptree isSetTree;
+    for (const auto& row : isSetFlags) {
+        boost::property_tree::ptree rowNode;
+        for (bool b : row) {
+            boost::property_tree::ptree v;
+            v.put("", b);
+            rowNode.push_back({"", v});
+        }
+        isSetTree.push_back({"", rowNode});
+    }
+    serializer.root.add_child("isSet", isSetTree);
+
+    return std::nullopt;
+}
+
+template <typename T>
+::nicxlive::core::serde::SerdeException ParameterBindingImpl<T>::deserializeFromFghj(const ::nicxlive::core::serde::Fghj& data) {
+    nodeUuid_ = data.get<uint32_t>("node", 0);
+    target.uuid = nodeUuid_;
+    target.name = data.get<std::string>("param_name", target.name);
+    interpolateMode_ = static_cast<InterpolateMode>(data.get<int>("interpolate_mode", static_cast<int>(InterpolateMode::Linear)));
+
+    static const boost::property_tree::ptree empty{};
+    const auto valuesIt = data.find("values");
+    const auto isSetIt = data.find("isSet");
+    const auto& valuesTree = valuesIt != data.not_found() ? valuesIt->second : empty;
+    const auto& isSetTree = isSetIt != data.not_found() ? isSetIt->second : empty;
+
+    auto xCount = parameter ? parameter->axisPointCount(0) : static_cast<std::size_t>(valuesTree.size());
+    auto yCount = parameter ? parameter->axisPointCount(1) : 0u;
+    if (yCount == 0 && !valuesTree.empty()) yCount = valuesTree.front().second.size();
+
+    values.assign(xCount, std::vector<T>(yCount, T{}));
+    isSetFlags.assign(xCount, std::vector<bool>(yCount, false));
+
+    std::size_t xi = 0;
+    for (auto& row : valuesTree) {
+        if (xi >= values.size()) break;
+        std::size_t yi = 0;
+        for (auto& valNode : row.second) {
+            if (yi >= values[xi].size()) break;
+            detail::deserializeValueNode(valNode.second, values[xi][yi]);
+            yi++;
+        }
+        xi++;
+    }
+
+    xi = 0;
+    for (auto& row : isSetTree) {
+        if (xi >= isSetFlags.size()) break;
+        std::size_t yi = 0;
+        for (auto& valNode : row.second) {
+            if (yi >= isSetFlags[xi].size()) break;
+            isSetFlags[xi][yi] = valNode.second.get_value<bool>();
+            yi++;
+        }
+        xi++;
+    }
+
+    return std::nullopt;
 }
 
 } // namespace nicxlive::core::param

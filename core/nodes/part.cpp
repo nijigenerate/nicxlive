@@ -507,8 +507,10 @@ void Part::fillDrawPacket(const Node& header, PartDrawPacket& packet, bool isMas
     packet.deformAtlasStride = sharedDeformBufferData().size();
     packet.vertexCount = static_cast<uint32_t>(mesh->vertices.size());
     packet.indexCount = static_cast<uint32_t>(mesh->indices.size());
+    packet.indexBuffer = 0; // 現状はソフト配列のみ
     for (std::size_t i = 0; i < textures.size() && i < 3; ++i) {
         packet.textureUUIDs[i] = textures[i] ? textures[i]->getRuntimeUUID() : 0;
+        packet.textures[i] = textures[i];
     }
     packet.vertices = mesh->vertices;
     packet.uvs = mesh->uvs;

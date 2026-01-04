@@ -90,10 +90,10 @@ public:
     bool evaluateDifferenceAggregation(RenderResourceHandle, int, int) override;
     bool fetchDifferenceAggregationResult(DifferenceEvaluationResult& out) override;
 
-    uint32_t createTexture(const std::vector<uint8_t>& data, int width, int height, int channels, bool stencil);
-    void updateTexture(uint32_t id, const std::vector<uint8_t>& data, int width, int height, int channels);
-    void setTextureParams(uint32_t id, ::nicxlive::core::Filtering filtering, ::nicxlive::core::Wrapping wrapping, float anisotropy);
-    void disposeTexture(uint32_t id);
+    uint32_t createTexture(const std::vector<uint8_t>& data, int width, int height, int channels, bool stencil) override;
+    void updateTexture(uint32_t id, const std::vector<uint8_t>& data, int width, int height, int channels) override;
+    void setTextureParams(uint32_t id, ::nicxlive::core::Filtering filtering, ::nicxlive::core::Wrapping wrapping, float anisotropy) override;
+    void disposeTexture(uint32_t id) override;
     bool hasTexture(uint32_t id) const;
     const TextureHandle* getTexture(uint32_t id) const;
 

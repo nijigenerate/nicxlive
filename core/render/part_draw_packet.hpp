@@ -1,9 +1,14 @@
 #pragma once
 
 #include "../nodes/common.hpp"
+#include "../texture.hpp"
+#include <array>
+#include <cstdint>
 #include <vector>
 
 namespace nicxlive::core::nodes {
+
+using RenderResourceHandle = uint32_t;
 
 struct PartDrawPacket {
     Mat4 modelMatrix{Mat4::identity()};
@@ -28,6 +33,8 @@ struct PartDrawPacket {
     uint32_t deformAtlasStride{0};
     uint32_t vertexCount{0};
     uint32_t indexCount{0};
+    RenderResourceHandle indexBuffer{0};
+    std::array<std::shared_ptr<::nicxlive::core::Texture>, 3> textures{};
     uint32_t textureUUIDs[3]{};
     std::vector<uint16_t> indices{};
     std::vector<Vec2> vertices{};

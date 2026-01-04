@@ -6,6 +6,7 @@
 #include "../nodes/drawable.hpp"
 #include "../nodes/common.hpp"
 
+#include <iostream>
 #include <algorithm>
 #include <cmath>
 
@@ -52,7 +53,12 @@ bool tryMakeMaskApplyPacket(const std::shared_ptr<nodes::Drawable>& drawable, bo
         packet.isDodge = isDodge;
         const auto& mesh = mask->getMesh();
         if (!indexRangeValid(mesh)) return false;
-        if (packet.maskPacket.indexCount == 0) return false;
+        if (packet.maskPacket.indexCount == 0 || packet.maskPacket.indexBuffer == 0) {
+            std::cerr << "[nicxlive] tryMakeMaskApplyPacket skip: mask index buffer invalid "
+                      << "ibo=" << packet.maskPacket.indexBuffer
+                      << " idxCount=" << packet.maskPacket.indexCount << "\n";
+            return false;
+        }
         return true;
     }
     if (auto part = std::dynamic_pointer_cast<nodes::Part>(drawable)) {
@@ -61,7 +67,12 @@ bool tryMakeMaskApplyPacket(const std::shared_ptr<nodes::Drawable>& drawable, bo
         packet.isDodge = isDodge;
         const auto& mesh = part->getMesh();
         if (!indexRangeValid(mesh)) return false;
-        if (packet.partPacket.indexCount == 0) return false;
+        if (packet.partPacket.indexCount == 0 || packet.partPacket.indexBuffer == 0) {
+            std::cerr << "[nicxlive] tryMakeMaskApplyPacket skip: part index buffer invalid "
+                      << "ibo=" << packet.partPacket.indexBuffer
+                      << " idxCount=" << packet.partPacket.indexCount << "\n";
+            return false;
+        }
         return true;
     }
     return false;

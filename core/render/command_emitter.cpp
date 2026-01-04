@@ -118,7 +118,11 @@ void QueueCommandEmitter::applyMask(const std::shared_ptr<nodes::Drawable>& mask
 }
 
 void QueueCommandEmitter::beginMaskContent() {
-    if (pendingMask) return; // ApplyMask が無効なら skip
+    if (pendingMask) {
+        // D版: BeginMask は ApplyMask が成立したときのみキューへ積む。
+        // ApplyMask が来ずに BeginMaskContent だけ来た場合は何もせず破棄。
+        return;
+    }
     record(RenderCommandKind::BeginMaskContent, [](QueuedCommand&) {});
 }
 

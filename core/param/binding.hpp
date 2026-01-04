@@ -3,6 +3,7 @@
 #include "../nodes/common.hpp"
 #include "../nodes/node.hpp"
 #include "../common/utils.hpp"
+#include "../serde.hpp"
 
 #include <memory>
 #include <string>
@@ -15,6 +16,7 @@ using nodes::Vec3;
 using nodes::Vec4;
 using nodes::Node;
 using common::InterpolateMode;
+namespace core { class Puppet; }
 
 class Parameter;
 
@@ -26,6 +28,7 @@ struct Vec2u {
 struct BindTarget {
     std::weak_ptr<nodes::Node> node{};
     std::string name{};
+    uint32_t uuid{0};
 };
 
 class ParameterBinding : public std::enable_shared_from_this<ParameterBinding> {
@@ -60,6 +63,9 @@ public:
     virtual void setTarget(const std::shared_ptr<Node>& node, const std::string& paramName) = 0;
     virtual bool isCompatibleWithNode(const std::shared_ptr<Node>& other) const = 0;
     virtual std::string getName() const = 0;
+    // Serialize / Deserialize
+    virtual ::nicxlive::core::serde::SerdeException serializeSelf(::nicxlive::core::serde::InochiSerializer&) const { return std::nullopt; }
+    virtual ::nicxlive::core::serde::SerdeException deserializeFromFghj(const ::nicxlive::core::serde::Fghj&) { return std::nullopt; }
 };
 
 

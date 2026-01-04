@@ -31,8 +31,8 @@ Mat3x3 inverse(const Mat3x3& m) {
     return inv;
 }
 
-::nicxlive::core::nodes::Vec2 applyAffine(const Mat3x3& m, const ::nicxlive::core::nodes::Vec2& p) {
-    ::nicxlive::core::nodes::Vec2 out{};
+Vec2 applyAffine(const Mat3x3& m, const Vec2& p) {
+    Vec2 out{};
     out.x = m.m[0][0] * p.x + m.m[0][1] * p.y + m.m[0][2];
     out.y = m.m[1][0] * p.x + m.m[1][1] * p.y + m.m[1][2];
     return out;
