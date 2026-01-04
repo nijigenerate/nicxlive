@@ -14,8 +14,7 @@ static std::vector<MaskBinding> dedupMasks(const std::vector<MaskBinding>& masks
 static void emitMasks(const std::vector<MaskBinding>& bindings, core::RenderCommandEmitter& emitter);
 
 Part::Part(const MeshData& data, const std::array<std::shared_ptr<::nicxlive::core::Texture>, 3>& tex, uint32_t uuidVal)
-    : textures(tex) {
-    mesh = data;
+    : Drawable(data, uuidVal), textures(tex) {
     if (uuidVal != 0) uuid = uuidVal;
     initPartTasks();
     updateVertices();

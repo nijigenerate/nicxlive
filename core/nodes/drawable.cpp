@@ -5,46 +5,17 @@
 
 #include "../serde.hpp"
 #include "../render/common.hpp"
+#include "../render/shared_deform_buffer.hpp"
 
 #include <algorithm>
 #include <cmath>
 #include <limits>
-#include <map>
 #include <optional>
 
 namespace nicxlive::core::nodes {
 
 namespace {
-Vec2Array gSharedVertices;
-Vec2Array gSharedUvs;
-Vec2Array gSharedDeform;
-std::map<NodeId, std::size_t> gVertexOffsets;
-std::map<NodeId, std::size_t> gUvOffsets;
-std::map<NodeId, std::size_t> gDeformOffsets;
-bool gSharedVerticesDirty = false;
-bool gSharedUvsDirty = false;
-bool gSharedDeformDirty = false;
 bool gDoGenerateBounds = false;
-
-void ensureCapacity(Vec2Array& buf, std::size_t offset, std::size_t count) {
-    if (buf.size() < offset + count) {
-        buf.resize(offset + count);
-    }
-}
-
-void writeBuffer(const Vec2Array& src, Vec2Array& dst, std::size_t offset) {
-    ensureCapacity(dst, offset, src.size());
-    for (std::size_t i = 0; i < src.size(); ++i) {
-        dst.x[offset + i] = src.x[i];
-        dst.y[offset + i] = src.y[i];
-    }
-}
-
-void clearOffsetsFor(NodeId id) {
-    gVertexOffsets.erase(id);
-    gUvOffsets.erase(id);
-    gDeformOffsets.erase(id);
-}
 
 std::array<float, 3> barycentric(const Vec2& p, const Vec2& v0, const Vec2& v1, const Vec2& v2) {
     float denom = (v1.y - v2.y) * (v0.x - v2.x) + (v2.x - v1.x) * (v0.y - v2.y);
@@ -166,6 +137,37 @@ bool calculateTransformInTriangle(const MeshData& mesh, const std::array<std::si
 }
 } // namespace
 
+Drawable::Drawable() : Deformable() {
+    ::nicxlive::core::render::sharedDeformRegister(deformation, &deformOffset);
+    ::nicxlive::core::render::sharedVertexRegister(sharedVertices, &vertexOffset);
+    ::nicxlive::core::render::sharedUvRegister(sharedUvs, &uvOffset);
+}
+
+Drawable::Drawable(const std::shared_ptr<Node>& parent) : Deformable(parent) {
+    ::nicxlive::core::render::sharedDeformRegister(deformation, &deformOffset);
+    for (const auto& v : mesh.vertices) sharedVertices.push_back(v);
+    ::nicxlive::core::render::sharedVertexRegister(sharedVertices, &vertexOffset);
+    for (const auto& uv : mesh.uvs) sharedUvs.push_back(uv);
+    ::nicxlive::core::render::sharedUvRegister(sharedUvs, &uvOffset);
+}
+
+Drawable::Drawable(const MeshData& data, uint32_t uuidVal, const std::shared_ptr<Node>& parent)
+    : Deformable(uuidVal, parent), mesh(data) {
+    ::nicxlive::core::render::sharedDeformRegister(deformation, &deformOffset);
+    for (const auto& v : mesh.vertices) sharedVertices.push_back(v);
+    ::nicxlive::core::render::sharedVertexRegister(sharedVertices, &vertexOffset);
+    for (const auto& uv : mesh.uvs) sharedUvs.push_back(uv);
+    ::nicxlive::core::render::sharedUvRegister(sharedUvs, &uvOffset);
+    updateIndices();
+    updateVertices();
+}
+
+Drawable::~Drawable() {
+    ::nicxlive::core::render::sharedDeformUnregister(deformation);
+    ::nicxlive::core::render::sharedVertexUnregister(sharedVertices);
+    ::nicxlive::core::render::sharedUvUnregister(sharedUvs);
+}
+
 void MeshData::add(const Vec2& vertex, const Vec2& uv) {
     vertices.push_back(vertex);
     uvs.push_back(uv);
@@ -244,17 +246,17 @@ MeshData MeshData::copy() const {
     return out;
 }
 
-Vec2Array& sharedVertexBufferData() { return gSharedVertices; }
-Vec2Array& sharedUvBufferData() { return gSharedUvs; }
-Vec2Array& sharedDeformBufferData() { return gSharedDeform; }
+Vec2Array& sharedVertexBufferData() { return ::nicxlive::core::render::sharedVertexBufferData(); }
+Vec2Array& sharedUvBufferData() { return ::nicxlive::core::render::sharedUvBufferData(); }
+Vec2Array& sharedDeformBufferData() { return ::nicxlive::core::render::sharedDeformBufferData(); }
 
-void sharedVertexResize(Vec2Array& target, std::size_t newLength) { target.resize(newLength); gSharedVerticesDirty = true; }
-void sharedUvResize(Vec2Array& target, std::size_t newLength) { target.resize(newLength); gSharedUvsDirty = true; }
-void sharedUvResize(std::vector<Vec2>& target, std::size_t newLength) { target.resize(newLength); gSharedUvsDirty = true; }
-void sharedDeformResize(Vec2Array& target, std::size_t newLength) { target.resize(newLength); gSharedDeformDirty = true; }
-void sharedVertexMarkDirty() { gSharedVerticesDirty = true; }
-void sharedUvMarkDirty() { gSharedUvsDirty = true; }
-void sharedDeformMarkDirty() { gSharedDeformDirty = true; }
+void sharedVertexResize(Vec2Array& target, std::size_t newLength) { target.resize(newLength); ::nicxlive::core::render::sharedVertexResize(target, newLength); }
+void sharedUvResize(Vec2Array& target, std::size_t newLength) { target.resize(newLength); ::nicxlive::core::render::sharedUvResize(target, newLength); }
+void sharedUvResize(std::vector<Vec2>& target, std::size_t newLength) { target.resize(newLength); }
+void sharedDeformResize(Vec2Array& target, std::size_t newLength) { target.resize(newLength); ::nicxlive::core::render::sharedDeformResize(target, newLength); }
+void sharedVertexMarkDirty() { ::nicxlive::core::render::sharedVertexMarkDirty(); }
+void sharedUvMarkDirty() { ::nicxlive::core::render::sharedUvMarkDirty(); }
+void sharedDeformMarkDirty() { ::nicxlive::core::render::sharedDeformMarkDirty(); }
 void inSetUpdateBounds(bool state) { gDoGenerateBounds = state; }
 bool inGetUpdateBounds() { return gDoGenerateBounds; }
 
@@ -459,15 +461,6 @@ void Drawable::updateIndices() {
     backend->uploadDrawableIndices(ibo, mesh.indices);
 }
 
-static std::size_t registerBuffer(std::map<NodeId, std::size_t>& table, NodeId id, const Vec2Array& data, Vec2Array& buf) {
-    auto it = table.find(id);
-    if (it != table.end()) return it->second;
-    std::size_t offset = buf.size();
-    ensureCapacity(buf, offset, data.size());
-    table[id] = offset;
-    return offset;
-}
-
 std::tuple<Vec2Array, std::optional<Mat4>, bool> Drawable::nodeAttachProcessor(const std::shared_ptr<Node>& node,
                                                                                const Vec2Array& origVertices,
                                                                                const Vec2Array& origDeformation,
@@ -504,39 +497,30 @@ std::tuple<Vec2Array, std::optional<Mat4>, bool> Drawable::nodeAttachProcessor(c
 }
 
 void Drawable::writeSharedBuffers() {
-    if (!mesh.vertices.empty()) {
-        if (vertexOffset == 0 && uuid != 0 && gVertexOffsets.count(uuid) == 0) {
-            vertexOffset = static_cast<uint32_t>(registerBuffer(gVertexOffsets, uuid, vertices, gSharedVertices));
-        }
-        writeBuffer(vertices, gSharedVertices, vertexOffset);
-        gSharedVerticesDirty = true;
-        if (auto backend = core::getCurrentRenderBackend()) {
-            backend->uploadSharedVertexBuffer(gSharedVertices);
-        }
+    // vertices
+    sharedVertices.resize(mesh.vertices.size());
+    for (std::size_t i = 0; i < mesh.vertices.size(); ++i) {
+        sharedVertices.x[i] = mesh.vertices[i].x;
+        sharedVertices.y[i] = mesh.vertices[i].y;
     }
-    if (!mesh.uvs.empty()) {
-        if (uvOffset == 0 && uuid != 0 && gUvOffsets.count(uuid) == 0) {
-            Vec2Array uva(mesh.uvs.size());
-            for (std::size_t i = 0; i < mesh.uvs.size(); ++i) { uva.x[i] = mesh.uvs[i].x; uva.y[i] = mesh.uvs[i].y; }
-            uvOffset = static_cast<uint32_t>(registerBuffer(gUvOffsets, uuid, uva, gSharedUvs));
-        }
-        Vec2Array uva(mesh.uvs.size());
-        for (std::size_t i = 0; i < mesh.uvs.size(); ++i) { uva.x[i] = mesh.uvs[i].x; uva.y[i] = mesh.uvs[i].y; }
-        writeBuffer(uva, gSharedUvs, uvOffset);
-        gSharedUvsDirty = true;
-        if (auto backend = core::getCurrentRenderBackend()) {
-            backend->uploadSharedUvBuffer(gSharedUvs);
-        }
+    sharedVertexResize(sharedVertices, sharedVertices.size());
+    sharedVertexMarkDirty();
+    // uvs
+    sharedUvs.resize(mesh.uvs.size());
+    for (std::size_t i = 0; i < mesh.uvs.size(); ++i) {
+        sharedUvs.x[i] = mesh.uvs[i].x;
+        sharedUvs.y[i] = mesh.uvs[i].y;
     }
-    if (deformation.size() > 0) {
-        if (deformOffset == 0 && uuid != 0 && gDeformOffsets.count(uuid) == 0) {
-            deformOffset = static_cast<uint32_t>(registerBuffer(gDeformOffsets, uuid, deformation, gSharedDeform));
-        }
-        writeBuffer(deformation, gSharedDeform, deformOffset);
-        gSharedDeformDirty = true;
-        if (auto backend = core::getCurrentRenderBackend()) {
-            backend->uploadSharedDeformBuffer(gSharedDeform);
-        }
+    sharedUvResize(sharedUvs, sharedUvs.size());
+    sharedUvMarkDirty();
+    // deformation
+    sharedDeformResize(deformation, deformation.size());
+    sharedDeformMarkDirty();
+
+    if (auto backend = core::getCurrentRenderBackend()) {
+        backend->uploadSharedVertexBuffer(sharedVertexBufferData());
+        backend->uploadSharedUvBuffer(sharedUvBufferData());
+        backend->uploadSharedDeformBuffer(sharedDeformBufferData());
     }
 }
 
@@ -765,7 +749,6 @@ void Drawable::runBeginTask(core::RenderContext& ctx) {
     weldingApplied.clear();
     Deformable::runBeginTask(ctx);
     writeSharedBuffers();
-    gSharedVerticesDirty = gSharedUvsDirty = gSharedDeformDirty = false;
 }
 
 void Drawable::runPostTaskImpl(std::size_t priority, core::RenderContext& ctx) {

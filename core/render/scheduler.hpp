@@ -1,6 +1,7 @@
 #pragma once
 
 #include <functional>
+#include <map>
 #include <utility>
 #include <vector>
 
@@ -8,18 +9,18 @@ namespace nicxlive::core {
 
 class RenderContext;
 
-enum class TaskOrder {
-    Init,
-    Parameters,
-    PreProcess,
-    Dynamic,
-    Post0,
-    Post1,
-    Post2,
-    RenderBegin,
-    Render,
-    Final,
-    RenderEnd,
+enum class TaskOrder : int {
+    Init = 1,
+    Parameters = 2,
+    PreProcess = 3,
+    Dynamic = 4,
+    Post0 = 5,
+    Post1 = 6,
+    Post2 = 7,
+    RenderBegin = 8,
+    Render = 9,
+    RenderEnd = 10,
+    Final = 11,
 };
 
 enum class TaskKind {
@@ -32,26 +33,26 @@ enum class TaskKind {
     Finalize,
 };
 
+using TaskHandler = std::function<void(RenderContext&)>;
+
+struct Task {
+    TaskOrder order;
+    TaskKind kind;
+    TaskHandler handler;
+};
+
 class TaskScheduler {
 public:
-    using TaskFn = std::function<void(RenderContext&)>;
+    TaskScheduler();
 
-    void clearTasks() { tasks_.clear(); }
-
-    void addTask(TaskOrder order, TaskKind /*kind*/, TaskFn fn) {
-        tasks_.push_back(std::make_pair(order, std::move(fn)));
-    }
-
-    void executeRange(RenderContext& ctx, TaskOrder begin, TaskOrder end) {
-        for (auto& [order, fn] : tasks_) {
-            if (static_cast<int>(order) < static_cast<int>(begin)) continue;
-            if (static_cast<int>(order) > static_cast<int>(end)) continue;
-            if (fn) fn(ctx);
-        }
-    }
+    void clearTasks();
+    void addTask(TaskOrder order, TaskKind kind, TaskHandler handler);
+    void executeRange(RenderContext& ctx, TaskOrder startOrder, TaskOrder endOrder = TaskOrder::Final);
+    void execute(RenderContext& ctx) { executeRange(ctx, TaskOrder::Init, TaskOrder::Final); }
 
 private:
-    std::vector<std::pair<TaskOrder, TaskFn>> tasks_{};
+    std::map<TaskOrder, std::vector<Task>> queues_;
+    std::vector<TaskOrder> orderSequence_;
 };
 
 } // namespace nicxlive::core

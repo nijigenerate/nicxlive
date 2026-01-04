@@ -12,6 +12,37 @@
 
 namespace nicxlive::core {
 
+class Texture;
+
+// 簡易矩形（D: rect）
+struct Rect {
+    float x{0};
+    float y{0};
+    float w{0};
+    float h{0};
+};
+
+// Difference evaluation (D: diff_collect)
+struct DifferenceEvaluationRegion {
+    int x{0};
+    int y{0};
+    int width{0};
+    int height{0};
+};
+
+constexpr std::size_t kDiffTileColumns = 16;
+constexpr std::size_t kDiffTileCount = kDiffTileColumns * kDiffTileColumns;
+
+struct DifferenceEvaluationResult {
+    double red{0};
+    double green{0};
+    double blue{0};
+    double alpha{0};
+    uint32_t sampleCount{0};
+    std::array<double, kDiffTileCount> tileTotals{};
+    std::array<double, kDiffTileCount> tileCounts{};
+};
+
 using RenderResourceHandle = uint32_t;
 struct DynamicCompositePass;
 
@@ -65,6 +96,20 @@ public:
     virtual void endDynamicComposite(const DynamicCompositePass& /*pass*/) {}
     virtual void destroyDynamicComposite(const std::shared_ptr<DynamicCompositeSurface>& /*surface*/) {}
     virtual void drawPartPacket(const nodes::PartDrawPacket& /*packet*/) {}
+    // Immediate テクスチャ描画
+    virtual void drawTextureAtPart(const Texture& /*tex*/, const std::shared_ptr<nodes::Part>& /*part*/) {}
+    virtual void drawTextureAtPosition(const Texture& /*tex*/, const nodes::Vec2& /*pos*/, float /*opacity*/,
+                                       const nodes::Vec3& /*color*/, const nodes::Vec3& /*screenColor*/) {}
+    virtual void drawTextureAtRect(const Texture& /*tex*/, const Rect& /*area*/, const Rect& /*uv*/,
+                                   float /*opacity*/, const nodes::Vec3& /*color*/, const nodes::Vec3& /*screenColor*/,
+                                   void* /*shader*/, void* /*camera*/) {}
+    // Difference aggregation (default no-op)
+    virtual void setDifferenceAggregationEnabled(bool) {}
+    virtual bool isDifferenceAggregationEnabled() { return false; }
+    virtual void setDifferenceAggregationRegion(const DifferenceEvaluationRegion&) {}
+    virtual DifferenceEvaluationRegion getDifferenceAggregationRegion() { return DifferenceEvaluationRegion{}; }
+    virtual bool evaluateDifferenceAggregation(RenderResourceHandle, int, int) { return false; }
+    virtual bool fetchDifferenceAggregationResult(DifferenceEvaluationResult&) { return false; }
 };
 class UnityRenderBackend : public RenderBackend {
 public:

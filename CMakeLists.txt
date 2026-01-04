@@ -13,6 +13,15 @@ set(NICXLIVE_SOURCES
     core/texture.cpp
     core/puppet.cpp
     core/render/common.cpp
+    core/render/commands.cpp
+    core/render/command_emitter.cpp
+    core/render/backend_queue.cpp
+    core/render/graph_builder.cpp
+    core/render/profiler.cpp
+    core/render/scheduler.cpp
+    core/render/immediate.cpp
+    core/render/shared_deform_buffer.cpp
+    core/render/commands.cpp
     core/nodes/node.cpp
     core/nodes/part.cpp
     core/nodes/mask.cpp

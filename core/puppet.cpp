@@ -2,6 +2,7 @@
 #include "render/common.hpp"
 #include "render/graph_builder.hpp"
 #include "render/scheduler.hpp"
+#include "render/command_emitter.hpp"
 #include "nodes/projectable.hpp"
 
 #include <algorithm>

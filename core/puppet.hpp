@@ -10,6 +10,7 @@
 #include "param/parameter.hpp"
 #include "render/graph_builder.hpp"
 #include "render/scheduler.hpp"
+#include "render/command_emitter.hpp"
 #include "texture.hpp"
 
 #include <algorithm>

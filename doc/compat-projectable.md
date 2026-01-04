@@ -10,8 +10,8 @@
 | method `scanPartsRecurse()` | Part/Mask を収集、Projectable 子は自身で scanParts | Projectable 子にscanPartsRecurseを委譲し取りこぼし防止 | ◯ | - |
 | method `drawSelf()` | 子なしなら return、ありなら Part::drawSelf | 同等 | ◯ | - |
 | method `renderMask()` | MaskApply を backend に送る | Part経由でbackend apply（同等） | ◯ | - |
-| method `serializeSelfImpl()` | textures 一時退避＋ auto_resized を出力 | auto_resizedのみ保存 | ◯ | - |
-| method `deserializeFromFghj()` | auto_resized 読み込み、textures null で復元 | 同等 | ◯ | - |
+| method `serializeSelfImpl()` | textures/stencil一時退避＋auto_resized・texture_offset・use_max_children_bounds・max_bounds_start_frame・deferred/ancestor flagsを保存 | 同等 | ◯ | - |
+| method `deserializeFromFghj()` | 上記 state を復元（auto_resized/texture_offset/use_max_children_bounds/max_bounds_start_frame/deferred/ancestor flags） | 同等 | ◯ | - |
 | method `initTarget()` | bounds で tex/stencil生成＋既存破棄 | deformオフセットを反映し旧リソース破棄・destroyDynamicComposite 呼び出し | ◯ | - |
 | method `updateDynamicRenderStateFlags()` | deferred/autoResize/boundsDirty 管理 | ancestor差分反映/prevTRS更新を実装 | ◯ | - |
 | method `mergeBounds()` | 配列から min/max を算出 | 実装済み | ◯ | - |

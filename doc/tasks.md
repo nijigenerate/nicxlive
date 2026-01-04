@@ -7,7 +7,19 @@ Status: `[ ]` todo, `[>]` in progress, `[x]` done, `[?]` blocked.
 - [x] R2: RenderBackend に MaskApply/DynamicComposite begin/end/playback を追加し、RenderCommandEmitter から呼び出せるようにする
 - [x] R3: Offscreen テクスチャ/ステンシルの生成・破棄・再利用（Texture 管理と reuseCachedTextureThisFrame の裏付け）
 - [x] R4: RenderContext への renderGraph/renderBackend 配線と frame 管理（currentDynamicCompositeFrame 等）
-- [ ] R5: Projectable/Composite の serialize/deserialize で textureOffset/offsreen 状態・maxBoundsStartFrame など固有フィールドを保存/復元する
+- [x] R5: Projectable/Composite の serialize/deserialize で textureOffset/オフスクリーン状態/maxBoundsStartFrame など固有フィールドを保存/復元する（D版写経。auto_resized だけでなく offscreenSurface/textureOffset/useMaxChildrenBounds/deferredChanged 等も含む）
+- [x] R6: Render queue フレームワークの移植（`render/commands.d`, `command_emitter.d`, `graph_builder.d`, `scheduler.d`, `backends/queue/package.d` を C++ に写経）
+  - [x] Q1: render/commands の各コマンド構造体と enum を C++ に写経（DrawPart/ApplyMask/Begin/EndDynamicComposite など）
+  - [x] Q2: RenderCommandEmitter を写経（コマンド構築・キュー投入・frame begin/end 管理）
+  - [x] Q3: RenderGraphBuilder/RenderScheduler を写経し、queue backend にフック（frame 内の command list 構築）
+  - [x] Q4: backend_queue を写経（queue 再生、render backend 呼び出し、resource handle 管理）
+  - [x] Q5: immediate/render/profiler 等、queue依存の補助モジュールを必要に応じて写経し統合
+    - [x] render/profiler: D 同等のスコープ計測＋1s毎のレポート
+    - [x] render/immediate: inDrawTexture* 即時描画ラッパーを追加（Backend API 拡張）
+    - [x] render/passes: RenderPassKind/RenderScopeHint を render_pass.hpp に写経済み（GraphBuilder で使用）
+    - [x] render/shared_deform_buffer: SharedVecAtlas ベースの共有バッファ API を写経追加し Drawable/Part/Mask で利用開始
+    - [x] Backend: differenceAggregation 系 API（DifferenceEvaluationRegion/Result）を RenderBackend/QueueBackend に追加（評価は未実装）
+  - [x] File layout (D準拠で作成/分割): `core/render/commands.hpp/.cpp`, `command_emitter.hpp/.cpp`, `graph_builder.hpp/.cpp`, `scheduler.hpp/.cpp`, `backend_queue.hpp/.cpp`, `immediate.hpp/.cpp`, `profiler.hpp/.cpp`
 
 ## パラメータ / フィルタ基盤（優先）
 - [x] P1: Vec2Array/InterpolateMode/gather・scatter など ParameterBinding が依存する utils を core/common に実装。

@@ -5,6 +5,7 @@
 #include "../texture.hpp"
 #include "../common/utils.hpp"
 #include "../serde.hpp"
+#include "../render/shared_deform_buffer.hpp"
 
 #include <algorithm>
 #include <unordered_set>
@@ -63,10 +64,13 @@ struct WeldingLink {
 class Drawable : public Deformable {
 public:
     MeshData mesh{};
+    // Shared buffer mirrors for atlas registration
+    Vec2Array sharedVertices{};
+    Vec2Array sharedUvs{};
     std::vector<Vec2> deformationOffsets{};
-    uint32_t vertexOffset{0};
-    uint32_t uvOffset{0};
-    uint32_t deformOffset{0};
+    std::size_t vertexOffset{0};
+    std::size_t uvOffset{0};
+    std::size_t deformOffset{0};
     uint32_t ibo{0};
     Vec3 tint{};
     Vec3 screenTint{};
@@ -80,7 +84,10 @@ public:
     std::unordered_set<NodeId> weldingApplied{};
     std::unordered_map<NodeId, std::array<std::size_t, 3>> attachedIndex{};
 
-    Drawable() = default;
+    Drawable();
+    explicit Drawable(const std::shared_ptr<Node>& parent);
+    Drawable(const MeshData& data, uint32_t uuidVal = 0, const std::shared_ptr<Node>& parent = nullptr);
+    ~Drawable() override;
 
     virtual void updateIndices();
 
