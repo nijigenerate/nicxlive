@@ -21,4 +21,4 @@
 | method `getAffectedParameters`/`affectsParameter` | 影響パラメータ返却 | Driver 側に実装依存（未リゾルブ） | △ |
 | serializeSelfImpl | param/model/map/physics params/output_scale/local_only を保存 | 同等フィールド保存 | ◯ |
 | deserializeFromFghj | 上記復元＋初期化 | 同等フィールド復元 | ◯ |
-| drawDebug | デバッグ描画 | 未実装 | ✗ |
+| drawDebug | デバッグ描画 | anchor→output を debugDrawBuffer に出力 | ◯ |

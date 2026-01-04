@@ -139,4 +139,14 @@ void SimplePhysicsDriver::logPhysicsState(const std::string& context, const std:
     std::cerr << std::endl;
 }
 
+void SimplePhysicsDriver::drawDebug() {
+    auto& buf = debugDrawBuffer();
+    DebugLine line{
+        Vec3{anchor.x, anchor.y, 0},
+        Vec3{output.x, output.y, 0},
+        Vec4{0.2f, 0.8f, 1.0f, 0.8f},
+    };
+    buf.push_back(line);
+}
+
 } // namespace nicxlive::core::nodes
