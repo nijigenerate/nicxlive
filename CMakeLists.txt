@@ -1,6 +1,11 @@
 cmake_minimum_required(VERSION 3.20)
 project(nicxlive LANGUAGES CXX)
 
+# Allow FindBoost while CMake 3.31+ defaults to Boost Config packages only.
+if(POLICY CMP0167)
+  cmake_policy(SET CMP0167 OLD)
+endif()
+
 # Require modern C++
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -10,7 +15,27 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 option(BUILD_WASM "Build nicxlive for WebAssembly via Emscripten" OFF)
 
 # Boost is used for property_tree and qvm (header-only)
-find_package(Boost REQUIRED)
+# Prefer a Config package (common on Windows/vcpkg) and fall back to FindBoost.
+# On MSVC we default to static, multithreaded runtime unless the user overrides.
+if(WIN32 AND NOT DEFINED Boost_USE_STATIC_LIBS)
+  set(Boost_USE_STATIC_LIBS ON)
+endif()
+if(NOT DEFINED Boost_USE_MULTITHREADED)
+  set(Boost_USE_MULTITHREADED ON)
+endif()
+
+find_package(Boost 1.70 QUIET CONFIG)
+if(NOT Boost_FOUND)
+  find_package(Boost 1.70 REQUIRED)
+endif()
+
+if(TARGET Boost::headers)
+  set(NICXLIVE_BOOST_HEADERS_TARGET Boost::headers)
+elseif(TARGET Boost::boost)
+  set(NICXLIVE_BOOST_HEADERS_TARGET Boost::boost)
+else()
+  message(FATAL_ERROR "Boost headers target not found. Ensure Boost is installed and provides Boost::headers or Boost::boost.")
+endif()
 
 if(BUILD_WASM)
   if(NOT EMSCRIPTEN AND NOT CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
@@ -62,12 +87,14 @@ target_include_directories(nicxlive
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/core
         ${CMAKE_CURRENT_SOURCE_DIR}/core/third_party
-        ${Boost_INCLUDE_DIRS}
 )
+if(Boost_INCLUDE_DIRS)
+    target_include_directories(nicxlive PUBLIC ${Boost_INCLUDE_DIRS})
+endif()
 
 target_link_libraries(nicxlive
     PUBLIC
-        Boost::boost
+        ${NICXLIVE_BOOST_HEADERS_TARGET}
 )
 
 target_compile_features(nicxlive PUBLIC cxx_std_20)

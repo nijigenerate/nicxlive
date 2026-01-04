@@ -9,6 +9,7 @@
 #include <iostream>
 #include <memory>
 #include <limits>
+#include <numbers>
 #include <vector>
 
 namespace nicxlive::core::nodes {
@@ -220,7 +221,7 @@ public:
             return;
         }
 
-        float springKsqrt = frequencyVal * 2.0f * static_cast<float>(M_PI);
+        float springKsqrt = frequencyVal * 2.0f * std::numbers::pi_v<float>;
         if (!std::isfinite(springKsqrt)) {
             driver->logPhysicsState("SpringPendulum:springKsqrtInvalid");
             setD(2, Vec2{0, 0});
@@ -616,7 +617,7 @@ void SimplePhysicsDriver::updateOutputs() {
         break;
     }
     case ParamMapMode::AngleLength: {
-        float a = std::atan2(-localAngle.x, localAngle.y) / static_cast<float>(M_PI);
+        float a = std::atan2(-localAngle.x, localAngle.y) / std::numbers::pi_v<float>;
         paramVal = Vec2{a, relLength};
         break;
     }
@@ -626,7 +627,7 @@ void SimplePhysicsDriver::updateOutputs() {
         break;
     }
     case ParamMapMode::LengthAngle: {
-        float a = std::atan2(-localAngle.x, localAngle.y) / static_cast<float>(M_PI);
+        float a = std::atan2(-localAngle.x, localAngle.y) / std::numbers::pi_v<float>;
         paramVal = Vec2{relLength, a};
         break;
     }
