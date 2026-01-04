@@ -5,6 +5,7 @@
 #include "../render.hpp"
 #include "../serde.hpp"
 #include "path_deformer.hpp"
+#include "composite.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -338,6 +339,12 @@ void GridDeformer::build(bool force) {
 
 void GridDeformer::setupChildNoRecurse(const std::shared_ptr<Node>& node, bool prepend) {
     if (!node) return;
+    if (auto comp = std::dynamic_pointer_cast<Composite>(node)) {
+        if (comp->propagateMeshGroupEnabled()) {
+            releaseChildNoRecurse(node);
+            return;
+        }
+    }
     auto deformable = std::dynamic_pointer_cast<Deformable>(node);
     bool isDeformable = static_cast<bool>(deformable);
     Node::FilterHook hook;

@@ -32,7 +32,7 @@
 | メソッド computeCache | clamp→区間探索→u/v 計算 | 同等 | ◯ |
 | メソッド locateInterval | 軸から区間/重み取得 | 同等 | ◯ |
 | メソッド sampleGridPoints | バイリニア補間（SIMD/スカラ両方） | バイリニア補間（4レーンバッチ＋スカラ） | ◯ |
-| メソッド setupChildNoRecurse | dynamic/translateChildren に応じ pre/post hook 設定 | 同等 | ◯ |
+| メソッド setupChildNoRecurse | dynamic/translateChildren に応じ pre/post hook 設定。Composite が propagateMeshGroup のときは hook を外す | 同等（Composite propagateMeshGroup では hook を外す） | ◯ |
 | メソッド releaseChildNoRecurse | hook 解除 | 同等 | ◯ |
 | メソッド adoptGridFromAxes | 軸採用 | 同等 | ◯ |
 | メソッド adoptFromVertices | 頂点から軸採用（形状保持可） | 同等 | ◯ |
