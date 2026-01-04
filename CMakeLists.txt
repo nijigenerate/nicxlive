@@ -50,6 +50,7 @@ endif()
 set(NICXLIVE_SOURCES
     core/texture.cpp
     core/puppet.cpp
+    utils/stb_image_write_impl.cpp
     core/render/common.cpp
     core/render/commands.cpp
     core/render/command_emitter.cpp

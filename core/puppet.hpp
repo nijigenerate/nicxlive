@@ -118,6 +118,7 @@ public:
     bool renderParameters{true};
     bool enableDrivers{true};
     nodes::Transform transform{};
+    std::map<std::string, std::vector<uint8_t>> extData{};
 
 private:
     std::shared_ptr<nodes::Node> puppetRootNode{};

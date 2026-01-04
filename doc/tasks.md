@@ -27,8 +27,8 @@ Status: `[ ]` todo, `[>]` in progress, `[x]` done, `[?]` blocked.
 - [x] P3: NodeFilter の `applyDeformToChildren` をフル実装（パラメータバインディングを辿って deform/transform を転送）。
 
 ## シリアライズ/フォーマット基盤（Unity DLL 前提）
-- [ ] F1: `fmt/package.d`, `fmt/io.d`, `fmt/serialize.d`, `fmt/binfmt.d` を写経し、C++の fmt モジュールを追加（InochiSerializer/Fghj 等を提供）
-- [ ] F2: fmt 基盤を使って Node/Puppet/Texture 等のシリアライズ経路を D 版と一致させる（ファイル読み書きは Unity 側バッファ渡しを前提）
+- [>] F1: `fmt/package.d`, `fmt/io.d`, `fmt/serialize.d`, `fmt/binfmt.d` を写経し、C++の fmt モジュールを追加（InochiSerializer/Fghj 等を提供）【ヘッダ追加済み、INP テクスチャの TGA/PNG エンコードは未実装】
+- [>] F2: fmt 基盤を使って Node/Puppet/Texture 等のシリアライズ経路を D 版と一致させる（ファイル読み書きは Unity 側バッファ渡しを前提。INP テクスチャセクション/EXT セクションは実装済、TGAのみ対応で PNG/BC7 未対応）
 
 ## ノード階層（基底 → 派生）
 - [x] 1: `package.d` → `core/nodes/node.hpp/.cpp`（Node/TmpNode, TaskFlag/SerializeFlag/UUID/transform）
@@ -88,6 +88,14 @@ Status: `[ ]` todo, `[>]` in progress, `[x]` done, `[?]` blocked.
 | RQ9 | render/backends/queue/package.d | 393 | core/render/backend_queue.cpp | 148 | △ |
 | RQ10 | render/backends/opengl/* | 4150 | （未移植） | 0 | ✗ |
 | RQ11 | render/backends/directx12/* | 2915 | （未移植） | 0 | ✗ |
+
+### fmt 層 行数トラッカー（◯/△/✗ 評価メモ）※上記 F1/F2 タスク対応
+| Task ID | D モジュール | Lines | C++ モジュール | Lines | 評価 |
+| - | --- | ---:| --- | ---:| --- |
+| F1 (fmt/package) | fmt/package.d | 37 | fmt/fmt.hpp | 73 | △ |
+| F1 (fmt/io) | fmt/io.d | 118 | fmt/io.hpp | 44 | ◯ |
+| F1 (fmt/serialize) | fmt/serialize.d | 185 | fmt/serialize.hpp | 48 | ◯ |
+| F1 (fmt/binfmt) | fmt/binfmt.d | 81 | fmt/binfmt.hpp | 37 | ◯ |
 
 ※ バックエンドは queue のみ移植済み。OpenGL/DX12 系は未着手のため ✗。人数の差は写経範囲の差異を示す。
 
