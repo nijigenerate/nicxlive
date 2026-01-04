@@ -16,6 +16,7 @@ using ::nicxlive::core::nodes::Drawable;
 using ::nicxlive::core::nodes::Mask;
 using ::nicxlive::core::nodes::Part;
 using ::nicxlive::core::nodes::PartDrawPacket;
+using ::nicxlive::core::nodes::MeshData;
 
 PartDrawPacket makePartDrawPacket(const std::shared_ptr<Part>& part, bool isMask) {
     PartDrawPacket packet{};
@@ -34,7 +35,7 @@ PartDrawPacket makeMaskDrawPacket(const std::shared_ptr<Mask>& mask) {
     return packet;
 }
 
-static bool indexRangeValid(const nodes::MeshData& mesh) {
+static bool indexRangeValid(const MeshData& mesh) {
     if (mesh.indices.empty()) return true;
     std::size_t maxIdx = 0;
     for (auto idx : mesh.indices) {

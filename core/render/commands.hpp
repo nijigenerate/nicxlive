@@ -9,14 +9,17 @@
 #include <optional>
 #include <vector>
 
-namespace nicxlive::core::render {
-
+namespace nicxlive::core {
 namespace nodes {
 class Part;
 class Mask;
 class Drawable;
 class Composite;
 } // namespace nodes
+} // namespace nicxlive::core
+
+namespace nicxlive::core::render {
+
 using ::nicxlive::core::nodes::Vec2;
 using ::nicxlive::core::nodes::Vec3;
 using ::nicxlive::core::nodes::BlendMode;

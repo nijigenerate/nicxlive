@@ -26,7 +26,29 @@ struct TextureHandle {
     uint32_t id{0};
     int width{0};
     int height{0};
-    int channels{4};
+    int inChannels{0};
+    int outChannels{0};
+    bool stencil{false};
+    std::vector<uint8_t> data{};
+    ::nicxlive::core::Filtering filtering{::nicxlive::core::Filtering::Linear};
+    ::nicxlive::core::Wrapping wrapping{::nicxlive::core::Wrapping::Clamp};
+    float anisotropy{1.0f};
+};
+
+enum class TextureCommandKind {
+    Create,
+    Update,
+    Params,
+    Dispose,
+};
+
+struct TextureCommand {
+    TextureCommandKind kind{TextureCommandKind::Create};
+    uint32_t id{0};
+    int width{0};
+    int height{0};
+    int inChannels{0};
+    int outChannels{0};
     bool stencil{false};
     std::vector<uint8_t> data{};
     ::nicxlive::core::Filtering filtering{::nicxlive::core::Filtering::Linear};
@@ -77,6 +99,7 @@ public:
 
     // Unity DLL 側に受け渡すためのコピー出力
     std::vector<QueuedCommand> queue{};
+    std::vector<TextureCommand> resourceQueue{};
 
     // キューを別 backend に再生（D: RenderingBackend.playback 相当）
     void playback(RenderBackend* backend) const;
@@ -86,6 +109,7 @@ public:
 
     const std::vector<QueuedCommand>& backendQueue() const { return queue; }
     std::vector<QueuedCommand>& backendQueue() { return queue; }
+    const std::vector<TextureCommand>& backendResourceQueue() const { return resourceQueue; }
 
     const std::vector<uint16_t>* getDrawableIndices(uint32_t id) const {
         auto it = indexBuffers.find(id);

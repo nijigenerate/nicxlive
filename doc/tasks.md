@@ -26,6 +26,10 @@ Status: `[ ]` todo, `[>]` in progress, `[x]` done, `[?]` blocked.
 - [x] P2: ParameterBinding 詳細（Value/Deformation/ParameterParameterBinding の apply/scale/copy/swap/reverseAxis/reInterpolate 等）を D に合わせて移植。
 - [x] P3: NodeFilter の `applyDeformToChildren` をフル実装（パラメータバインディングを辿って deform/transform を転送）。
 
+## シリアライズ/フォーマット基盤（Unity DLL 前提）
+- [ ] F1: `fmt/package.d`, `fmt/io.d`, `fmt/serialize.d`, `fmt/binfmt.d` を写経し、C++の fmt モジュールを追加（InochiSerializer/Fghj 等を提供）
+- [ ] F2: fmt 基盤を使って Node/Puppet/Texture 等のシリアライズ経路を D 版と一致させる（ファイル読み書きは Unity 側バッファ渡しを前提）
+
 ## ノード階層（基底 → 派生）
 - [x] 1: `package.d` → `core/nodes/node.hpp/.cpp`（Node/TmpNode, TaskFlag/SerializeFlag/UUID/transform）
 - [x] 2: `filter.d` → `core/nodes/filter.hpp`（NodeFilter/Mixin）
@@ -86,3 +90,9 @@ Status: `[ ]` todo, `[>]` in progress, `[x]` done, `[?]` blocked.
 | RQ11 | render/backends/directx12/* | 2915 | （未移植） | 0 | ✗ |
 
 ※ バックエンドは queue のみ移植済み。OpenGL/DX12 系は未着手のため ✗。人数の差は写経範囲の差異を示す。
+
+### Unity Native DLL exports（DllImport 参照）
+- [ ] U1: `njgCreateRenderer`/`njgDestroyRenderer`/`njgFlushCommandBuffer`/`njgGetGcHeapSize`/`njgGetTextureStats` の C API を `extern "C"` で実装し、構造体 packing 含め D 版と一致させる（`unity-managed/Interop/NijiliveNative.cs` に準拠）
+- [ ] U2: `njgLoadPuppet`/`njgUnloadPuppet`/`njgBeginFrame`/`njgTickPuppet` を写経ベースで C API 化（UTF-8 パス、Puppet ハンドル管理、バッファ渡し対応）
+- [ ] U3: `njgEmitCommands`/`njgGetSharedBuffers` で queue/backend のコマンドと共有バッファスナップショットを返す C API を実装（SharedBufferSnapshot に頂点/UV/deform のポインタ＋長さを詰める）
+- [ ] U4: `njgGetParameters`/`njgUpdateParameters` のパラメータ列挙・更新 API を写経し、構造体サイズ/packing を D 版に揃える（P/Invoke バッファ経由）

@@ -7,6 +7,78 @@ namespace nicxlive::core::render {
 
 namespace nodes = ::nicxlive::core::nodes;
 
+// --- RenderQueue (リアルバックエンド向け) ---
+
+void RenderQueue::beginFrame(RenderBackend* backend, RenderGpuState& state) {
+    activeBackend_ = backend;
+    frameState_ = &state;
+    state = RenderGpuState::init();
+    uploadSharedBuffers();
+}
+
+void RenderQueue::endFrame(RenderBackend*, RenderGpuState&) {
+    activeBackend_ = nullptr;
+    frameState_ = nullptr;
+}
+
+bool RenderQueue::ready() const { return activeBackend_ != nullptr && frameState_ != nullptr; }
+
+void RenderQueue::beginMask(bool useStencil) {
+    if (!ready()) return;
+    activeBackend_->beginMask(useStencil);
+}
+
+void RenderQueue::applyMask(const std::shared_ptr<nodes::Drawable>& mask, bool dodge) {
+    if (!ready() || !mask) return;
+    RenderBackend::MaskApplyPacket packet{};
+    if (tryMakeMaskApplyPacket(mask, dodge, packet)) {
+        activeBackend_->applyMask(packet);
+    }
+}
+
+void RenderQueue::beginMaskContent() {
+    if (!ready()) return;
+    activeBackend_->beginMaskContent();
+}
+
+void RenderQueue::endMask() {
+    if (!ready()) return;
+    activeBackend_->endMask();
+}
+
+void RenderQueue::drawPartPacket(const nodes::PartDrawPacket& packet) {
+    if (!ready()) return;
+    activeBackend_->drawPartPacket(packet);
+}
+
+void RenderQueue::beginDynamicComposite(const std::shared_ptr<nodes::Projectable>& composite, const DynamicCompositePass& pass) {
+    if (!ready() || !pass.surface) return;
+    activeBackend_->beginDynamicComposite(pass);
+}
+
+void RenderQueue::endDynamicComposite(const std::shared_ptr<nodes::Projectable>& composite, const DynamicCompositePass& pass) {
+    if (!ready() || !pass.surface) return;
+    activeBackend_->endDynamicComposite(pass);
+}
+
+void RenderQueue::uploadSharedBuffers() {
+    if (!activeBackend_) return;
+    if (sharedVertexBufferDirty()) {
+        activeBackend_->uploadSharedVertexBuffer(sharedVertexBufferData());
+        sharedVertexMarkUploaded();
+    }
+    if (sharedUvBufferDirty()) {
+        activeBackend_->uploadSharedUvBuffer(sharedUvBufferData());
+        sharedUvMarkUploaded();
+    }
+    if (sharedDeformBufferDirty()) {
+        activeBackend_->uploadSharedDeformBuffer(sharedDeformBufferData());
+        sharedDeformMarkUploaded();
+    }
+}
+
+// --- QueueCommandEmitter (キュー収集用) ---
+
 QueueCommandEmitter::QueueCommandEmitter(const std::shared_ptr<QueueRenderBackend>& backend) : backend_(backend) {}
 
 void QueueCommandEmitter::beginFrame(RenderBackend* backend, RenderGpuState& state) {
@@ -15,6 +87,7 @@ void QueueCommandEmitter::beginFrame(RenderBackend* backend, RenderGpuState& sta
     pendingMask = false;
     pendingMaskUsesStencil = false;
     backendQueue().clear();
+    uploadSharedBuffers();
 }
 
 void QueueCommandEmitter::endFrame(RenderBackend*, RenderGpuState&) {
@@ -123,6 +196,32 @@ void QueueCommandEmitter::record(RenderCommandKind kind, const std::function<voi
     cmd.kind = kind;
     fill(cmd);
     backendQueue().push_back(std::move(cmd));
+}
+
+void QueueCommandEmitter::uploadSharedBuffers() {
+    if (!activeBackend_) return;
+    using ::nicxlive::core::render::sharedDeformBufferData;
+    using ::nicxlive::core::render::sharedDeformBufferDirty;
+    using ::nicxlive::core::render::sharedDeformMarkUploaded;
+    using ::nicxlive::core::render::sharedVertexBufferData;
+    using ::nicxlive::core::render::sharedVertexBufferDirty;
+    using ::nicxlive::core::render::sharedVertexMarkUploaded;
+    using ::nicxlive::core::render::sharedUvBufferData;
+    using ::nicxlive::core::render::sharedUvBufferDirty;
+    using ::nicxlive::core::render::sharedUvMarkUploaded;
+
+    if (sharedVertexBufferDirty()) {
+        activeBackend_->uploadSharedVertexBuffer(sharedVertexBufferData());
+        sharedVertexMarkUploaded();
+    }
+    if (sharedUvBufferDirty()) {
+        activeBackend_->uploadSharedUvBuffer(sharedUvBufferData());
+        sharedUvMarkUploaded();
+    }
+    if (sharedDeformBufferDirty()) {
+        activeBackend_->uploadSharedDeformBuffer(sharedDeformBufferData());
+        sharedDeformMarkUploaded();
+    }
 }
 
 } // namespace nicxlive::core::render

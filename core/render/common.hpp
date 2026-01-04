@@ -4,6 +4,7 @@
 #include "../nodes/drawable.hpp"
 #include "../nodes/part.hpp"
 #include "../nodes/projectable.hpp"
+#include "../texture.hpp"
 #include "part_draw_packet.hpp"
 
 #include <array>
@@ -14,6 +15,8 @@
 namespace nicxlive::core {
 
 class Texture;
+enum class Filtering;
+enum class Wrapping;
 
 // 簡易矩形（D: rect）
 struct Rect {
@@ -93,6 +96,11 @@ public:
     virtual void applyMask(const MaskApplyPacket& /*packet*/) {}
     virtual void beginMaskContent() {}
     virtual void endMask() {}
+    // Resource ops (D queue backend 用)
+    virtual uint32_t createTexture(const std::vector<uint8_t>& /*data*/, int /*width*/, int /*height*/, int /*channels*/, bool /*stencil*/) { return 0; }
+    virtual void updateTexture(uint32_t /*id*/, const std::vector<uint8_t>& /*data*/, int /*width*/, int /*height*/, int /*channels*/) {}
+    virtual void setTextureParams(uint32_t /*id*/, ::nicxlive::core::Filtering /*filtering*/, ::nicxlive::core::Wrapping /*wrapping*/, float /*anisotropy*/) {}
+    virtual void disposeTexture(uint32_t /*id*/) {}
     virtual void beginDynamicComposite(const DynamicCompositePass& /*pass*/) {}
     virtual void endDynamicComposite(const DynamicCompositePass& /*pass*/) {}
     virtual void destroyDynamicComposite(const std::shared_ptr<DynamicCompositeSurface>& /*surface*/) {}
@@ -141,6 +149,11 @@ public:
     virtual void drawPartPacket(const nodes::PartDrawPacket& /*packet*/) {}
     virtual void beginDynamicComposite(const std::shared_ptr<nodes::Projectable>& /*composite*/, const DynamicCompositePass& /*pass*/) {}
     virtual void endDynamicComposite(const std::shared_ptr<nodes::Projectable>& /*composite*/, const DynamicCompositePass& /*pass*/) {}
+    // Resource ops (queue backend再生用)
+    virtual uint32_t createTexture(const std::vector<uint8_t>& /*data*/, int /*width*/, int /*height*/, int /*channels*/, bool /*stencil*/) { return 0; }
+    virtual void updateTexture(uint32_t /*id*/, const std::vector<uint8_t>& /*data*/, int /*width*/, int /*height*/, int /*channels*/) {}
+    virtual void setTextureParams(uint32_t /*id*/, ::nicxlive::core::Filtering /*filtering*/, ::nicxlive::core::Wrapping /*wrapping*/, float /*anisotropy*/) {}
+    virtual void disposeTexture(uint32_t /*id*/) {}
     virtual void drawPart(const std::shared_ptr<nodes::Part>& part, bool isMask) {
         if (!part) return;
         nodes::PartDrawPacket packet{};
