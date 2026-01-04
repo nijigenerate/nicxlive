@@ -13,6 +13,7 @@
 - C++17 compiler
 - Boost (uses `property_tree`)
 - stb_image (bundled at `core/third_party/stb_image.h`)
+- (WASM build) Emscripten toolchain + Node.js (Emscripten uses node as emulator) and Boost headers available to the toolchain
 
 ## Build
 ```bash
@@ -24,7 +25,8 @@ cmake --build build
 ### Build for WASM (Emscripten)
 ```bash
 # Set up emsdk and PATH to emcc, then:
-emcmake cmake -S . -B build-wasm -DBUILD_WASM=ON -DCMAKE_BUILD_TYPE=Release
+emcmake cmake -S . -B build-wasm -DBUILD_WASM=ON -DCMAKE_BUILD_TYPE=Release \
+  -DBoost_INCLUDE_DIR=$(brew --prefix)/include
 cmake --build build-wasm
 ```
 `BUILD_WASM=ON` is only honored when using the Emscripten toolchain. If you need specific exports, uncomment and adjust the `add_link_options` hints in `CMakeLists.txt`.
