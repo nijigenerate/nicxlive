@@ -11,6 +11,14 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# Export all symbols on Windows when building shared
+if(WIN32)
+  set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ON)
+endif()
+
+# Toggle for shared library build
+option(NICXLIVE_BUILD_SHARED "Build nicxlive as a shared library" ON)
+
 # WASM (Emscripten) build toggle
 option(BUILD_WASM "Build nicxlive for WebAssembly via Emscripten" OFF)
 
@@ -54,6 +62,7 @@ set(NICXLIVE_SOURCES
     core/runtime_state.cpp
     core/timing.cpp
     core/math/camera.cpp
+    utils/stb_image_impl.cpp
     utils/stb_image_write_impl.cpp
     core/render/common.cpp
     core/render/commands.cpp
@@ -103,3 +112,21 @@ target_link_libraries(nicxlive
 )
 
 target_compile_features(nicxlive PUBLIC cxx_std_20)
+
+if(NICXLIVE_BUILD_SHARED)
+  add_library(nicxlive_shared SHARED ${NICXLIVE_SOURCES})
+  set_target_properties(nicxlive_shared PROPERTIES OUTPUT_NAME nicxlive)
+  target_include_directories(nicxlive_shared
+      PUBLIC
+          ${CMAKE_CURRENT_SOURCE_DIR}/core
+          ${CMAKE_CURRENT_SOURCE_DIR}/core/third_party
+  )
+  if(Boost_INCLUDE_DIRS)
+      target_include_directories(nicxlive_shared PUBLIC ${Boost_INCLUDE_DIRS})
+  endif()
+  target_link_libraries(nicxlive_shared
+      PUBLIC
+          ${NICXLIVE_BOOST_HEADERS_TARGET}
+  )
+  target_compile_features(nicxlive_shared PUBLIC cxx_std_20)
+endif()

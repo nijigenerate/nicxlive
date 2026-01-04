@@ -1,8 +1,4 @@
-#define STB_IMAGE_IMPLEMENTATION
-#define STBI_NO_THREAD_LOCALS
-#define STBI_NO_GIF
-#define STBI_NO_PIC
-#include "third_party/stb_image.h"
+#include "third_party/stb_image_full.h"
 
 #include <cstring>
 #include "texture.hpp"
