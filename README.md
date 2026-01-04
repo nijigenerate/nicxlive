@@ -1,6 +1,6 @@
-# nic☒live
+# nicxlive
 
-`nic☒live` is a straight C++ port of the D-based `nijilive` library. It aims to mirror the original node graph and rendering behavior as closely as possible, while documenting compatibility gaps.
+`nicxlive` is a straight C++ port of the D-based `nijilive` library. It aims to mirror the original node graph and rendering behavior as closely as possible, while documenting compatibility gaps.
 
 ## Goals
 - Implement full compatibility with `nijilive` in C++ (node graph + render behavior)
