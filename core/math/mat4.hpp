@@ -94,6 +94,10 @@ struct Mat4 {
     }
 };
 
+static_assert(std::is_standard_layout_v<Mat4>, "Mat4 must be standard layout");
+static_assert(sizeof(Mat4) == sizeof(float) * 16, "Mat4 size must be 16 floats");
+static_assert(alignof(Mat4) == alignof(float), "Mat4 alignment must match float");
+
 inline Mat4 operator*(const Mat4& lhs, const Mat4& rhs) {
     return Mat4::multiply(lhs, rhs);
 }
