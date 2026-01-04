@@ -6,8 +6,21 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# WASM (Emscripten) build toggle
+option(BUILD_WASM "Build nicxlive for WebAssembly via Emscripten" OFF)
+
 # Boost is used for property_tree and qvm (header-only)
 find_package(Boost REQUIRED)
+
+if(BUILD_WASM)
+  if(NOT EMSCRIPTEN AND NOT CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
+    message(FATAL_ERROR "BUILD_WASM=ON requires Emscripten toolchain (use emcmake).")
+  endif()
+  message(STATUS "Configuring for WASM (Emscripten)")
+  add_compile_options(-sALLOW_MEMORY_GROWTH=1 -sWASM=1)
+  # Linker options for typical modularized builds; adjust as needed for your integration.
+  # add_link_options(-sMODULARIZE=1 -sEXPORT_NAME=\"Module\")
+endif()
 
 set(NICXLIVE_SOURCES
     core/texture.cpp
