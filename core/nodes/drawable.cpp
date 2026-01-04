@@ -6,6 +6,8 @@
 #include "../serde.hpp"
 #include "../render/common.hpp"
 #include "../render/shared_deform_buffer.hpp"
+#include "../math/triangle.hpp"
+#include "../math/mat3.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -17,65 +19,19 @@ namespace nicxlive::core::nodes {
 namespace {
 bool gDoGenerateBounds = false;
 
-std::array<float, 3> barycentric(const Vec2& p, const Vec2& v0, const Vec2& v1, const Vec2& v2) {
-    float denom = (v1.y - v2.y) * (v0.x - v2.x) + (v2.x - v1.x) * (v0.y - v2.y);
-    if (denom == 0.0f) return {-1.0f, -1.0f, -1.0f};
-    float a = ((v1.y - v2.y) * (p.x - v2.x) + (v2.x - v1.x) * (p.y - v2.y)) / denom;
-    float b = ((v2.y - v0.y) * (p.x - v2.x) + (v0.x - v2.x) * (p.y - v2.y)) / denom;
-    float c = 1.0f - a - b;
-    return {a, b, c};
-}
-
-bool pointInTriangle(const Vec2& p, const Vec2& v0, const Vec2& v1, const Vec2& v2) {
-    auto w = barycentric(p, v0, v1, v2);
-    return w[0] >= 0.0f && w[1] >= 0.0f && w[2] >= 0.0f;
-}
-
-struct Mat3x3 {
-    float m[3][3]{
-        {1, 0, 0},
-        {0, 1, 0},
-        {0, 0, 1},
-    };
-    float* operator[](int r) { return m[r]; }
-    const float* operator[](int r) const { return m[r]; }
-};
-
-Mat3x3 multiply(const Mat3x3& a, const Mat3x3& b) {
-    Mat3x3 out{};
-    for (int r = 0; r < 3; ++r) {
-        for (int c = 0; c < 3; ++c) {
-            out.m[r][c] = a.m[r][0] * b.m[0][c] + a.m[r][1] * b.m[1][c] + a.m[r][2] * b.m[2][c];
-        }
-    }
-    return out;
-}
-
-Mat3x3 inverse(const Mat3x3& m) {
-    Mat3x3 inv{};
-    float det = m[0][0] * (m[1][1] * m[2][2] - m[2][1] * m[1][2]) -
-                m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0]) +
-                m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
-    if (det == 0.0f) return Mat3x3{};
-    float invDet = 1.0f / det;
-    inv[0][0] = (m[1][1] * m[2][2] - m[2][1] * m[1][2]) * invDet;
-    inv[0][1] = (m[0][2] * m[2][1] - m[0][1] * m[2][2]) * invDet;
-    inv[0][2] = (m[0][1] * m[1][2] - m[0][2] * m[1][1]) * invDet;
-    inv[1][0] = (m[1][2] * m[2][0] - m[1][0] * m[2][2]) * invDet;
-    inv[1][1] = (m[0][0] * m[2][2] - m[0][2] * m[2][0]) * invDet;
-    inv[1][2] = (m[1][0] * m[0][2] - m[0][0] * m[1][2]) * invDet;
-    inv[2][0] = (m[1][0] * m[2][1] - m[2][0] * m[1][1]) * invDet;
-    inv[2][1] = (m[2][0] * m[0][1] - m[0][0] * m[2][1]) * invDet;
-    inv[2][2] = (m[0][0] * m[1][1] - m[1][0] * m[0][1]) * invDet;
-    return inv;
-}
-
-Vec2 applyAffine(const Mat3x3& m, const Vec2& p) {
-    Vec2 out{};
-    out.x = m[0][0] * p.x + m[0][1] * p.y + m[0][2];
-    out.y = m[1][0] * p.x + m[1][1] * p.y + m[1][2];
-    return out;
-}
+using nicxlive::core::math::applyAffine;
+using nicxlive::core::math::barycentric;
+using nicxlive::core::math::inverse;
+using nicxlive::core::math::Mat3x3;
+using nicxlive::core::math::multiply;
+using nicxlive::core::math::pointInTriangle;
+using nicxlive::core::common::gatherVec2;
+using nicxlive::core::common::scatterAddVec2;
+using nicxlive::core::common::transformAdd;
+using nicxlive::core::common::transformAssign;
+using nicxlive::core::common::operator+=;
+using nicxlive::core::common::operator-=;
+using nicxlive::core::common::operator*=;
 
 std::optional<std::array<std::size_t, 3>> findSurroundingTriangle(const Vec2& pt, const MeshData& mesh) {
     if (mesh.indices.size() < 3) return std::nullopt;

@@ -4,6 +4,8 @@
 #include "filter.hpp"
 #include "../texture.hpp"
 #include "../common/utils.hpp"
+#include "../math/triangle.hpp"
+#include "../math/mat3.hpp"
 #include "../serde.hpp"
 #include "../render/shared_deform_buffer.hpp"
 

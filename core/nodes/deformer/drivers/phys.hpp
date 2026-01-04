@@ -1,14 +1,27 @@
 #pragma once
 
-#include "common.hpp"
-#include "../common/utils.hpp"
+#include "../../common.hpp"
+#include "../../../common/utils.hpp"
 
-#include <vector>
+#include <cstddef>
 #include <memory>
+#include <string>
+#include <vector>
 
 namespace nicxlive::core::nodes {
 
 class PathDeformer;
+
+// Guard helpers translated from D phys.d
+bool guardFinite(PathDeformer* deformer, const std::string& context, float value, std::size_t index = static_cast<std::size_t>(-1));
+bool guardFinite(PathDeformer* deformer, const std::string& context, const Vec2& value, std::size_t index = static_cast<std::size_t>(-1));
+bool isFiniteMatrix(const Mat4& m);
+
+// Require a finite matrix; if invalid, mark and return identity
+Mat4 requireFiniteMatrix(PathDeformer* deformer, const Mat4& m, const std::string& context);
+
+// Summary string for diagnostics
+std::string matrixSummary(const Mat4& m);
 
 struct PhysicsDriverState {
     std::string type{};
@@ -17,12 +30,17 @@ struct PhysicsDriverState {
     std::vector<float> lengths{};
     Vec2 base{};
     Vec2 externalForce{};
-    float damping{0.0f};
-    float restore{0.0f};
-    float timeStep{0.0f};
-    float gravity{0.0f};
-    float inputScale{0.0f};
+    float damping{1.0f};
+    float restore{300.0f};
+    float timeStep{0.01f};
+    float gravity{9.8f};
+    float inputScale{0.01f};
     float worldAngle{0.0f};
+    float propagateScale{0.2f};
+    // Spring driver specifics
+    Vec2 gravityVec{0.0f, 9.8f};
+    float springConstant{10.0f};
+    float restorationConstant{0.0f};
 };
 
 class ConnectedPhysicsDriver {
@@ -53,15 +71,18 @@ public:
 private:
     PathDeformer* deformer_{nullptr};
     std::vector<float> angles_{};
+    std::vector<float> initialAngles_{};
     std::vector<float> angularVelocities_{};
     std::vector<float> lengths_{};
+    core::common::Vec2Array physDeformation_{};
     Vec2 base_{};
     Vec2 externalForce_{};
     float damping_{1.0f};
-    float restore_{300.0f};
+    float restoreConstant_{300.0f};
     float timeStep_{0.01f};
     float gravity_{9.8f};
     float inputScale_{0.01f};
+    float propagateScale_{0.2f};
     float worldAngle_{0.0f};
 };
 
@@ -79,17 +100,26 @@ public:
 
 private:
     PathDeformer* deformer_{nullptr};
-    std::vector<float> angles_{};
-    std::vector<float> angularVelocities_{};
+    core::common::Vec2Array positions_{};
+    core::common::Vec2Array velocities_{};
+    core::common::Vec2Array initialPositions_{};
     std::vector<float> lengths_{};
-    Vec2 base_{};
+    core::common::Vec2Array physDeformation_{};
     Vec2 externalForce_{};
-    float damping_{1.0f};
-    float restore_{50.0f};
-    float timeStep_{0.01f};
-    float gravity_{9.8f};
-    float inputScale_{0.01f};
-    float worldAngle_{0.0f};
+    float damping_{0.3f};
+    float springConstant_{10.0f};
+    float restorationConstant_{0.0f};
+    float timeStep_{0.1f};
+    Vec2 gravityVec_{0.0f, 9.8f};
+
+    void updateSpringPendulum(core::common::Vec2Array& positions,
+                              core::common::Vec2Array& velocities,
+                              const core::common::Vec2Array& initialPositions,
+                              const std::vector<float>& lengths,
+                              float damping,
+                              float springConstant,
+                              float restorationConstant,
+                              float timeStep);
 };
 
 } // namespace nicxlive::core::nodes

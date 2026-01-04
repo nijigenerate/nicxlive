@@ -49,8 +49,10 @@ set(NICXLIVE_SOURCES
     core/nodes/curve.cpp
     core/nodes/deformable.cpp
     core/nodes/filter.cpp
-    core/nodes/connected_physics_driver.cpp
-    core/nodes/phys.cpp
+    core/nodes/deformer/drivers/phys.cpp
+    core/math/triangle.cpp
+    core/math/mat3.cpp
+    # math/transform.hpp is header-only
 )
 
 add_library(nicxlive STATIC ${NICXLIVE_SOURCES})

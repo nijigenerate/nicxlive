@@ -11,6 +11,10 @@
 
 namespace nicxlive::core::nodes {
 
+using nicxlive::core::common::transformAssign;
+using nicxlive::core::common::transformAdd;
+using nicxlive::core::common::operator-;
+
 namespace {
 constexpr float kAxisTolerance = 1e-4f;
 constexpr float kBoundaryTolerance = 1e-4f;

@@ -6,7 +6,7 @@
 #include "../serde.hpp"
 #include "../param/parameter.hpp"
 #include "curve.hpp"
-#include "connected_physics_driver.hpp"
+#include "deformer/drivers/phys.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -16,6 +16,13 @@
 #include <unordered_map>
 
 namespace nicxlive::core::nodes {
+
+using nicxlive::core::common::transformAssign;
+using nicxlive::core::common::transformAdd;
+using nicxlive::core::common::operator+=;
+using nicxlive::core::common::operator-=;
+using nicxlive::core::common::gatherVec2;
+using nicxlive::core::common::scatterAddVec2;
 
 namespace {
 constexpr int kPathFilterStage = 2;
@@ -1247,6 +1254,11 @@ void PathDeformer::serializeSelfImpl(::nicxlive::core::serde::InochiSerializer& 
             phys.put("gravity", st.gravity);
             phys.put("inputScale", st.inputScale);
             phys.put("worldAngle", st.worldAngle);
+            phys.put("propagateScale", st.propagateScale);
+            phys.put("gravityVec.x", st.gravityVec.x);
+            phys.put("gravityVec.y", st.gravityVec.y);
+            phys.put("springConstant", st.springConstant);
+            phys.put("restorationConstant", st.restorationConstant);
         }
         serializer.root.add_child("physics", phys);
     }
@@ -1317,6 +1329,11 @@ void PathDeformer::serializeSelfImpl(::nicxlive::core::serde::InochiSerializer& 
             st.gravity = phy->get<float>("gravity", st.gravity);
             st.inputScale = phy->get<float>("inputScale", st.inputScale);
             st.worldAngle = phy->get<float>("worldAngle", st.worldAngle);
+            st.propagateScale = phy->get<float>("propagateScale", st.propagateScale);
+            st.gravityVec.x = phy->get<float>("gravityVec.x", st.gravityVec.x);
+            st.gravityVec.y = phy->get<float>("gravityVec.y", st.gravityVec.y);
+            st.springConstant = phy->get<float>("springConstant", st.springConstant);
+            st.restorationConstant = phy->get<float>("restorationConstant", st.restorationConstant);
             adapter->setState(st);
         }
     }

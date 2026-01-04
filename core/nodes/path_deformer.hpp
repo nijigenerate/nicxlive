@@ -3,8 +3,7 @@
 #include "deformer_base.hpp"
 #include "deformable.hpp"
 #include "curve.hpp"
-#include "connected_physics_driver.hpp"
-#include "phys.hpp"
+#include "deformer/drivers/phys.hpp"
 #include "../param/parameter.hpp"
 
 #include <memory>
@@ -150,6 +149,8 @@ public:
     void setPhysicsOnly(bool v) { physicsOnly = v; }
     void setDynamicDeformation(bool v) { dynamicDeformation = v; }
     void reportInvalid(const std::string& ctx, std::size_t idx, const Vec2& value);
+    // D互換の物理デグレ報告
+    void reportPhysicsDegeneracy(const std::string& ctx) { disablePhysicsDriver(ctx); }
     void switchDynamic(bool enablePhysics);
     void serializeSelfImpl(::nicxlive::core::serde::InochiSerializer& serializer, bool recursive, SerializeNodeFlags flags) const override;
     ::nicxlive::core::serde::SerdeException deserializeFromFghj(const ::nicxlive::core::serde::Fghj& data) override;

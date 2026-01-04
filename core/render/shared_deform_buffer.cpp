@@ -5,7 +5,7 @@
 #include <vector>
 
 namespace nicxlive::core::render {
-using ::nicxlive::core::common::Vec2Array;
+using ::nicxlive::core::nodes::Vec2Array;
 
 namespace {
 struct SharedVecAtlas {

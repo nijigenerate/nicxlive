@@ -18,7 +18,7 @@ public:
 
     void runBeginTask(core::RenderContext& ctx) override { Node::runBeginTask(ctx); }
 
-    virtual const std::string& typeId() const {
+    const std::string& typeId() const override {
         static const std::string k = "Driver";
         return k;
     }

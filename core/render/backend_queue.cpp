@@ -7,9 +7,9 @@ void QueueRenderBackend::initializeDrawableResources() {}
 void QueueRenderBackend::bindDrawableVao() {}
 void QueueRenderBackend::createDrawableBuffers(RenderResourceHandle& outHandle) { outHandle = nextIndexId++; }
 void QueueRenderBackend::uploadDrawableIndices(RenderResourceHandle id, const std::vector<uint16_t>& indices) { indexBuffers[id] = indices; }
-void QueueRenderBackend::uploadSharedVertexBuffer(const ::nicxlive::core::common::Vec2Array& v) { sharedVertices = v; }
-void QueueRenderBackend::uploadSharedUvBuffer(const ::nicxlive::core::common::Vec2Array& u) { sharedUvs = u; }
-void QueueRenderBackend::uploadSharedDeformBuffer(const ::nicxlive::core::common::Vec2Array& d) { sharedDeform = d; }
+void QueueRenderBackend::uploadSharedVertexBuffer(const ::nicxlive::core::nodes::Vec2Array& v) { sharedVertices = v; }
+void QueueRenderBackend::uploadSharedUvBuffer(const ::nicxlive::core::nodes::Vec2Array& u) { sharedUvs = u; }
+void QueueRenderBackend::uploadSharedDeformBuffer(const ::nicxlive::core::nodes::Vec2Array& d) { sharedDeform = d; }
 void QueueRenderBackend::drawDrawableElements(RenderResourceHandle id, std::size_t count) { lastDraw[id] = count; }
 void QueueRenderBackend::setDebugPointSize(float v) { debugPointSize = v; }
 void QueueRenderBackend::setDebugLineWidth(float v) { debugLineWidth = v; }
@@ -145,4 +145,3 @@ void QueueRenderBackend::playback(RenderBackend* backend) const {
 }
 
 } // namespace nicxlive::core::render
-
