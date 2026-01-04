@@ -8,6 +8,8 @@
 
 namespace nicxlive::core::render {
 
+using ::nicxlive::core::nodes::PartDrawPacket;
+
 class QueueRenderBackend;
 
 class QueueCommandEmitter : public RenderCommandEmitter {
@@ -17,12 +19,12 @@ public:
     void beginFrame(RenderBackend* backend, RenderGpuState& state) override;
     void endFrame(RenderBackend*, RenderGpuState&) override;
     void beginMask(bool useStencil) override;
-    void applyMask(const std::shared_ptr<nodes::Drawable>& mask, bool dodge) override;
+    void applyMask(const std::shared_ptr<::nicxlive::core::nodes::Drawable>& mask, bool dodge) override;
     void beginMaskContent() override;
     void endMask() override;
-    void drawPartPacket(const nodes::PartDrawPacket& packet) override;
-    void beginDynamicComposite(const std::shared_ptr<nodes::Projectable>& composite, const DynamicCompositePass& pass) override;
-    void endDynamicComposite(const std::shared_ptr<nodes::Projectable>& composite, const DynamicCompositePass& pass) override;
+    void drawPartPacket(const PartDrawPacket& packet) override;
+    void beginDynamicComposite(const std::shared_ptr<::nicxlive::core::nodes::Projectable>& composite, const DynamicCompositePass& pass) override;
+    void endDynamicComposite(const std::shared_ptr<::nicxlive::core::nodes::Projectable>& composite, const DynamicCompositePass& pass) override;
     void playback(RenderBackend* backend) override;
 
     const std::vector<QueuedCommand>& queue() const { return backendQueue(); }
@@ -31,7 +33,7 @@ public:
 private:
     const std::vector<QueuedCommand>& backendQueue() const;
     std::vector<QueuedCommand>& backendQueue();
-    bool tryMakeMaskApplyPacket(const std::shared_ptr<nodes::Drawable>& drawable, bool isDodge, RenderBackend::MaskApplyPacket& packet);
+    bool tryMakeMaskApplyPacket(const std::shared_ptr<::nicxlive::core::nodes::Drawable>& drawable, bool isDodge, RenderBackend::MaskApplyPacket& packet);
     void record(RenderCommandKind kind, const std::function<void(QueuedCommand&)>& fill);
 
     std::shared_ptr<QueueRenderBackend> backend_{};

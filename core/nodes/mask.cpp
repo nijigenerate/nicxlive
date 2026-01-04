@@ -1,5 +1,6 @@
 #include "mask.hpp"
 #include "../render/common.hpp"
+#include "../render/commands.hpp"
 #include "../puppet.hpp"
 
 namespace nicxlive::core::nodes {

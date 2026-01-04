@@ -2,6 +2,7 @@
 
 #include "../puppet.hpp"
 #include "../render.hpp"
+#include "../render/commands.hpp"
 #include "../render/backend_queue.hpp"
 #include "../texture.hpp"
 

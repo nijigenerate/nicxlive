@@ -5,6 +5,8 @@
 
 namespace nicxlive::core::render {
 
+namespace nodes = ::nicxlive::core::nodes;
+
 QueueCommandEmitter::QueueCommandEmitter(const std::shared_ptr<QueueRenderBackend>& backend) : backend_(backend) {}
 
 void QueueCommandEmitter::beginFrame(RenderBackend* backend, RenderGpuState& state) {

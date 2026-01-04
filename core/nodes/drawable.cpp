@@ -6,6 +6,7 @@
 #include "../serde.hpp"
 #include "../render/common.hpp"
 #include "../render/shared_deform_buffer.hpp"
+#include "../render/commands.hpp"
 #include "../math/triangle.hpp"
 #include "../math/mat3.hpp"
 

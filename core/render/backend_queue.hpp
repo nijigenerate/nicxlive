@@ -14,6 +14,14 @@
 
 namespace nicxlive::core::render {
 
+using ::nicxlive::core::nodes::BlendMode;
+using ::nicxlive::core::nodes::Mat4;
+using ::nicxlive::core::nodes::Vec2;
+using ::nicxlive::core::nodes::Vec3;
+using ::nicxlive::core::nodes::Vec4;
+using ::nicxlive::core::nodes::PartDrawPacket;
+using ::nicxlive::core::Rect;
+
 struct TextureHandle {
     uint32_t id{0};
     int width{0};
@@ -39,9 +47,9 @@ public:
     void drawDrawableElements(RenderResourceHandle id, std::size_t count) override;
     void setDebugPointSize(float v) override;
     void setDebugLineWidth(float v) override;
-    void uploadDebugBuffer(const std::vector<nodes::Vec3>& positions, const std::vector<uint16_t>& indices) override;
-    void drawDebugPoints(const nodes::Vec4&, const nodes::Mat4&) override;
-    void drawDebugLines(const nodes::Vec4&, const nodes::Mat4&) override;
+    void uploadDebugBuffer(const std::vector<Vec3>& positions, const std::vector<uint16_t>& indices) override;
+    void drawDebugPoints(const Vec4&, const Mat4&) override;
+    void drawDebugLines(const Vec4&, const Mat4&) override;
     void beginMask(bool useStencil) override;
     void applyMask(const MaskApplyPacket& packet) override;
     void beginMaskContent() override;
@@ -49,10 +57,10 @@ public:
     void beginDynamicComposite(const ::nicxlive::core::DynamicCompositePass& pass) override;
     void endDynamicComposite(const ::nicxlive::core::DynamicCompositePass& pass) override;
     void destroyDynamicComposite(const std::shared_ptr<::nicxlive::core::DynamicCompositeSurface>&) override;
-    void drawPartPacket(const nodes::PartDrawPacket& packet) override;
-    void drawTextureAtPart(const Texture&, const std::shared_ptr<nodes::Part>&) override;
-    void drawTextureAtPosition(const Texture&, const nodes::Vec2&, float, const nodes::Vec3&, const nodes::Vec3&) override;
-    void drawTextureAtRect(const Texture&, const Rect&, const Rect&, float, const nodes::Vec3&, const nodes::Vec3&, void*, void*) override;
+    void drawPartPacket(const PartDrawPacket& packet) override;
+    void drawTextureAtPart(const Texture&, const std::shared_ptr<::nicxlive::core::nodes::Part>&) override;
+    void drawTextureAtPosition(const Texture&, const Vec2&, float, const Vec3&, const Vec3&) override;
+    void drawTextureAtRect(const Texture&, const Rect&, const Rect&, float, const Vec3&, const Vec3&, void*, void*) override;
     void setDifferenceAggregationEnabled(bool enabled) override;
     bool isDifferenceAggregationEnabled() override;
     void setDifferenceAggregationRegion(const DifferenceEvaluationRegion& region) override;
@@ -93,7 +101,7 @@ private:
     ::nicxlive::core::common::Vec2Array sharedVertices{};
     ::nicxlive::core::common::Vec2Array sharedUvs{};
     ::nicxlive::core::common::Vec2Array sharedDeform{};
-    std::vector<nodes::Vec3> debugPositions{};
+    std::vector<Vec3> debugPositions{};
     std::vector<uint16_t> debugIndices{};
     std::map<RenderResourceHandle, std::size_t> lastDraw{};
     float debugPointSize{1.0f};

@@ -4,6 +4,7 @@
 #include "../nodes/drawable.hpp"
 #include "../nodes/part.hpp"
 #include "../nodes/projectable.hpp"
+#include "part_draw_packet.hpp"
 
 #include <array>
 #include <cstdint>

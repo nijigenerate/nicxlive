@@ -11,8 +11,14 @@
 
 namespace nicxlive::core::render {
 
-nodes::PartDrawPacket makePartDrawPacket(const std::shared_ptr<nodes::Part>& part, bool isMask) {
-    nodes::PartDrawPacket packet{};
+using ::nicxlive::core::nodes::Composite;
+using ::nicxlive::core::nodes::Drawable;
+using ::nicxlive::core::nodes::Mask;
+using ::nicxlive::core::nodes::Part;
+using ::nicxlive::core::nodes::PartDrawPacket;
+
+PartDrawPacket makePartDrawPacket(const std::shared_ptr<Part>& part, bool isMask) {
+    PartDrawPacket packet{};
     if (part) {
         packet.isMask = isMask;
         part->fillDrawPacket(*part, packet, isMask);
@@ -20,8 +26,8 @@ nodes::PartDrawPacket makePartDrawPacket(const std::shared_ptr<nodes::Part>& par
     return packet;
 }
 
-nodes::PartDrawPacket makeMaskDrawPacket(const std::shared_ptr<nodes::Mask>& mask) {
-    nodes::PartDrawPacket packet{};
+PartDrawPacket makeMaskDrawPacket(const std::shared_ptr<Mask>& mask) {
+    PartDrawPacket packet{};
     if (mask) {
         mask->fillMaskDrawPacket(packet);
     }

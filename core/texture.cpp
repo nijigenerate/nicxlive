@@ -48,6 +48,37 @@ std::vector<uint8_t> loadImageBuffer(const std::vector<uint8_t>& buffer, int& w,
 }
 } // namespace
 
+ShallowTexture::ShallowTexture(const std::string& file, int channels) {
+    int w = 0, h = 0, comp = 0;
+    auto img = loadImage(file, w, h, comp, channels);
+    data = img;
+    width = w;
+    height = h;
+    channels = channels == 0 ? comp : channels;
+    convChannels = channels;
+}
+
+ShallowTexture::ShallowTexture(const std::vector<uint8_t>& buffer, int channels) {
+    int w = 0, h = 0, comp = 0;
+    auto img = loadImageBuffer(buffer, w, h, comp, channels);
+    data = img;
+    width = w;
+    height = h;
+    this->channels = channels == 0 ? comp : channels;
+    convChannels = this->channels;
+}
+
+ShallowTexture::ShallowTexture(const std::vector<uint8_t>& buffer, int w, int h, int channels)
+    : ShallowTexture(buffer, w, h, channels, channels) {}
+
+ShallowTexture::ShallowTexture(const std::vector<uint8_t>& buffer, int w, int h, int channels, int convChannels) {
+    data = buffer;
+    width = w;
+    height = h;
+    this->channels = channels;
+    this->convChannels = convChannels;
+}
+
 Texture::Texture(const std::string& file, int channels, bool useMipmaps) {
     int w = 0, h = 0, comp = 0;
     auto img = loadImage(file, w, h, comp, channels);

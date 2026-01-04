@@ -20,8 +20,14 @@ struct ShallowTexture {
     std::vector<uint8_t> data{};
     int width{0};
     int height{0};
-    int channels{4};
-    int convChannels{4};
+    int channels{0};
+    int convChannels{0};
+
+    ShallowTexture() = default;
+    ShallowTexture(const std::string& file, int channels = 0);
+    ShallowTexture(const std::vector<uint8_t>& buffer, int channels = 0);
+    ShallowTexture(const std::vector<uint8_t>& buffer, int w, int h, int channels = 4);
+    ShallowTexture(const std::vector<uint8_t>& buffer, int w, int h, int channels, int convChannels);
 };
 
 class Texture {
