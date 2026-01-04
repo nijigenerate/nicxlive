@@ -75,7 +75,7 @@ public:
     struct MaskApplyPacket {
         MaskDrawableKind kind{MaskDrawableKind::Part};
         nodes::PartDrawPacket partPacket{};
-        nodes::PartDrawPacket maskPacket{};
+        nodes::MaskDrawPacket maskPacket{};
         bool isDodge{false};
     };
     // Drawable geometry uploads (Unity互換の簡易インターフェース)
@@ -105,6 +105,7 @@ public:
     virtual void endDynamicComposite(const DynamicCompositePass& /*pass*/) {}
     virtual void destroyDynamicComposite(const std::shared_ptr<DynamicCompositeSurface>& /*surface*/) {}
     virtual void drawPartPacket(const nodes::PartDrawPacket& /*packet*/) {}
+    virtual void initializeRenderer() {}
     // Immediate テクスチャ描画
     virtual void drawTextureAtPart(const Texture& /*tex*/, const std::shared_ptr<nodes::Part>& /*part*/) {}
     virtual void drawTextureAtPosition(const Texture& /*tex*/, const nodes::Vec2& /*pos*/, float /*opacity*/,

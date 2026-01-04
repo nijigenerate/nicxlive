@@ -20,9 +20,40 @@ struct Mat4 {
         return out;
     }
 
+    static Mat4 orthographic(float left, float right, float bottom, float top, float zNear, float zFar) {
+        Mat4 out = identity();
+        const float rl = right - left;
+        const float tb = top - bottom;
+        const float fn = zFar - zNear;
+        if (rl != 0.0f) {
+            out.a.a[0][0] = 2.0f / rl;
+            out.a.a[0][3] = -(right + left) / rl;
+        }
+        if (tb != 0.0f) {
+            out.a.a[1][1] = 2.0f / tb;
+            out.a.a[1][3] = -(top + bottom) / tb;
+        }
+        if (fn != 0.0f) {
+            out.a.a[2][2] = -2.0f / fn;
+            out.a.a[2][3] = -(zFar + zNear) / fn;
+        }
+        return out;
+    }
+
     static Mat4 multiply(const Mat4& lhs, const Mat4& rhs) {
         Mat4 out{};
         out.a = boost::qvm::operator*(lhs.a, rhs.a);
+        return out;
+    }
+
+    static Mat4 zRotation(float radians) {
+        Mat4 out = identity();
+        const float c = std::cos(radians);
+        const float s = std::sin(radians);
+        out.a.a[0][0] = c;
+        out.a.a[0][1] = -s;
+        out.a.a[1][0] = s;
+        out.a.a[1][1] = c;
         return out;
     }
 
@@ -32,6 +63,10 @@ struct Mat4 {
         out.a.a[1][3] = t.y;
         out.a.a[2][3] = t.z;
         return out;
+    }
+
+    static Mat4 translation(float x, float y, float z) {
+        return translation(Vec3{x, y, z});
     }
 
     static Mat4 scale(const Vec3& s) {
@@ -58,5 +93,9 @@ struct Mat4 {
         return out;
     }
 };
+
+inline Mat4 operator*(const Mat4& lhs, const Mat4& rhs) {
+    return Mat4::multiply(lhs, rhs);
+}
 
 } // namespace nicxlive::core::math

@@ -24,6 +24,7 @@ using ::nicxlive::core::nodes::Vec2;
 using ::nicxlive::core::nodes::Vec3;
 using ::nicxlive::core::nodes::BlendMode;
 using ::nicxlive::core::nodes::PartDrawPacket;
+using ::nicxlive::core::nodes::MaskDrawPacket;
 
 enum class RenderCommandKind {
     DrawPart,
@@ -63,7 +64,7 @@ struct QueuedCommand {
 };
 
 PartDrawPacket makePartDrawPacket(const std::shared_ptr<nodes::Part>& part, bool isMask = false);
-PartDrawPacket makeMaskDrawPacket(const std::shared_ptr<nodes::Mask>& mask);
+MaskDrawPacket makeMaskDrawPacket(const std::shared_ptr<nodes::Mask>& mask);
 bool tryMakeMaskApplyPacket(const std::shared_ptr<nodes::Drawable>& drawable, bool isDodge, MaskApplyPacket& packet);
 CompositeDrawPacket makeCompositeDrawPacket(const std::shared_ptr<nodes::Composite>& composite);
 

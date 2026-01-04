@@ -96,7 +96,6 @@ public:
     void disposeTexture(uint32_t id) override;
     bool hasTexture(uint32_t id) const;
     const TextureHandle* getTexture(uint32_t id) const;
-
     // Unity DLL 側に受け渡すためのコピー出力
     std::vector<QueuedCommand> queue{};
     std::vector<TextureCommand> resourceQueue{};
@@ -110,6 +109,22 @@ public:
     const std::vector<QueuedCommand>& backendQueue() const { return queue; }
     std::vector<QueuedCommand>& backendQueue() { return queue; }
     const std::vector<TextureCommand>& backendResourceQueue() const { return resourceQueue; }
+    void clearResourceQueue() { resourceQueue.clear(); }
+    void setRenderTargets(std::size_t renderHandle, std::size_t compositeHandle) {
+        renderTargetHandle = renderHandle;
+        compositeTargetHandle = compositeHandle;
+    }
+    std::size_t renderTarget() const { return renderTargetHandle; }
+    std::size_t compositeTarget() const { return compositeTargetHandle; }
+    ::nicxlive::core::math::RawStorage sharedVerticesRaw() const { return sharedVertices.rawStorage(); }
+    ::nicxlive::core::math::RawStorage sharedUvRaw() const { return sharedUvs.rawStorage(); }
+    ::nicxlive::core::math::RawStorage sharedDeformRaw() const { return sharedDeform.rawStorage(); }
+    std::size_t sharedVertexCount() const { return sharedVertices.size(); }
+    std::size_t sharedUvCount() const { return sharedUvs.size(); }
+    std::size_t sharedDeformCount() const { return sharedDeform.size(); }
+    const ::nicxlive::core::common::Vec2Array& sharedVerticesData() const { return sharedVertices; }
+    const ::nicxlive::core::common::Vec2Array& sharedUvData() const { return sharedUvs; }
+    const ::nicxlive::core::common::Vec2Array& sharedDeformData() const { return sharedDeform; }
 
     const std::vector<uint16_t>* getDrawableIndices(uint32_t id) const {
         auto it = indexBuffers.find(id);
@@ -136,6 +151,8 @@ private:
     bool differenceAggregationEnabled{false};
     DifferenceEvaluationRegion differenceRegion{};
     DifferenceEvaluationResult differenceResult{};
+    std::size_t renderTargetHandle{0};
+    std::size_t compositeTargetHandle{0};
 };
 
 } // namespace nicxlive::core::render

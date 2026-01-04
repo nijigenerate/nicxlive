@@ -15,7 +15,7 @@ public:
     void serializeSelfImpl(::nicxlive::core::serde::InochiSerializer& serializer, bool recursive, SerializeNodeFlags flags) const override;
     ::nicxlive::core::serde::SerdeException deserializeFromFghj(const ::nicxlive::core::serde::Fghj& data) override;
     void renderMask(bool dodge = false) override;
-    void fillMaskDrawPacket(PartDrawPacket& packet) const;
+    void fillMaskDrawPacket(::nicxlive::core::nodes::MaskDrawPacket& packet) const;
     void runRenderTask(core::RenderContext& ctx) override;
     void draw() override;
 };

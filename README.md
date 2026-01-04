@@ -72,23 +72,22 @@ cmake --build build-wasm
 ### fmt layer (D → C++)
 | # | nijilive (D) | Lines | nicxlive (C++) | Lines | Compat note |
 | - | --- | ---:| --- | ---:| --- |
-| F1 | fmt/package.d | 37 | （未移植） | 0 | (WIP) |
-| F2 | fmt/io.d | 118 | （未移植） | 0 | (WIP) |
-| F3 | fmt/serialize.d | 185 | （未移植） | 0 | (WIP) |
+| F1 | fmt/package.d | 37 | fmt/fmt.hpp | 203 | [compat-fmt](doc/compat-fmt.md) |
+| F2 | fmt/io.d | 118 | fmt/io.hpp | 59 | [compat-io](doc/compat-io.md) |
+| F3 | fmt/serialize.d | 185 | fmt/serialize.hpp | 62 | [compat-serialize](doc/compat-serialize.md) |
+| F4 | fmt/binfmt.d | 81 | fmt/binfmt.hpp | 33 | [compat-binfmt](doc/compat-binfmt.md) |
 
 ### Unity integration (D → C++)
 | # | nijilive (D) | Lines | nicxlive (C++) | Lines | Compat note |
 | - | --- | ---:| --- | ---:| --- |
-| U1 | unity/native.d | n/a | （未移植） | 0 | (WIP) |
-| U2 | unity/interop.d | n/a | （未移植） | 0 | (WIP) |
-| U3 | unity/plugin exports | n/a | （未移植） | 0 | (WIP) |
+| U1 | unity/native.d | n/a | core/unity_native.cpp + unity_native.hpp | 766 | [compat-unity_native](doc/compat-unity_native.md) |
 
 ### Math / Common (D → C++)
 | # | nijilive (D) | Lines | nicxlive (C++) | Lines | Compat note |
 | - | --- | ---:| --- | ---:| --- |
 | M1 | math/veca.d | 673 | core/math/veca.hpp | 846 | [compat-vec2array](doc/compat-vec2array.md) |
 | M2 | math/transform.d | 175 | core/math/transform.hpp | 128 | [compat-transform](doc/compat-transform.md) |
-| M3 | math/camera.d | 75 | （未移植） | 0 | (WIP) |
+| M3 | math/camera.d | 75 | core/math/camera.hpp + camera.cpp | 58 | [compat-runtime_state](doc/compat-runtime_state.md) |
 | M4 | math/triangle.d | 165 | core/math/triangle.hpp + triangle.cpp | 42 | [compat-triangle](doc/compat-triangle.md) |
 | C1 | core/nodes/common.d | 290 | core/nodes/common.hpp | 76 | [compat-common](doc/compat-common.md) |
 

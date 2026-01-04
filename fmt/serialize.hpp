@@ -5,6 +5,7 @@
 #include <boost/property_tree/ptree.hpp>
 #include <sstream>
 #include <string>
+#include <memory>
 
 namespace nicxlive::core::fmt {
 
@@ -14,7 +15,10 @@ using Optional = int;
 using Name = int;
 
 template <typename T>
-inline T inLoadJsonData(const std::string& file) {
+inline std::shared_ptr<T> inLoadJsonDataFromMemory(const std::string& data);
+
+template <typename T>
+inline std::shared_ptr<T> inLoadJsonData(const std::string& file) {
     std::ifstream ifs(file);
     std::stringstream buffer;
     buffer << ifs.rdbuf();
@@ -22,13 +26,13 @@ inline T inLoadJsonData(const std::string& file) {
 }
 
 template <typename T>
-inline T inLoadJsonDataFromMemory(const std::string& data) {
+inline std::shared_ptr<T> inLoadJsonDataFromMemory(const std::string& data) {
     std::stringstream ss(data);
     boost::property_tree::ptree pt;
     boost::property_tree::read_json(ss, pt);
-    T obj{};
+    auto obj = std::make_shared<T>();
     if constexpr (requires(T t) { t.deserializeFromFghj(pt); }) {
-        obj.deserializeFromFghj(pt);
+        obj->deserializeFromFghj(pt);
     }
     return obj;
 }

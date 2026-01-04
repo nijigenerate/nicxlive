@@ -50,6 +50,10 @@ endif()
 set(NICXLIVE_SOURCES
     core/texture.cpp
     core/puppet.cpp
+    core/unity_native.cpp
+    core/runtime_state.cpp
+    core/timing.cpp
+    core/math/camera.cpp
     utils/stb_image_write_impl.cpp
     core/render/common.cpp
     core/render/commands.cpp

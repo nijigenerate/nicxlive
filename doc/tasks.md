@@ -100,7 +100,7 @@ Status: `[ ]` todo, `[>]` in progress, `[x]` done, `[?]` blocked.
 ※ バックエンドは queue のみ移植済み。OpenGL/DX12 系は未着手のため ✗。人数の差は写経範囲の差異を示す。
 
 ### Unity Native DLL exports（DllImport 参照）
-- [ ] U1: `njgCreateRenderer`/`njgDestroyRenderer`/`njgFlushCommandBuffer`/`njgGetGcHeapSize`/`njgGetTextureStats` の C API を `extern "C"` で実装し、構造体 packing 含め D 版と一致させる（`unity-managed/Interop/NijiliveNative.cs` に準拠）
-- [ ] U2: `njgLoadPuppet`/`njgUnloadPuppet`/`njgBeginFrame`/`njgTickPuppet` を写経ベースで C API 化（UTF-8 パス、Puppet ハンドル管理、バッファ渡し対応）
-- [ ] U3: `njgEmitCommands`/`njgGetSharedBuffers` で queue/backend のコマンドと共有バッファスナップショットを返す C API を実装（SharedBufferSnapshot に頂点/UV/deform のポインタ＋長さを詰める）
-- [ ] U4: `njgGetParameters`/`njgUpdateParameters` のパラメータ列挙・更新 API を写経し、構造体サイズ/packing を D 版に揃える（P/Invoke バッファ経由）
+- [x] U1: `njgCreateRenderer`/`njgDestroyRenderer`/`njgFlushCommandBuffer`/`njgGetGcHeapSize`/`njgGetTextureStats` の C API を `extern "C"` で実装し、構造体 packing 含め D 版と一致させる（`unity-managed/Interop/NijiliveNative.cs` に準拠）※ GC サイズは malloc 統計の概算
+- [x] U2: `njgLoadPuppet`/`njgUnloadPuppet`/`njgLoadPuppetFromMemory`/`njgWritePuppetToMemory`/`njgBeginFrame`/`njgTickPuppet` を写経ベースで C API 化（UTF-8 パス、メモリ渡し、Puppet ハンドル管理、FreeBuffer 付き）
+- [x] U3: `njgEmitCommands`/`njgGetSharedBuffers` で queue/backend のコマンドと共有バッファスナップショットを返す C API を実装（SharedBufferSnapshot に頂点/UV/deform のポインタ＋長さを詰める）
+- [x] U4: `njgGetParameters`/`njgUpdateParameters` のパラメータ列挙・更新 API を写経し、構造体サイズ/packing を D 版に揃える（P/Invoke バッファ経由）

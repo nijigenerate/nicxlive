@@ -13,6 +13,7 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include <memory>
 
 namespace nicxlive::core::fmt {
 
@@ -53,12 +54,12 @@ inline bool inIsINPMode() {
 
 // JSON-based load/save
 template <typename T>
-T inLoadJSONPuppet(const std::string& data) {
+std::shared_ptr<T> inLoadJSONPuppet(const std::string& data) {
     return inLoadJsonDataFromMemory<T>(data);
 }
 
 template <typename T>
-T inLoadPuppetFromMemory(const std::vector<uint8_t>& data) {
+std::shared_ptr<T> inLoadPuppetFromMemory(const std::vector<uint8_t>& data) {
     // Detect INP/INX magic
     auto startsWith = [&](const std::array<uint8_t, 8>& magic) {
         return data.size() >= magic.size() &&
@@ -86,7 +87,7 @@ T inLoadPuppetFromMemory(const std::vector<uint8_t>& data) {
     std::string puppetJson(reinterpret_cast<const char*>(data.data() + offset), puppetLen);
     offset += puppetLen;
 
-    T puppet = inLoadJsonDataFromMemory<T>(puppetJson);
+    auto puppet = inLoadJsonDataFromMemory<T>(puppetJson);
 
     // Texture section
     if (offset + TEX_SECTION.size() <= data.size() &&
@@ -100,10 +101,10 @@ T inLoadPuppetFromMemory(const std::vector<uint8_t>& data) {
             (void)texType;
             std::vector<uint8_t> payload(data.begin() + offset, data.begin() + offset + texLen);
             offset += texLen;
-            if constexpr (requires(T t) { t.textureSlots; }) {
+            if constexpr (requires(T t) { t->textureSlots; }) {
                 auto shallow = ::nicxlive::core::ShallowTexture(payload);
                 auto tex = std::make_shared<::nicxlive::core::Texture>(shallow);
-                puppet.textureSlots.push_back(tex);
+                puppet->textureSlots.push_back(tex);
             }
         }
     }
@@ -122,8 +123,8 @@ T inLoadPuppetFromMemory(const std::vector<uint8_t>& data) {
             if (offset + payloadLen > data.size()) throw std::runtime_error("Invalid ext payload length");
             std::vector<uint8_t> payload(data.begin() + offset, data.begin() + offset + payloadLen);
             offset += payloadLen;
-            if constexpr (requires(T t) { t.extData; }) {
-                puppet.extData[name] = payload;
+            if constexpr (requires(T t) { t->extData; }) {
+                puppet->extData[name] = payload;
             }
         }
     }
@@ -133,7 +134,7 @@ T inLoadPuppetFromMemory(const std::vector<uint8_t>& data) {
 }
 
 template <typename T>
-T inLoadPuppet(const std::string& file) {
+std::shared_ptr<T> inLoadPuppet(const std::string& file) {
     // For now route to JSON loader; INP binary loader is TODO.
     return inLoadJsonData<T>(file);
 }

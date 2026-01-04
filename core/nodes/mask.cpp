@@ -2,6 +2,7 @@
 #include "../render/common.hpp"
 #include "../render/commands.hpp"
 #include "../puppet.hpp"
+#include "../runtime_state.hpp"
 
 namespace nicxlive::core::nodes {
 
@@ -36,7 +37,7 @@ void Mask::serializeSelfImpl(::nicxlive::core::serde::InochiSerializer& serializ
 void Mask::renderMask(bool /*dodge*/) {
     auto backend = ::nicxlive::core::getCurrentRenderBackend();
     if (!backend) return;
-    PartDrawPacket packet{};
+    ::nicxlive::core::nodes::MaskDrawPacket packet{};
     fillMaskDrawPacket(packet);
     ::nicxlive::core::RenderBackend::MaskApplyPacket mp;
     mp.kind = ::nicxlive::core::RenderBackend::MaskDrawableKind::Mask;
@@ -45,22 +46,21 @@ void Mask::renderMask(bool /*dodge*/) {
     backend->applyMask(mp);
 }
 
-void Mask::fillMaskDrawPacket(PartDrawPacket& packet) const {
+void Mask::fillMaskDrawPacket(::nicxlive::core::nodes::MaskDrawPacket& packet) const {
     packet.modelMatrix = immediateModelMatrix();
+    Mat4 puppetMatrix = Mat4::identity();
     if (auto pup = puppetRef()) {
-        packet.puppetMatrix = pup->transform.toMat4();
+        puppetMatrix = pup->transform.toMat4();
     }
-    packet.renderable = false;
+    packet.mvp = ::nicxlive::core::inGetCamera().matrix() * puppetMatrix * packet.modelMatrix;
     packet.origin = mesh->origin;
     packet.vertexOffset = vertexOffset;
     packet.vertexAtlasStride = sharedVertexBufferData().size();
-    packet.uvOffset = uvOffset;
-    packet.uvAtlasStride = sharedUvBufferData().size();
     packet.deformOffset = deformOffset;
     packet.deformAtlasStride = sharedDeformBufferData().size();
+    packet.indexBuffer = ibo;
     packet.indexCount = static_cast<uint32_t>(mesh->indices.size());
     packet.vertexCount = static_cast<uint32_t>(mesh->vertices.size());
-    for (auto& t : packet.textureUUIDs) t = 0;
 }
 
 void Mask::runRenderTask(core::RenderContext&) {

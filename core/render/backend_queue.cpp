@@ -3,6 +3,7 @@
 namespace nicxlive::core::render {
 
 void QueueRenderBackend::clear() { queue.clear(); }
+// resourceQueue は applyTextureCommands 後に caller で明示的に clearResourceQueue される
 void QueueRenderBackend::initializeDrawableResources() {}
 void QueueRenderBackend::bindDrawableVao() {}
 void QueueRenderBackend::createDrawableBuffers(RenderResourceHandle& outHandle) { outHandle = nextIndexId++; }

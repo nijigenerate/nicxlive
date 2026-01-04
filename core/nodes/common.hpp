@@ -50,6 +50,7 @@ enum class BlendMode {
 };
 
 struct PartDrawPacket;
+struct MaskDrawPacket;
 
 struct Rect {
     float x{};

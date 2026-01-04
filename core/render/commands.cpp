@@ -17,6 +17,7 @@ using ::nicxlive::core::nodes::Drawable;
 using ::nicxlive::core::nodes::Mask;
 using ::nicxlive::core::nodes::Part;
 using ::nicxlive::core::nodes::PartDrawPacket;
+using ::nicxlive::core::nodes::MaskDrawPacket;
 using ::nicxlive::core::nodes::MeshData;
 
 PartDrawPacket makePartDrawPacket(const std::shared_ptr<Part>& part, bool isMask) {
@@ -28,8 +29,8 @@ PartDrawPacket makePartDrawPacket(const std::shared_ptr<Part>& part, bool isMask
     return packet;
 }
 
-PartDrawPacket makeMaskDrawPacket(const std::shared_ptr<Mask>& mask) {
-    PartDrawPacket packet{};
+MaskDrawPacket makeMaskDrawPacket(const std::shared_ptr<Mask>& mask) {
+    MaskDrawPacket packet{};
     if (mask) {
         mask->fillMaskDrawPacket(packet);
     }

@@ -15,6 +15,10 @@ namespace nicxlive::core::math {
 // SoA Vec2 array (D: veca!(float,2)) - SIMD 部分を除き写経ベースで実装
 struct Vec2View;
 struct Vec2ViewConst;
+struct RawStorage {
+    const float* ptr{nullptr};
+    std::size_t length{0};
+};
 
 struct Vec2Array {
     // lanes (shared to allow views)
@@ -27,6 +31,7 @@ struct Vec2Array {
     std::size_t laneBase_{0};
     std::size_t viewCapacity_{0};
     bool ownsStorage_{true};
+    mutable std::vector<float> rawCache_{};
 
     Vec2Array() = default;
     explicit Vec2Array(std::size_t n) { ensureLength(n); }
@@ -176,6 +181,10 @@ struct Vec2Array {
         yPtr_[laneBase_ + i] = v.y;
     }
 
+    const float* dataX() const { return xPtr_ ? xPtr_ + laneBase_ : nullptr; }
+    const float* dataY() const { return yPtr_ ? yPtr_ + laneBase_ : nullptr; }
+    std::size_t length() const { return logicalLength_; }
+
     std::vector<Vec2> toArray() const {
         std::vector<Vec2> out;
         out.reserve(logicalLength_);
@@ -197,6 +206,19 @@ struct Vec2Array {
         copy.laneBase_ = 0;
         copy.viewCapacity_ = logicalLength_;
         return copy;
+    }
+
+    RawStorage rawStorage() const {
+        auto n = size();
+        rawCache_.resize(n * 2);
+        if (n == 0 || !xPtr_ || !yPtr_) {
+            return {rawCache_.data(), rawCache_.size()};
+        }
+        for (std::size_t i = 0; i < n; ++i) {
+            rawCache_[i] = xPtr_[laneBase_ + i];
+            rawCache_[n + i] = yPtr_[laneBase_ + i];
+        }
+        return {rawCache_.data(), rawCache_.size()};
     }
 
     // lane view (only for owned contiguous)
@@ -345,6 +367,7 @@ struct Vec3Array {
     std::size_t laneBase_{0};
     std::size_t viewCapacity_{0};
     bool ownsStorage_{true};
+    mutable std::vector<float> rawCache_{};
 
     Vec3Array() = default;
     explicit Vec3Array(std::size_t n) { ensureLength(n); }
