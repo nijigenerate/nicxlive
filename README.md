@@ -27,7 +27,7 @@ cmake --build build
 emcmake cmake -S . -B build-wasm -DBUILD_WASM=ON -DCMAKE_BUILD_TYPE=Release
 cmake --build build-wasm
 ```
-`BUILD_WASM=ON` は Emscripten toolchain 使用時のみ有効。必要なら `CMakeLists.txt` 内の `add_link_options` をコメント解除してエクスポート設定を追加してください。
+`BUILD_WASM=ON` is only honored when using the Emscripten toolchain. If you need specific exports, uncomment and adjust the `add_link_options` hints in `CMakeLists.txt`.
 
 ## Progress (D → C++ line counts with compat docs)
 | # | nijilive (D) | Lines | nicxlive (C++) | Lines | Compat note |
