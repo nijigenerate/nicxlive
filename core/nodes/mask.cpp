@@ -50,15 +50,15 @@ void Mask::fillMaskDrawPacket(PartDrawPacket& packet) const {
         packet.puppetMatrix = pup->transform.toMat4();
     }
     packet.renderable = false;
-    packet.origin = mesh.origin;
+    packet.origin = mesh->origin;
     packet.vertexOffset = vertexOffset;
     packet.vertexAtlasStride = sharedVertexBufferData().size();
     packet.uvOffset = uvOffset;
     packet.uvAtlasStride = sharedUvBufferData().size();
     packet.deformOffset = deformOffset;
     packet.deformAtlasStride = sharedDeformBufferData().size();
-    packet.indexCount = static_cast<uint32_t>(mesh.indices.size());
-    packet.vertexCount = static_cast<uint32_t>(mesh.vertices.size());
+    packet.indexCount = static_cast<uint32_t>(mesh->indices.size());
+    packet.vertexCount = static_cast<uint32_t>(mesh->vertices.size());
     for (auto& t : packet.textureUUIDs) t = 0;
 }
 

@@ -69,3 +69,20 @@ Status: `[ ]` todo, `[>]` in progress, `[x]` done, `[?]` blocked.
 | 15 | nodes/drivers/simplephysics.d | 1003 | core/nodes/simple_physics_driver.cpp | 781 | ◯ |
 
 ※ 写経レベルの突合前の暫定値。メソッド/フィールドごとの差分列挙と検証後、◯になるまで更新する。
+
+### レンダリング層 行数トラッカー（◯/△/✗ 評価メモ）
+| # | D (nijilive) | Lines | C++ (nicxlive) | Lines | 評価 |
+| - | --- | ---:| --- | ---:| --- |
+| RQ1 | render/commands.d | 210 | core/render/commands.cpp | 92 | ◯ |
+| RQ2 | render/command_emitter.d | 25 | core/render/command_emitter.cpp | 126 | ◯ |
+| RQ3 | render/graph_builder.d | 262 | core/render/graph_builder.cpp | 213 | ◯ |
+| RQ4 | render/scheduler.d | 98 | core/render/scheduler.cpp | 41 | ◯ |
+| RQ5 | render/shared_deform_buffer.d | 234 | core/render/shared_deform_buffer.cpp | 134 | ◯ |
+| RQ6 | render/immediate.d | 42 | core/render/immediate.cpp | 28 | ◯ |
+| RQ7 | render/passes.d | 39 | core/render/render_pass.hpp | 20 | ◯ |
+| RQ8 | render/profiler.d | 111 | core/render/profiler.cpp | 108 | ◯ |
+| RQ9 | render/backends/queue/package.d | 393 | core/render/backend_queue.cpp | 148 | △ |
+| RQ10 | render/backends/opengl/* | 4150 | （未移植） | 0 | ✗ |
+| RQ11 | render/backends/directx12/* | 2915 | （未移植） | 0 | ✗ |
+
+※ バックエンドは queue のみ移植済み。OpenGL/DX12 系は未着手のため ✗。人数の差は写経範囲の差異を示す。

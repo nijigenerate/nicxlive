@@ -63,7 +63,7 @@ struct WeldingLink {
 
 class Drawable : public Deformable {
 public:
-    MeshData mesh{};
+    std::shared_ptr<MeshData> mesh{std::make_shared<MeshData>()};
     // Shared buffer mirrors for atlas registration
     Vec2Array sharedVertices{};
     Vec2Array sharedUvs{};

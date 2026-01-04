@@ -6,7 +6,7 @@ namespace nicxlive::core::nodes {
 constexpr uint64_t MaxBoundsResetInterval = 5;
 
 Composite::Composite(const MeshData& data, uint32_t uuidVal) : Projectable() {
-    mesh = data;
+    *mesh = data;
     if (uuidVal != 0) uuid = uuidVal;
     autoResizedMesh = true;
 }
@@ -130,10 +130,10 @@ Vec4 Composite::localBoundsFromMatrix(const std::shared_ptr<Part>& child, const 
     float tx = matrix[0][3];
     float ty = matrix[1][3];
     Vec4 bounds{tx, ty, tx, ty};
-    if (!child || child->mesh.vertices.empty()) return bounds;
+    if (!child || child->mesh->vertices.empty()) return bounds;
     auto deform = child->deformation;
-    for (std::size_t i = 0; i < child->mesh.vertices.size(); ++i) {
-        Vec2 localVertex = child->mesh.vertices[i];
+    for (std::size_t i = 0; i < child->mesh->vertices.size(); ++i) {
+        Vec2 localVertex = child->mesh->vertices[i];
         if (i < deform.size()) {
             localVertex.x += deform.x[i];
             localVertex.y += deform.y[i];

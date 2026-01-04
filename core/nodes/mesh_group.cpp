@@ -29,7 +29,7 @@ void MeshGroup::releaseTarget(const std::shared_ptr<Node>& target) {
 }
 
 void MeshGroup::applyDeformToChildren(const std::vector<std::shared_ptr<core::param::Parameter>>& params, bool recursive) {
-    if (dynamic || mesh.indices.empty()) return;
+    if (dynamic || mesh->indices.empty()) return;
     if (!precalculated) precalculate();
     forwardMatrix = transform().toMat4();
     inverseMatrix = forwardMatrix.inverse();
@@ -88,8 +88,8 @@ void MeshGroup::applyDeformToChildren(const std::vector<std::shared_ptr<core::pa
     for (auto& c : children) apply(c);
 
     // After deform transfer, clear own mesh and disable translateChildren like D 実装
-    mesh = MeshData{};
-    rebuffer(mesh);
+    *mesh = MeshData{};
+    rebuffer(*mesh);
     translateChildren = false;
     precalculated = false;
 }
@@ -115,15 +115,15 @@ void MeshGroup::preProcess() { Drawable::preProcess(); }
 void MeshGroup::postProcess(int id) { Drawable::postProcess(id); }
 
 void MeshGroup::runPreProcessTask(core::RenderContext&) {
-    if (mesh.indices.empty()) return;
+    if (mesh->indices.empty()) return;
     if (!precalculated) precalculate();
     // update transformedVertices and triangle matrices
     transformedVertices = vertices;
     transformedVertices += deformation;
-    for (std::size_t i = 0; i + 2 < mesh.indices.size() && i / 3 < triangles.size(); ++i) {
-        auto i0 = mesh.indices[i];
-        auto i1 = mesh.indices[i + 1];
-        auto i2 = mesh.indices[i + 2];
+    for (std::size_t i = 0; i + 2 < mesh->indices.size() && i / 3 < triangles.size(); ++i) {
+        auto i0 = mesh->indices[i];
+        auto i1 = mesh->indices[i + 1];
+        auto i2 = mesh->indices[i + 2];
         Vec2 p1{transformedVertices.x[i0], transformedVertices.y[i0]};
         Vec2 p2{transformedVertices.x[i1], transformedVertices.y[i1]};
         Vec2 p3{transformedVertices.x[i2], transformedVertices.y[i2]};
@@ -152,14 +152,14 @@ void MeshGroup::renderMask(bool dodge) {
 }
 
 void MeshGroup::rebuffer(const MeshData& data) {
-    mesh = data;
+    *mesh = data;
     vertices.clear();
     deformation.clear();
-    vertices.resize(mesh.vertices.size());
-    deformation.resize(mesh.vertices.size());
-    for (std::size_t i = 0; i < mesh.vertices.size(); ++i) {
-        vertices.x[i] = mesh.vertices[i].x;
-        vertices.y[i] = mesh.vertices[i].y;
+    vertices.resize(mesh->vertices.size());
+    deformation.resize(mesh->vertices.size());
+    for (std::size_t i = 0; i < mesh->vertices.size(); ++i) {
+        vertices.x[i] = mesh->vertices[i].x;
+        vertices.y[i] = mesh->vertices[i].y;
     }
     precalculated = false;
 }
@@ -254,7 +254,7 @@ std::tuple<Vec2Array, std::optional<Mat4>, bool> MeshGroup::filterChildren(const
 }
 
 void MeshGroup::precalculate() {
-    if (mesh.indices.empty()) {
+    if (mesh->indices.empty()) {
         triangles.clear();
         bitMask.clear();
         precalculated = false;
@@ -279,18 +279,18 @@ void MeshGroup::precalculate() {
         return b;
     };
 
-    bounds = getBounds(mesh.vertices);
+    bounds = getBounds(mesh->vertices);
     triangles.clear();
-    std::size_t triCount = mesh.indices.size() / 3;
+    std::size_t triCount = mesh->indices.size() / 3;
     triangles.reserve(triCount);
 
     for (std::size_t i = 0; i < triCount; ++i) {
-        auto i0 = mesh.indices[i * 3];
-        auto i1 = mesh.indices[i * 3 + 1];
-        auto i2 = mesh.indices[i * 3 + 2];
-        Vec2 p1 = mesh.vertices[i0];
-        Vec2 p2 = mesh.vertices[i1];
-        Vec2 p3 = mesh.vertices[i2];
+        auto i0 = mesh->indices[i * 3];
+        auto i1 = mesh->indices[i * 3 + 1];
+        auto i2 = mesh->indices[i * 3 + 2];
+        Vec2 p1 = mesh->vertices[i0];
+        Vec2 p2 = mesh->vertices[i1];
+        Vec2 p3 = mesh->vertices[i2];
 
         Vec2 axis0{p2.x - p1.x, p2.y - p1.y};
         float axis0len = std::sqrt(axis0.x * axis0.x + axis0.y * axis0.y);
@@ -336,12 +336,12 @@ void MeshGroup::precalculate() {
     bitMask.assign(static_cast<std::size_t>(width * height), 0);
 
     for (std::size_t idx = 0; idx < triangles.size(); ++idx) {
-        auto i0 = mesh.indices[idx * 3];
-        auto i1 = mesh.indices[idx * 3 + 1];
-        auto i2 = mesh.indices[idx * 3 + 2];
-        Vec2 p1 = mesh.vertices[i0];
-        Vec2 p2 = mesh.vertices[i1];
-        Vec2 p3 = mesh.vertices[i2];
+        auto i0 = mesh->indices[idx * 3];
+        auto i1 = mesh->indices[idx * 3 + 1];
+        auto i2 = mesh->indices[idx * 3 + 2];
+        Vec2 p1 = mesh->vertices[i0];
+        Vec2 p2 = mesh->vertices[i1];
+        Vec2 p3 = mesh->vertices[i2];
         Vec4 tbounds = getBounds({p1, p2, p3});
         int bwidth = static_cast<int>(std::ceil(tbounds.z) - std::floor(tbounds.x) + 1);
         int bheight = static_cast<int>(std::ceil(tbounds.w) - std::floor(tbounds.y) + 1);
@@ -376,7 +376,7 @@ bool MeshGroup::setupChild(const std::shared_ptr<Node>& child) {
             for (auto& c : n->childrenRef()) selfRef(c, selfRef);
         }
     };
-    if (!mesh.indices.empty()) {
+    if (!mesh->indices.empty()) {
         visit(child, visit);
     }
     return false;
@@ -396,7 +396,7 @@ bool MeshGroup::releaseChild(const std::shared_ptr<Node>& child) {
 
 void MeshGroup::setupSelf() {
     Drawable::setupSelf();
-    if (!precalculated && !mesh.indices.empty()) {
+    if (!precalculated && !mesh->indices.empty()) {
         precalculate();
     }
 }

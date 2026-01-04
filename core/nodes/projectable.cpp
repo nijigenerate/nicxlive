@@ -126,9 +126,9 @@ Vec4 Projectable::boundsFromMatrix(const std::shared_ptr<Part>& child, const Mat
     float tx = matrix[0][3];
     float ty = matrix[1][3];
     Vec4 bounds{tx, ty, tx, ty};
-    if (!child || child->mesh.vertices.empty()) return bounds;
-    for (std::size_t i = 0; i < child->mesh.vertices.size(); ++i) {
-        Vec2 local = child->mesh.vertices[i];
+    if (!child || child->mesh->vertices.empty()) return bounds;
+    for (std::size_t i = 0; i < child->mesh->vertices.size(); ++i) {
+        Vec2 local = child->mesh->vertices[i];
         if (i < child->deformation.size()) {
             local.x += child->deformation.x[i];
             local.y += child->deformation.y[i];
@@ -293,8 +293,8 @@ bool Projectable::createSimpleMesh() {
                              std::abs(newTextureOffset.y - textureOffset.y) > TextureOffsetEpsilon;
         if (offsetChanged) {
             textureInvalidated = true;
-            mesh.vertices = vertexArray;
-            mesh.indices = {0, 1, 2, 2, 1, 3};
+            mesh->vertices = vertexArray;
+            mesh->indices = {0, 1, 2, 2, 1, 3};
             shouldUpdateVertices = true;
             autoResizedSize = Vec2{bounds.z - bounds.x, bounds.w - bounds.y};
             updateVertices();
@@ -795,7 +795,7 @@ void Projectable::serializeSelfImpl(::nicxlive::core::serde::InochiSerializer& s
     textures = {};
     if (auto ar = data.get_optional<bool>("auto_resized")) {
         autoResizedMesh = *ar;
-    } else if (!mesh.indices.empty()) {
+    } else if (!mesh->indices.empty()) {
         autoResizedMesh = false;
     } else {
         autoResizedMesh = true;

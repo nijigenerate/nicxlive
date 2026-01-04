@@ -145,18 +145,18 @@ Drawable::Drawable() : Deformable() {
 
 Drawable::Drawable(const std::shared_ptr<Node>& parent) : Deformable(parent) {
     ::nicxlive::core::render::sharedDeformRegister(deformation, &deformOffset);
-    for (const auto& v : mesh.vertices) sharedVertices.push_back(v);
+    for (const auto& v : mesh->vertices) sharedVertices.push_back(v);
     ::nicxlive::core::render::sharedVertexRegister(sharedVertices, &vertexOffset);
-    for (const auto& uv : mesh.uvs) sharedUvs.push_back(uv);
+    for (const auto& uv : mesh->uvs) sharedUvs.push_back(uv);
     ::nicxlive::core::render::sharedUvRegister(sharedUvs, &uvOffset);
 }
 
 Drawable::Drawable(const MeshData& data, uint32_t uuidVal, const std::shared_ptr<Node>& parent)
-    : Deformable(uuidVal, parent), mesh(data) {
+    : Deformable(uuidVal, parent), mesh(std::make_shared<MeshData>(data)) {
     ::nicxlive::core::render::sharedDeformRegister(deformation, &deformOffset);
-    for (const auto& v : mesh.vertices) sharedVertices.push_back(v);
+    for (const auto& v : mesh->vertices) sharedVertices.push_back(v);
     ::nicxlive::core::render::sharedVertexRegister(sharedVertices, &vertexOffset);
-    for (const auto& uv : mesh.uvs) sharedUvs.push_back(uv);
+    for (const auto& uv : mesh->uvs) sharedUvs.push_back(uv);
     ::nicxlive::core::render::sharedUvRegister(sharedUvs, &uvOffset);
     updateIndices();
     updateVertices();
@@ -374,15 +374,15 @@ void MeshData::serialize(::nicxlive::core::serde::InochiSerializer& serializer) 
 
 void Drawable::updateBounds() {
     if (!gDoGenerateBounds) return;
-    if (mesh.vertices.empty()) {
+    if (mesh->vertices.empty()) {
         bounds.reset();
         return;
     }
-    float minx = mesh.vertices[0].x, maxx = mesh.vertices[0].x;
-    float miny = mesh.vertices[0].y, maxy = mesh.vertices[0].y;
-    for (std::size_t i = 0; i < mesh.vertices.size(); ++i) {
-        auto vx = mesh.vertices[i].x;
-        auto vy = mesh.vertices[i].y;
+    float minx = mesh->vertices[0].x, maxx = mesh->vertices[0].x;
+    float miny = mesh->vertices[0].y, maxy = mesh->vertices[0].y;
+    for (std::size_t i = 0; i < mesh->vertices.size(); ++i) {
+        auto vx = mesh->vertices[i].x;
+        auto vy = mesh->vertices[i].y;
         if (i < deformationOffsets.size()) {
             vx += deformationOffsets[i].x;
             vy += deformationOffsets[i].y;
@@ -400,20 +400,20 @@ void Drawable::updateBounds() {
 }
 
 void Drawable::drawMeshLines() const {
-    if (mesh.vertices.empty() || mesh.indices.empty()) return;
+    if (mesh->vertices.empty() || mesh->indices.empty()) return;
     Mat4 trans = getDynamicMatrix();
     if (auto ot = getOneTimeTransform()) trans = Mat4::multiply(*ot, trans);
     std::vector<Vec3> pts;
-    pts.reserve(mesh.vertices.size());
-    for (std::size_t i = 0; i < mesh.vertices.size(); ++i) {
-        pts.push_back(Vec3{mesh.vertices[i].x - mesh.origin.x + deformation[i].x, mesh.vertices[i].y - mesh.origin.y + deformation[i].y, 0});
+    pts.reserve(mesh->vertices.size());
+    for (std::size_t i = 0; i < mesh->vertices.size(); ++i) {
+        pts.push_back(Vec3{mesh->vertices[i].x - mesh->origin.x + deformation[i].x, mesh->vertices[i].y - mesh->origin.y + deformation[i].y, 0});
     }
     std::vector<uint16_t> idx;
-    idx.reserve(mesh.indices.size() * 2);
-    for (std::size_t i = 0; i + 2 < mesh.indices.size(); i += 3) {
-        auto i0 = mesh.indices[i];
-        auto i1 = mesh.indices[i + 1];
-        auto i2 = mesh.indices[i + 2];
+    idx.reserve(mesh->indices.size() * 2);
+    for (std::size_t i = 0; i + 2 < mesh->indices.size(); i += 3) {
+        auto i0 = mesh->indices[i];
+        auto i1 = mesh->indices[i + 1];
+        auto i2 = mesh->indices[i + 2];
         if (i0 >= pts.size() || i1 >= pts.size() || i2 >= pts.size()) continue;
         idx.push_back(static_cast<uint16_t>(i0));
         idx.push_back(static_cast<uint16_t>(i1));
@@ -430,35 +430,35 @@ void Drawable::drawMeshLines() const {
 }
 
 void Drawable::drawMeshPoints() const {
-    if (mesh.vertices.empty()) return;
+    if (mesh->vertices.empty()) return;
     Mat4 trans = getDynamicMatrix();
     if (auto ot = getOneTimeTransform()) trans = Mat4::multiply(*ot, trans);
     std::vector<Vec3> pts;
-    pts.reserve(mesh.vertices.size());
-    for (std::size_t i = 0; i < mesh.vertices.size(); ++i) {
-        pts.push_back(Vec3{mesh.vertices[i].x - mesh.origin.x + deformation[i].x, mesh.vertices[i].y - mesh.origin.y + deformation[i].y, 0});
+    pts.reserve(mesh->vertices.size());
+    for (std::size_t i = 0; i < mesh->vertices.size(); ++i) {
+        pts.push_back(Vec3{mesh->vertices[i].x - mesh->origin.x + deformation[i].x, mesh->vertices[i].y - mesh->origin.y + deformation[i].y, 0});
     }
     std::vector<uint16_t> idx;
-    idx.reserve(mesh.vertices.size());
-    for (std::size_t i = 0; i < mesh.vertices.size(); ++i) idx.push_back(static_cast<uint16_t>(i));
+    idx.reserve(mesh->vertices.size());
+    for (std::size_t i = 0; i < mesh->vertices.size(); ++i) idx.push_back(static_cast<uint16_t>(i));
     if (auto backend = core::getCurrentRenderBackend()) {
         backend->setDebugPointSize(4.0f);
         backend->uploadDebugBuffer(pts, idx);
         backend->drawDebugPoints(Vec4{1, 1, 1, 1}, trans);
     }
 }
-MeshData& Drawable::getMesh() { return mesh; }
+MeshData& Drawable::getMesh() { return *mesh; }
 
 void Drawable::updateIndices() {
     auto backend = core::getCurrentRenderBackend();
     if (!backend) return;
-    if (mesh.indices.empty()) return;
+    if (mesh->indices.empty()) return;
     backend->initializeDrawableResources();
     backend->bindDrawableVao();
     if (ibo == 0) {
         backend->createDrawableBuffers(ibo);
     }
-    backend->uploadDrawableIndices(ibo, mesh.indices);
+    backend->uploadDrawableIndices(ibo, mesh->indices);
 }
 
 std::tuple<Vec2Array, std::optional<Mat4>, bool> Drawable::nodeAttachProcessor(const std::shared_ptr<Node>& node,
@@ -466,7 +466,7 @@ std::tuple<Vec2Array, std::optional<Mat4>, bool> Drawable::nodeAttachProcessor(c
                                                                                const Vec2Array& origDeformation,
                                                                                const Mat4* origTransform) {
     bool changed = false;
-    if (!node || mesh.indices.size() < 3) return {origDeformation, std::nullopt, false};
+    if (!node || mesh->indices.size() < 3) return {origDeformation, std::nullopt, false};
     Mat4 inv = Mat4::inverse(transform().toMat4());
     Vec3 localNode = inv.transformPoint(Vec3{node->transform().translation.x, node->transform().translation.y, 0});
     Vec2 nodeOrigin{localNode.x, localNode.y};
@@ -474,7 +474,7 @@ std::tuple<Vec2Array, std::optional<Mat4>, bool> Drawable::nodeAttachProcessor(c
     auto triIt = attachedIndex.find(node->uuid);
     std::array<std::size_t, 3> tri{};
     if (triIt == attachedIndex.end()) {
-        auto triFound = findSurroundingTriangle(nodeOrigin, mesh);
+        auto triFound = findSurroundingTriangle(nodeOrigin, *mesh);
         if (!triFound) return {origDeformation, std::nullopt, false};
         tri = *triFound;
         attachedIndex[node->uuid] = tri;
@@ -484,7 +484,7 @@ std::tuple<Vec2Array, std::optional<Mat4>, bool> Drawable::nodeAttachProcessor(c
 
     Vec2 targetPrime{};
     float rotVert = 0.0f, rotHorz = 0.0f;
-    if (!calculateTransformInTriangle(mesh, tri, deformation, nodeOrigin, targetPrime, rotVert, rotHorz)) {
+    if (!calculateTransformInTriangle(*mesh, tri, deformation, nodeOrigin, targetPrime, rotVert, rotHorz)) {
         return {origDeformation, std::nullopt, false};
     }
     Vec2 delta{targetPrime.x - nodeOrigin.x, targetPrime.y - nodeOrigin.y};
@@ -498,18 +498,18 @@ std::tuple<Vec2Array, std::optional<Mat4>, bool> Drawable::nodeAttachProcessor(c
 
 void Drawable::writeSharedBuffers() {
     // vertices
-    sharedVertices.resize(mesh.vertices.size());
-    for (std::size_t i = 0; i < mesh.vertices.size(); ++i) {
-        sharedVertices.x[i] = mesh.vertices[i].x;
-        sharedVertices.y[i] = mesh.vertices[i].y;
+    sharedVertices.resize(mesh->vertices.size());
+    for (std::size_t i = 0; i < mesh->vertices.size(); ++i) {
+        sharedVertices.x[i] = mesh->vertices[i].x;
+        sharedVertices.y[i] = mesh->vertices[i].y;
     }
     sharedVertexResize(sharedVertices, sharedVertices.size());
     sharedVertexMarkDirty();
     // uvs
-    sharedUvs.resize(mesh.uvs.size());
-    for (std::size_t i = 0; i < mesh.uvs.size(); ++i) {
-        sharedUvs.x[i] = mesh.uvs[i].x;
-        sharedUvs.y[i] = mesh.uvs[i].y;
+    sharedUvs.resize(mesh->uvs.size());
+    for (std::size_t i = 0; i < mesh->uvs.size(); ++i) {
+        sharedUvs.x[i] = mesh->uvs[i].x;
+        sharedUvs.y[i] = mesh->uvs[i].y;
     }
     sharedUvResize(sharedUvs, sharedUvs.size());
     sharedUvMarkDirty();
@@ -525,10 +525,10 @@ void Drawable::writeSharedBuffers() {
 }
 
 void Drawable::updateVertices() {
-    Vec2Array verts(mesh.vertices.size());
-    for (std::size_t i = 0; i < mesh.vertices.size(); ++i) {
-        verts.x[i] = mesh.vertices[i].x;
-        verts.y[i] = mesh.vertices[i].y;
+    Vec2Array verts(mesh->vertices.size());
+    for (std::size_t i = 0; i < mesh->vertices.size(); ++i) {
+        verts.x[i] = mesh->vertices[i].x;
+        verts.y[i] = mesh->vertices[i].y;
     }
     vertices = verts;
     deformation.resize(vertices.size());
@@ -543,7 +543,7 @@ void Drawable::updateVertices() {
 }
 
 void Drawable::rebufferMesh(const MeshData& data) {
-    mesh = data;
+    *mesh = data;
     updateIndices();
     updateVertices();
 }
@@ -556,10 +556,10 @@ void Drawable::updateDeform() {
 }
 
 void Drawable::reset() {
-    vertices.resize(mesh.vertices.size());
-    for (std::size_t i = 0; i < mesh.vertices.size(); ++i) {
-        vertices.x[i] = mesh.vertices[i].x;
-        vertices.y[i] = mesh.vertices[i].y;
+    vertices.resize(mesh->vertices.size());
+    for (std::size_t i = 0; i < mesh->vertices.size(); ++i) {
+        vertices.x[i] = mesh->vertices[i].x;
+        vertices.y[i] = mesh->vertices[i].y;
     }
     sharedVertexMarkDirty();
 }
@@ -669,7 +669,7 @@ void Drawable::addWeldedTarget(const std::shared_ptr<Drawable>& target,
     }
     auto reciprocal = std::find_if(target->weldedLinks.begin(), target->weldedLinks.end(), [&](const WeldingLink& l) { return l.targetUUID == uuid; });
     if (reciprocal == target->weldedLinks.end()) {
-        std::vector<std::ptrdiff_t> counter(target->mesh.vertices.size(), NOINDEX);
+        std::vector<std::ptrdiff_t> counter(target->mesh->vertices.size(), NOINDEX);
         for (std::size_t i = 0; i < indices.size() && i < counter.size(); ++i) {
             auto ind = indices[i];
             if (ind != NOINDEX && ind >= 0) counter[static_cast<std::size_t>(ind)] = static_cast<std::ptrdiff_t>(i);
@@ -774,13 +774,13 @@ void Drawable::runPostTaskImpl(std::size_t priority, core::RenderContext& ctx) {
 }
 
 void Drawable::normalizeUv() {
-    if (mesh.uvs.empty()) return;
-    float minX = mesh.uvs[0].x;
+    if (mesh->uvs.empty()) return;
+    float minX = mesh->uvs[0].x;
     float maxX = minX;
-    float minY = mesh.uvs[0].y;
+    float minY = mesh->uvs[0].y;
     float maxY = minY;
-    for (std::size_t i = 1; i < mesh.uvs.size(); ++i) {
-        const auto& uv = mesh.uvs[i];
+    for (std::size_t i = 1; i < mesh->uvs.size(); ++i) {
+        const auto& uv = mesh->uvs[i];
         minX = std::min(minX, uv.x);
         maxX = std::max(maxX, uv.x);
         minY = std::min(minY, uv.y);
@@ -790,7 +790,7 @@ void Drawable::normalizeUv() {
     float height = maxY - minY;
     float centerX = width != 0.0f ? (minX + maxX) / (2.0f * width) : 0.0f;
     float centerY = height != 0.0f ? (minY + maxY) / (2.0f * height) : 0.0f;
-    for (auto& uv : mesh.uvs) {
+    for (auto& uv : mesh->uvs) {
         if (width != 0.0f) uv.x /= width;
         if (height != 0.0f) uv.y /= height;
         uv.x += (0.5f - centerX);
@@ -810,11 +810,11 @@ void Drawable::centralizeDrawable() {
 }
 
 void Drawable::copyFromDrawable(const Drawable& src) {
-    mesh.vertices = src.mesh.vertices;
-    mesh.uvs = src.mesh.uvs.empty() ? src.mesh.vertices : src.mesh.uvs;
-    mesh.indices = src.mesh.indices;
-    mesh.origin = src.mesh.origin;
-    mesh.gridAxes = src.mesh.gridAxes;
+    mesh->vertices = src.mesh->vertices;
+    mesh->uvs = src.mesh->uvs.empty() ? src.mesh->vertices : src.mesh->uvs;
+    mesh->indices = src.mesh->indices;
+    mesh->origin = src.mesh->origin;
+    mesh->gridAxes = src.mesh->gridAxes;
     deformation = src.deformation;
     tint = src.tint;
     screenTint = src.screenTint;
@@ -874,7 +874,7 @@ void Drawable::build(bool force) {
 
 void Drawable::buildDrawable(bool force) {
     auto backend = core::getCurrentRenderBackend();
-    if (force || !mesh.isReady()) {
+    if (force || !mesh->isReady()) {
         if (backend) {
             backend->initializeDrawableResources();
             backend->bindDrawableVao();
@@ -883,15 +883,15 @@ void Drawable::buildDrawable(bool force) {
         updateVertices();
         writeSharedBuffers();
     }
-    if (backend && ibo != 0 && !mesh.indices.empty()) {
-        backend->drawDrawableElements(ibo, mesh.indices.size());
+    if (backend && ibo != 0 && !mesh->indices.empty()) {
+        backend->drawDrawableElements(ibo, mesh->indices.size());
     }
 }
 
 bool Drawable::mustPropagateDrawable() const { return true; }
 
 void Drawable::fillDrawPacket(const Node& header, PartDrawPacket& packet, bool /*isMask*/) const {
-    packet.renderable = header.enabled && mesh.isReady();
+    packet.renderable = header.enabled && mesh->isReady();
     packet.modelMatrix = header.transform().toMat4();
     if (auto pup = puppetRef()) {
         packet.puppetMatrix = pup->transform.toMat4();
@@ -905,21 +905,21 @@ void Drawable::fillDrawPacket(const Node& header, PartDrawPacket& packet, bool /
     packet.maskThreshold = 0.0f;
     packet.clampedTint = tint;
     packet.clampedScreen = screenTint;
-    packet.origin = mesh.origin;
+    packet.origin = mesh->origin;
     packet.vertexOffset = vertexOffset;
     packet.uvOffset = uvOffset;
     packet.deformOffset = deformOffset;
     packet.vertexAtlasStride = sharedVertexBufferData().size();
     packet.uvAtlasStride = sharedUvBufferData().size();
     packet.deformAtlasStride = sharedDeformBufferData().size();
-    packet.vertexCount = static_cast<uint32_t>(mesh.vertices.size());
-    packet.indexCount = static_cast<uint32_t>(mesh.indices.size());
+    packet.vertexCount = static_cast<uint32_t>(mesh->vertices.size());
+    packet.indexCount = static_cast<uint32_t>(mesh->indices.size());
     for (std::size_t i = 0; i < textures.size() && i < 3; ++i) {
         packet.textureUUIDs[i] = textures[i] ? textures[i]->getRuntimeUUID() : 0;
     }
-    packet.vertices = mesh.vertices;
-    packet.uvs = mesh.uvs;
-    packet.indices = mesh.indices;
+    packet.vertices = mesh->vertices;
+    packet.uvs = mesh->uvs;
+    packet.indices = mesh->indices;
     packet.deformation = deformation;
     packet.node.reset();
 }
@@ -958,7 +958,7 @@ void Drawable::serializeSelfImpl(::nicxlive::core::serde::InochiSerializer& seri
     Node::serializeSelfImpl(serializer, recursive, flags);
     if (has_flag(flags, SerializeNodeFlags::Geometry)) {
         serializer.putKey("mesh");
-        mesh.serialize(serializer);
+        mesh->serialize(serializer);
     }
     if (has_flag(flags, SerializeNodeFlags::Links) && !weldedLinks.empty()) {
         serializer.putKey("weldedLinks");
@@ -984,13 +984,13 @@ void Drawable::serializeSelfImpl(::nicxlive::core::serde::InochiSerializer& seri
 ::nicxlive::core::serde::SerdeException Drawable::deserializeFromFghj(const ::nicxlive::core::serde::Fghj& data) {
     if (auto err = Node::deserializeFromFghj(data)) return err;
     if (auto m = data.get_child_optional("mesh")) {
-        if (auto exc = mesh.deserializeFromFghj(*m)) return exc;
-        vertices.resize(mesh.vertices.size());
-        for (std::size_t i = 0; i < mesh.vertices.size(); ++i) {
-            vertices.x[i] = mesh.vertices[i].x;
-            vertices.y[i] = mesh.vertices[i].y;
+        if (auto exc = mesh->deserializeFromFghj(*m)) return exc;
+        vertices.resize(mesh->vertices.size());
+        for (std::size_t i = 0; i < mesh->vertices.size(); ++i) {
+            vertices.x[i] = mesh->vertices[i].x;
+            vertices.y[i] = mesh->vertices[i].y;
         }
-        deformation.resize(mesh.vertices.size());
+        deformation.resize(mesh->vertices.size());
     }
     if (auto wl = data.get_child_optional("weldedLinks")) {
         weldedLinks.clear();

@@ -35,4 +35,19 @@ cmake --build build
 | 15 | nodes/drivers/simplephysics.d | 1003 | core/nodes/simple_physics_driver.cpp | 104 | (WIP) |
 | nijilive (total) | 10,692 | nicxlive (total) | — |  |
 
+### Render layer (D → C++)
+| # | nijilive (D) | Lines | nicxlive (C++) | Lines | Compat note |
+| - | --- | ---:| --- | ---:| --- |
+| RQ1 | render/commands.d | 210 | core/render/commands.cpp | 92 | [compat-queue](doc/compat-queue.md) |
+| RQ2 | render/command_emitter.d | 25 | core/render/command_emitter.cpp | 126 | [compat-queue](doc/compat-queue.md) |
+| RQ3 | render/graph_builder.d | 262 | core/render/graph_builder.cpp | 213 | [compat-queue](doc/compat-queue.md) |
+| RQ4 | render/scheduler.d | 98 | core/render/scheduler.cpp | 41 | [compat-queue](doc/compat-queue.md) |
+| RQ5 | render/shared_deform_buffer.d | 234 | core/render/shared_deform_buffer.cpp | 134 | [compat-queue](doc/compat-queue.md) |
+| RQ6 | render/immediate.d | 42 | core/render/immediate.cpp | 28 | [compat-queue](doc/compat-queue.md) |
+| RQ7 | render/passes.d | 39 | core/render/render_pass.hpp | 20 | [compat-queue](doc/compat-queue.md) |
+| RQ8 | render/profiler.d | 111 | core/render/profiler.cpp | 108 | [compat-queue](doc/compat-queue.md) |
+| RQ9 | render/backends/queue/package.d | 393 | core/render/backend_queue.cpp | 148 | [compat-queue](doc/compat-queue.md) |
+| RQ10 | render/backends/opengl/* | 4,150 | （未移植） | 0 | (WIP) |
+| RQ11 | render/backends/directx12/* | 2,915 | （未移植） | 0 | (WIP) |
+
 See `doc/compat-*.md` for detailed compatibility notes and remaining gaps.

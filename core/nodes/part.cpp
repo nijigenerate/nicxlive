@@ -80,7 +80,7 @@ const std::string& Part::typeId() const {
 void Part::initPartTasks() { requireRenderTask(); }
 
 void Part::updateUVs() {
-    sharedUvResize(mesh.uvs, mesh.uvs.size());
+    sharedUvResize(mesh->uvs, mesh->uvs.size());
     sharedUvMarkDirty();
 }
 
@@ -397,7 +397,7 @@ void Part::runBeginTask(core::RenderContext& ctx) {
 }
 
 void Part::rebuffer(const MeshData& data) {
-    mesh = data;
+    *mesh = data;
     updateVertices();
     updateUVs();
 }
@@ -474,7 +474,7 @@ void Part::drawOneDirect(bool forMasking) {
 }
 
 void Part::fillDrawPacket(const Node& header, PartDrawPacket& packet, bool isMask) const {
-    packet.renderable = enabled && opacity > 0.0f && mesh.isReady();
+    packet.renderable = enabled && opacity > 0.0f && mesh->isReady();
     packet.modelMatrix = header.transform().toMat4();
     if (auto pup = puppetRef()) {
         packet.puppetMatrix = pup->transform.toMat4();
@@ -497,21 +497,21 @@ void Part::fillDrawPacket(const Node& header, PartDrawPacket& packet, bool isMas
     screenAccum.y = std::clamp(screenTint.y + offsetScreenTint.y, 0.0f, 1.0f);
     screenAccum.z = std::clamp(screenTint.z + offsetScreenTint.z, 0.0f, 1.0f);
     packet.clampedScreen = screenAccum;
-    packet.origin = mesh.origin;
+    packet.origin = mesh->origin;
     packet.vertexOffset = vertexOffset;
     packet.uvOffset = uvOffset;
     packet.deformOffset = deformOffset;
     packet.vertexAtlasStride = sharedVertexBufferData().size();
     packet.uvAtlasStride = sharedUvBufferData().size();
     packet.deformAtlasStride = sharedDeformBufferData().size();
-    packet.vertexCount = static_cast<uint32_t>(mesh.vertices.size());
-    packet.indexCount = static_cast<uint32_t>(mesh.indices.size());
+    packet.vertexCount = static_cast<uint32_t>(mesh->vertices.size());
+    packet.indexCount = static_cast<uint32_t>(mesh->indices.size());
     for (std::size_t i = 0; i < textures.size() && i < 3; ++i) {
         packet.textureUUIDs[i] = textures[i] ? textures[i]->getRuntimeUUID() : 0;
     }
-    packet.vertices = mesh.vertices;
-    packet.uvs = mesh.uvs;
-    packet.indices = mesh.indices;
+    packet.vertices = mesh->vertices;
+    packet.uvs = mesh->uvs;
+    packet.indices = mesh->indices;
     packet.deformation = deformation;
     packet.node = std::dynamic_pointer_cast<Part>(const_cast<Part*>(this)->shared_from_this());
 }
@@ -527,7 +527,7 @@ Mat4 Part::immediateModelMatrix() const {
 void Part::setOffscreenModelMatrix(const Mat4& m) { offscreenModelMatrix = m; hasOffscreenModelMatrix = true; }
 void Part::clearOffscreenModelMatrix() { hasOffscreenModelMatrix = false; }
 
-bool Part::backendRenderable() const { return enabled && mesh.isReady(); }
+bool Part::backendRenderable() const { return enabled && mesh->isReady(); }
 
 std::size_t Part::backendMaskCount() const { return masks.size(); }
 
