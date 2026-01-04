@@ -5,7 +5,11 @@
 #include <mutex>
 #include <unordered_map>
 #include <algorithm>
+#if defined(_WIN32)
+#include <malloc.h>
+#elif defined(__APPLE__)
 #include <malloc/malloc.h>
+#endif
 #include <cstring>
 #include "runtime_state.hpp"
 #include "timing.hpp"
@@ -574,9 +578,14 @@ void njgFlushCommandBuffer(void* renderer) {
 size_t njgGetGcHeapSize() {
     // Approximate heap usage via malloc introspection (platform-specific).
     // On macOS, malloc_zone_statistics provides totals for the default zone.
+#if defined(__APPLE__)
     malloc_statistics_t stats{};
     malloc_zone_statistics(nullptr, &stats);
     return static_cast<size_t>(stats.size_in_use);
+#else
+    // Not available on this platform; return 0 as a stub.
+    return 0;
+#endif
 }
 
 TextureStats njgGetTextureStats(void* renderer) {
