@@ -1,4 +1,6 @@
-# Projectable 実装互換性チェック (D ↔ C++)
+﻿# Projectable 実装互換性チェック (D ↔ C++)
+
+判定基準: D実装を正とし、Dに存在してC++にない項目は `✗（未実装）`、Dに存在せずC++のみにある項目は `✗（削除候補）` とする。
 
 | 項目 | D 実装 | C++ 現状 | 互換性評価 | 差分メモ(概算行) |
 | --- | --- | --- | --- | --- |
@@ -47,10 +49,13 @@
 | field `maskParts` | Maskコレクション | 同等 | ◯ | - |
 | field `autoResizedMesh` | 自動リサイズ有効 | 追加済み | ◯ | - |
 | field `textureOffset` | テクスチャオフセット | 追加済み | ◯ | - |
-| field `texWidth/texHeight` | テクスチャ寸法 | 追加済み | ◯ | - |
+| field 	exWidth | テクスチャ寸法 | 追加済み | ◯ | - |
+| field 	exHeight | テクスチャ寸法 | 追加済み | ◯ | - |
 | field `autoResizedSize` | 自動リサイズ寸法 | 追加済み | ◯ | - |
 | field `deferred` | 遅延フラグ | 追加済み | ◯ | - |
-| field `prevTranslation/Rotation/Scale` | 前回TRS記録 | 追加済み | ◯ | - |
+| field prevTranslation | 前回TRS記録 | 追加済み | ◯ | - |
+| field prevRotation | 前回TRS記録 | 追加済み | ◯ | - |
+| field prevScale | 前回TRS記録 | 追加済み | ◯ | - |
 | field `deferredChanged` | 遅延変化フラグ | 追加済み | ◯ | - |
 | field `ancestorChangeQueued` | 祖先変化キュー | 追加済み | ◯ | - |
 | field `maxChildrenBounds` | 最大子bounds | 追加済み | ◯ | - |
@@ -67,3 +72,4 @@
 | method `setupSelf()` | listener登録・初期化処理 | D同等 | ◯ | - |
 | method `releaseSelf()` | listener解除 | D同等 | ◯ | - |
 | method `onAncestorChanged()` | ancestor変化検知でdeferred設定 | D同等 | ◯ | - |
+

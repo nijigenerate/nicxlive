@@ -1,4 +1,6 @@
-# scheduler 実装互換性チェック (D `nijilive.core.render.scheduler` ↔ C++ `core/render/scheduler.*`)
+﻿# scheduler 実装互換性チェック (D `nijilive.core.render.scheduler` ↔ C++ `core/render/scheduler.*`)
+
+判定基準: D実装を正とし、Dに存在してC++にない項目は `✗（未実装）`、Dに存在せずC++のみにある項目は `✗（削除候補）` とする。
 
 | フィールド/メソッド | D 実装 | C++ 現状 | 互換性 |
 | --- | --- | --- | --- |
@@ -7,7 +9,7 @@
 | `RenderContext.renderGraph` | RenderGraphBuilder* | 同等 | ◯ |
 | `RenderContext.renderBackend` | RenderBackend 値保持 | RenderBackend* | △（値→ポインタ） |
 | `RenderContext.gpuState` | RenderGpuState 値保持 | 同等 | ◯ |
-| `RenderContext.frameId` | 未定義 | `std::size_t frameId` 追加 | △（追加フィールド） |
+| `RenderContext.frameId` | 未定義 | `std::size_t frameId` 追加 | ✗（削除候補） |
 | `TaskHandler` | `delegate(ref RenderContext)` | `std::function<void(RenderContext&)>` | ◯ |
 | `Task` フィールド | order/kind/handler | 同等 | ◯ |
 | `TaskScheduler.queues` | Task[][TaskOrder] | `std::map<TaskOrder, std::vector<Task>>` | ◯ |
@@ -18,3 +20,4 @@
 | `execute` | Init→Final 全実行 | 同等 | ◯ |
 
 **現状**: スケジューラの挙動はほぼ一致。相違点は RenderContext の renderBackend が値→ポインタ、frameId 追加程度で互換性に大きな影響なし。***
+

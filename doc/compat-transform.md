@@ -1,4 +1,6 @@
-# Transform 実装互換性チェック (D `nijilive.math.transform` ↔ C++ `core/math/transform.hpp`)
+﻿# Transform 実装互換性チェック (D `nijilive.math.transform` ↔ C++ `core/math/transform.hpp`)
+
+判定基準: D実装を正とし、Dに存在してC++にない項目は `✗（未実装）`、Dに存在せずC++のみにある項目は `✗（削除候補）` とする。
 
 | フィールド/メソッド | D 実装 | C++ 現状 | 互換性 |
 | --- | --- | --- | --- |
@@ -13,8 +15,9 @@
 | `matrix()` | trs を返す | trs を返す | ◯ |
 | `update()` | translation/rotation/scale から trs を再計算 | 実装あり（pixelSnap 丸め） | ◯ |
 | `clear()` | translation/rotation/scale をリセット | リセット | ◯ |
-| `toString()` | 文字列表現 | 未実装 | ✗ |
-| `serialize()/deserializeFromFghj()` | trans/rot/scale をシリアライズ/デシリアライズ | 未実装 | ✗ |
+| `toString()` | 文字列表現 | 未実装 | ✗（未実装） |
+| serialize() | trans/rot/scale をシリアライズ | 未実装 | ✗（未実装） |
+| deserializeFromFghj() | trans/rot/scale をデシリアライズ | 未実装 | ✗（未実装） |
 | `Transform2D.translation` | vec2 | 実装あり | ◯ |
 | `Transform2D.scale` | vec2 | 実装あり | ◯ |
 | `Transform2D.rotation` | float | 実装あり | ◯ |
@@ -22,3 +25,4 @@
 | `Transform2D.update()` | mat3 translation/rotation/scale を合成 | 実装あり | ◯ |
 
 **現状**: Transform/Transform2D の主要な挙動は写経ベースで実装済み。残課題は scale 次元の扱い（Z は 1 固定想定）、toString/シリアライズ系の未実装。***
+

@@ -1,4 +1,6 @@
-# timing 実装互換性チェック (D `nijilive/package.d` ↔ C++ `core/timing.*`)
+﻿# timing 実装互換性チェック (D `nijilive/package.d` ↔ C++ `core/timing.*`)
+
+判定基準: D実装を正とし、Dに存在してC++にない項目は `✗（未実装）`、Dに存在せずC++のみにある項目は `✗（削除候補）` とする。
 
 | 関数 | D 実装 | C++ 現状 | 互換性 |
 | --- | --- | --- | --- |
@@ -10,3 +12,4 @@
 | `currentTime` | 現在時刻を返す | 同等 | ◯ |
 
 **現状**: 時間計測APIはほぼ移植済み。`inInit` が renderer初期化を呼ばない点のみ差分。***
+

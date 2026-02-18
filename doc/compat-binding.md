@@ -1,5 +1,9 @@
-# Binding 実装互換性チェック (D `nijilive.core.param.binding` ↔ C++ `core/param/binding*.hpp`)
+﻿# Binding 実装互換性チェック (D `nijilive.core.param.binding` ↔ C++ `core/param/binding*.hpp`)
 
+判定基準: D実装を正とし、Dに存在してC++にない項目は `✗（未実装）`、Dに存在せずC++のみにある項目は `✗（削除候補）` とする。
+
+| フィールド/メソッド | D 実装 | C++ 現状 | 互換性 |
+| --- | --- | --- | --- |
 | フィールド `BindTarget.target` | `Resource` 参照 | `weak_ptr<Node>` | △（Resource/UUID 不保持） |
 | フィールド `BindTarget.name` | 名前保持 | 同等 | ◯ |
 | `reconstruct` | puppet 経由で node 再解決 | no-op | ✗ |
@@ -24,11 +28,12 @@
 | `getNodeUUID` | nodeRef から UUID 返却 | weak_ptr 解決時のみ UUID 取得 | △ |
 | `interpolateMode` getter | 取得 | 実装あり | ◯ |
 | `interpolateMode` setter | 設定 | 実装あり | ◯ |
-| `serializeSelf` | target/values/isSet/interpolate_mode をシリアライズ | 未実装 | ✗ |
-| `deserializeFromFghj` | Fghj から復元＋整合性検証 | 未実装 | ✗ |
+| `serializeSelf` | target/values/isSet/interpolate_mode をシリアライズ | 未実装 | ✗（未実装） |
+| `deserializeFromFghj` | Fghj から復元＋整合性検証 | 未実装 | ✗（未実装） |
 | `clearValue (Value)` | 型に応じ既定値に戻す | 実装あり | ◯ |
 | `clearValue (Deformation)` | vertexOffsets をクリア | 実装あり | ◯ |
 | `clearValue (ParameterParameter)` | 参照パラメータのデフォルトに戻す | 実装あり | ◯ |
 | `isCompatibleWithNode` | node 型検証 | Deformation/Value は常に true、ParameterParameter は false 固定 | △ |
 
 **現状**: キーポイント操作・補間・軸操作は概ね写経済み。未対応はシリアライズ/デシリアライズ、puppet 再解決（reconstruct/finalize）、Resource/UUID ベースのターゲット保持。互換性チェックや UUID 参照も D 版ほど厳密ではない。***
+

@@ -1,4 +1,6 @@
-# Queue Backend 実装互換性チェック (D ↔ C++)
+﻿# Queue Backend 実装互換性チェック (D ↔ C++)
+
+判定基準: D実装を正とし、Dに存在してC++にない項目は `✗（未実装）`、Dに存在せずC++のみにある項目は `✗（削除候補）` とする。
 
 | メソッド / フィールド | D 実装 | C++ 現状 | 互換性評価 |
 | --- | --- | --- | --- |
@@ -15,11 +17,18 @@
 | uploadDebugBuffer | バッファ保持 | positions/indices保持 | ◯ |
 | drawDebugPoints | 記録のみ | noop | ◯ |
 | drawDebugLines | 記録のみ | noop | ◯ |
-| createTextureHandle/Texture管理 | 実装（QueueTextureHandle, upload/update/params等） | 実装（TextureHandle map） | ◯ |
-| submit/draw commands | CommandQueueEmitterがキュー記録 | QueueCommandEmitterがキュー記録 | ◯ |
-| queuedCommands/recorded取得 | 記録を返す | recorded/queueで返す | ◯ |
+| createTextureHandle | 実装（QueueTextureHandle） | 実装（TextureHandle map） | ◯ |
+| Texture管理 | upload/update/params 等を保持 | 同等 | ◯ |
+| submit | CommandQueueEmitterがキュー記録 | QueueCommandEmitterがキュー記録 | ◯ |
+| draw commands | CommandQueueEmitterがキュー記録 | QueueCommandEmitterがキュー記録 | ◯ |
+| queuedCommands 取得 | 記録を返す | recorded/queueで返す | ◯ |
+| `recorded` 取得 | 記録を返す | recorded/queueで返す | ◯ |
 | playback | queuedCommandsを backend に再生 | QueueRenderBackend::playback で再生 | ◯ |
-| drawTextureAtPart/Position/Rect | 全て空実装（差分評価用に保持のみ） | 全て空実装 | ◯ |
+| drawTextureAtPart | 空実装（差分評価用に保持のみ） | 空実装 | ◯ |
+| drawTextureAtPosition | 空実装（差分評価用に保持のみ） | 空実装 | ◯ |
+| drawTextureAtRect | 空実装（差分評価用に保持のみ） | 空実装 | ◯ |
 | differenceAggregation API | enable/region/result を保持、evaluateは未実装 | enable/region/result を保持、evaluateは未実装 | ◯ |
 
 ※デバッグ描画系はDでも実描画はしないが、point/line幅設定を保持する実装が未実装のため△。
+
+

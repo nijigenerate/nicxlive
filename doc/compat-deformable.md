@@ -1,4 +1,6 @@
-# Deformable 実装互換性チェック (D ↔ C++)
+﻿# Deformable 実装互換性チェック (D ↔ C++)
+
+判定基準: D実装を正とし、Dに存在してC++にない項目は `✗（未実装）`、Dに存在せずC++のみにある項目は `✗（削除候補）` とする。
 
 | メソッド/フィールド | D 実装 | C++ 現状 | 互換性評価 |
 | --- | --- | --- | --- |
@@ -19,3 +21,4 @@
 | `runPostTaskImpl` | super 後に updateDeform | 同等 | ◯ |
 | `onDeformPushed` | フック（デフォルト空） | フック（空） | ◯ |
 | `notifyDeformPushed` | onDeformPushed 呼び出し | 同等 | ◯ |
+

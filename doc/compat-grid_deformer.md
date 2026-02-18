@@ -1,4 +1,6 @@
-# GridDeformer 実装互換性チェック (D ↔ C++)
+﻿# GridDeformer 実装互換性チェック (D ↔ C++)
+
+判定基準: D実装を正とし、Dに存在してC++にない項目は `✗（未実装）`、Dに存在せずC++のみにある項目は `✗（削除候補）` とする。
 
 | 項目 | D 実装 | C++ 現状 | 互換性評価 |
 | --- | --- | --- | --- |
@@ -42,3 +44,4 @@
 | メソッド gridIndex | x,y から一次元 index | 同等 | ◯ |
 | メソッド serializeSelfImpl | 軸/formation/dynamic を保存 | 実装済 | ◯ |
 | メソッド deserializeFromFghj | 軸/formation/dynamic 復元＋軸設定 | 実装済 | ◯ |
+

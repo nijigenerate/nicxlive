@@ -1,11 +1,16 @@
-# compat-io (D `nijilive.fmt.io` ↔ C++ `fmt/io.hpp`)
+﻿# compat-io (D `nijilive.fmt.io` ↔ C++ `fmt/io.hpp`)
+
+判定基準: D実装を正とし、Dに存在してC++にない項目は `✗（未実装）`、Dに存在せずC++のみにある項目は `✗（削除候補）` とする。
 
 | フィールド/メソッド | D 実装 | C++ 現状 | 互換性 |
 | --- | --- | --- | --- |
 | `readValue` | BEで値読み取り | 同等（BE集計） | ◯ |
 | `peekValue` | 読んで戻す | 同等 | ◯ |
-| `readStr`/`peekStr` | 指定長の文字列読み取り/peek | 同等 | ◯ |
-| `read`/`peek` | 指定長のバイト読み取り/peek | 同等 | ◯ |
+| eadStr | 指定長の文字列読み取り | 同等 | ◯ |
+| peekStr | 指定長の文字列peek | 同等 | ◯ |
+| ead | 指定長のバイト読み取り | 同等 | ◯ |
+| peek | 指定長のバイトpeek | 同等 | ◯ |
 | `skip` | 指定バイト数シーク | 同等 | ◯ |
 
 備考: C++版は `std::ifstream` を前提。***
+

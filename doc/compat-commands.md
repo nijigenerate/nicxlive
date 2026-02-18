@@ -1,4 +1,6 @@
-# commands 実装互換性チェック (D `nijilive.core.render.commands` ↔ C++ `core/render/commands.*`)
+﻿# commands 実装互換性チェック (D `nijilive.core.render.commands` ↔ C++ `core/render/commands.*`)
+
+判定基準: D実装を正とし、Dに存在してC++にない項目は `✗（未実装）`、Dに存在せずC++のみにある項目は `✗（削除候補）` とする。
 
 | フィールド/メソッド | D 実装 | C++ 現状 | 互換性 |
 | --- | --- | --- | --- |
@@ -15,3 +17,4 @@
 | `makeCompositeDrawPacket(Composite)` | opacity/tint/screenTint/blendMode を計算 | C++ 同等（NaN チェックは std::isnan） | ◯ |
 
 **現状**: 各コマンド種・パケット構造は D と整合。MaskDrawPacket 専用化と mvp 計算も移植済み。`tryMakeMaskApplyPacket` のログは簡略だが機能上は同等。***
+

@@ -1,4 +1,6 @@
-# Composite 実装互換性チェック (D ↔ C++)
+﻿# Composite 実装互換性チェック (D ↔ C++)
+
+判定基準: D実装を正とし、Dに存在してC++にない項目は `✗（未実装）`、Dに存在せずC++のみにある項目は `✗（削除候補）` とする。
 
 | 項目 | D 実装 | C++ 現状 | 互換性評価 |
 | --- | --- | --- | --- |
@@ -24,3 +26,4 @@
 | field `maxChildrenBounds` | boundsキャッシュ | 同等 | ◯ |
 | field `useMaxChildrenBounds` | キャッシュ使用フラグ | 同等 | ◯ |
 | field `maxBoundsStartFrame` | キャッシュ開始フレーム | 同等 | ◯ |
+

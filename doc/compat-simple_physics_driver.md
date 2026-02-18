@@ -1,4 +1,6 @@
-# SimplePhysicsDriver 実装互換性チェック (D ↔ C++)
+﻿# SimplePhysicsDriver 実装互換性チェック (D ↔ C++)
+
+判定基準: D実装を正とし、Dに存在してC++にない項目は `✗（未実装）`、Dに存在せずC++のみにある項目は `✗（削除候補）` とする。
 
 | 項目 | D 実装 | C++ 現状 | 互換性評価 |
 | --- | --- | --- | --- |
@@ -59,3 +61,4 @@
 | deserializeFromFghj `output_scale` | 出力スケール復元 | 実装 | ◯ |
 | deserializeFromFghj `local_only` | ローカル参照復元 | 実装 | ◯ |
 | drawDebug | デバッグ描画 | anchor→outputライン＋クロスを描画 | ◯ |
+

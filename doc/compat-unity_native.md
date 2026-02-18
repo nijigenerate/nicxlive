@@ -1,28 +1,48 @@
-# unity_native (D `integration/unity.d` ↔ C++ `core/unity_native.*`) 互換性チェック
+﻿# unity_native (D `integration/unity.d` ↔ C++ `core/unity_native.*`) 互換性チェック
+
+判定基準: D実装を正とし、Dに存在してC++にない項目は `✗（未実装）`、Dに存在せずC++のみにある項目は `✗（削除候補）` とする。
 
 | 項目 | D 実装 | C++ 現状 | 互換性 |
 | --- | --- | --- | --- |
-| `NjgRenderCommandKind` | 全コマンド種を定義 | 同等列挙を定義 | ◯ |
-| `NjgQueuedCommand` | RenderCommandKind と各パケットを包含 | 同等構造体 | ◯ |
-| `NjgPartDrawPacket` | mvp付き。indices を範囲チェック | mvp/offset/indices保持。indexCountをクランプ | ◯ |
-| `NjgMaskDrawPacket` | model/mvp/origin/offset/indexをSerialize | 同等フィールド。indexCountをクランプ | ◯ |
-| `NjgDynamicCompositePass` | textures/stencil/scale/rotationZ/origBuffer/viewport | 同等フィールドを設定 | ◯ |
-| `UnityResourceCallbacks.createTexture` | Unity側でテクスチャ生成 | resourceQueue適用時/puppetロード時に呼び出し、ハンドル保持・統計加算（unity_native.cpp: applyTextureCommands/ensurePuppetTextures） | ◯ |
-| `UnityResourceCallbacks.updateTexture` | Unity側で更新 | resourceQueue適用時/puppetロード時に呼び出し（unity_native.cpp: applyTextureCommands/ensurePuppetTextures） | ◯ |
-| `UnityResourceCallbacks.releaseTexture` | Unity側で解放 | Dispose/puppetUnload/rendererDestroy で呼び出し統計更新（unity_native.cpp: releasePuppetTextures/releaseExternalTexture） | ◯ |
-| `njgCreateRenderer` | backend初期化、RT確保、activeRenderers登録 | backendをcurrentに設定し initRendererCommon/initializeRenderer を呼んだ上で viewport 初期設定（RT確保はBeginFrameで実施） | ◯ |
-| `njgDestroyRenderer` | activeRenderersから削除・解放 | マップerase | ◯ |
-| `njgLoadPuppet` | inLoadPuppet + TextureHandle確保 + Renderer紐付け | inLoadPuppetでロードし、Unity側テクスチャ作成・更新＋backendに作成/paramコマンドを積む | ◯ |
-| `njgLoadPuppetFromMemory` | バッファから inLoadPuppetFromMemory | 同等（Unityテクスチャ作成＋backendコマンド積み） | ◯ |
-| `njgWritePuppetToMemory` | PuppetをINP形式でバッファ出力 | inWriteINPPuppetMemory→mallocコピーを返す（njgFreeBufferで解放） | ◯ |
-| `njgGetParameters` | Puppet.parameters を列挙（uuid/isVec2/min/max/defaults/name） | 同等構造体をバッファに詰めて返す（unity_native.cpp: njgGetParameters） | ◯ |
-| `njgUpdateParameters` | uuidでパラメータを引き当て値を更新 | 同等に uuid 対応で Vec2/float を更新（unity_native.cpp: njgUpdateParameters） | ◯ |
-| `njgUnloadPuppet` | Renderer配列から除去 | 同等に除去 | ◯ |
-| `njgBeginFrame` | コマンドバッファ初期化、RT確保、viewport設定 | viewport設定し、サイズ変化時にRTを再生成して setRenderTargets、キューをクリア（unity_native.cpp: njgBeginFrame）。RTハンドルアクセサは未公開だが現行設計では不要（コマンドキュー再生のみ） | ◯ |
-| `njgTickPuppet` | 時間進行・puppet.update | inUpdate() → puppet->update を実行（unity_native.cpp: njgTickPuppet、timing.cpp: inUpdate） | ◯ |
-| `njgEmitCommands` | puppet.draw→QueueEmitterからSerialize。空コマンド除外。SharedBuffer詰める | puppet.draw→backendキューをパック、SharedBuffer詰める。resourceQueueをUnityに反映 | ◯ |
-| `njgFlushCommandBuffer` | バッファクリア＋GC要求 | backendキューとqueuedをクリア | △ |
-| `njgGetGcHeapSize` | GC使用量返却 | malloc統計でヒープ使用量を返す（macOS依存の概算） | △ |
-| `njgGetTextureStats` | 作成/解放/現在枚数返却 | create/dispose に加え puppetUnload/rendererDestroy で releaseTexture とカウント更新 | ◯ |
+| `NjgRenderCommandKind` | 定義あり | 定義あり | ◯ |
+| `NjgQueuedCommand` | 定義あり | 定義あり | ◯ |
+| `NjgPartDrawPacket` | 定義あり | 定義あり | ◯ |
+| `NjgMaskDrawPacket` | 定義あり | 定義あり | ◯ |
+| `NjgMaskApplyPacket` | 定義あり | 定義あり | ◯ |
+| `NjgDynamicCompositePass` | 定義あり | 定義あり | ◯ |
+| `CommandQueueView` | 定義あり | 定義あり | ◯ |
+| `TextureStats` | 定義あり | 定義あり | ◯ |
+| `SharedBufferSnapshot` | 定義あり | 定義あり | ◯ |
+| `NjgRenderTargets` | 定義あり | C++ 側に未定義 | ✗（未実装） |
+| `UnityResourceCallbacks.createTexture` | 定義あり | 定義あり | ◯ |
+| `UnityResourceCallbacks.updateTexture` | 定義あり | 定義あり | ◯ |
+| `UnityResourceCallbacks.releaseTexture` | 定義あり | 定義あり | ◯ |
+| `njgRuntimeInit` | export 関数あり | なし | ✗（未実装） |
+| `njgRuntimeTerm` | export 関数あり | なし | ✗（未実装） |
+| `njgCreateRenderer` | export 関数あり | あり | ◯ |
+| `njgDestroyRenderer` | export 関数あり | あり | ◯ |
+| `njgLoadPuppet` | export 関数あり | あり | ◯ |
+| `njgUnloadPuppet` | export 関数あり | あり | ◯ |
+| `njgBeginFrame` | export 関数あり | あり | ◯ |
+| `njgTickPuppet` | export 関数あり | あり | ◯ |
+| `njgEmitCommands` | export 関数あり | あり | ◯ |
+| `njgFlushCommandBuffer` | export 関数あり | あり | △（挙動差分あり） |
+| `njgGetTextureStats` | export 関数あり | あり | ◯ |
+| `njgGetRenderTargets` | export 関数あり | なし | ✗（未実装） |
+| `njgGetSharedBuffers` | export 関数あり | なし（`njgEmitCommands` に統合） | ✗（未実装） |
+| `njgSetLogCallback` | export 関数あり | なし | ✗（未実装） |
+| `njgGetGcHeapSize` | export 関数あり | あり | △（実装方針差分） |
+| `njgGetParameters` | export 関数あり | あり | ◯ |
+| `njgUpdateParameters` | export 関数あり | あり | ◯ |
+| `njgGetPuppetExtData` | export 関数あり | なし | ✗（未実装） |
+| `njgPlayAnimation` | export 関数あり | なし | ✗（未実装） |
+| `njgPauseAnimation` | export 関数あり | なし | ✗（未実装） |
+| `njgStopAnimation` | export 関数あり | なし | ✗（未実装） |
+| `njgSeekAnimation` | export 関数あり | なし | ✗（未実装） |
+| `njgSetPuppetScale` | export 関数あり | なし | ✗（未実装） |
+| `njgSetPuppetTranslation` | export 関数あり | なし | ✗（未実装） |
+| `njgLoadPuppetFromMemory` | D 側に export なし | C++ 側のみ存在 | ✗（削除候補） |
+| `njgWritePuppetToMemory` | D 側に export なし | C++ 側のみ存在 | ✗（削除候補） |
+| `njgFreeBuffer` | D 側に export なし | C++ 側のみ存在 | ✗（削除候補） |
 
-**現状**: コマンドパケットのシリアライズ経路は概ねD版と整合。Unityリソースコールバック、RT確保、puppet更新、GC/テクスチャ統計などDLL APIの多くが未移植。***
+**現状**: D export API を基準に、未実装と削除候補を本表へ反映済み。優先実装対象は `njgRuntimeInit/Term`、`njgGetRenderTargets`、`njgGetSharedBuffers`、`njgSetLogCallback`、`njgGetPuppetExtData`、各 animation/transform API。 

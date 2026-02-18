@@ -1,4 +1,6 @@
-# compat-binfmt (D `nijilive.fmt.binfmt` ↔ C++ `fmt/binfmt.hpp`)
+﻿# compat-binfmt (D `nijilive.fmt.binfmt` ↔ C++ `fmt/binfmt.hpp`)
+
+判定基準: D実装を正とし、Dに存在してC++にない項目は `✗（未実装）`、Dに存在せずC++のみにある項目は `✗（削除候補）` とする。
 
 | フィールド/メソッド | D 実装 | C++ 現状 | 互換性 |
 | --- | --- | --- | --- |
@@ -10,3 +12,4 @@
 | `inInterpretDataFromBuffer` | BE→native 変換 | 同等（BEで集計） | ◯ |
 
 備考: C++版は `std::vector<uint8_t>` を入力に使用。***
+

@@ -1,4 +1,6 @@
-# Parameter 実装互換性チェック (D ↔ C++)
+﻿# Parameter 実装互換性チェック (D ↔ C++)
+
+判定基準: D実装を正とし、Dに存在してC++にない項目は `✗（未実装）`、Dに存在せずC++のみにある項目は `✗（削除候補）` とする。
 
 | クラス/メソッド | D 実装 | C++ 現状 | 互換性評価 |
 | --- | --- | --- | --- |
@@ -23,11 +25,15 @@
 | `ParameterBinding::insertKeypoints` | あり | 実装 | ◯ |
 | `ParameterBinding::deleteKeypoints` | あり | 実装 | ◯ |
 | `ParameterBinding::getNodeUUID` | あり | target.node 参照 | ◯ |
-| `ParameterBinding::interpolateMode` getter/setter | あり | 実装（Nearest/Step/Linear/Cubic） | ◯ |
+| ParameterBinding::interpolateMode getter | あり | 実装 | ◯ |
+| ParameterBinding::interpolateMode setter | あり | 実装（Nearest/Step/Linear/Cubic） | ◯ |
 | `ValueParameterBinding` フィールド | values/isSet 保持 | 同等 | ◯ |
 | `ValueParameterBinding` メソッド | apply/scale/reverseAxis など | 実装（scaleValue/clearValue 対応） | ◯ |
 | `DeformationParameterBinding` フィールド | targetNode, values/isSet 保持 | DeformSlot で vertexOffsets (SoA) | ◯ |
 | `DeformationParameterBinding` メソッド | apply/copy/scale | 軸別スケール対応・apply | ◯ |
 | `ParameterParameterBinding` | 別パラメータバインド | 実装（値転送のみ） | ◯ |
 | `Resource` | プレースホルダ | プレースホルダ | ◯ |
-| 依存 utils/補間 | Vec2Array(SoA)/interpolate/gather 等 | Vec2Array SoA／補間・拡張 | ◯ |
+| 依存 Vec2Array(SoA) | あり | 同等 | ◯ |
+| 依存 interpolate | あり | 同等 | ◯ |
+| 依存 gather | あり | 同等 | ◯ |
+
