@@ -49,6 +49,8 @@ public:
     void addTask(TaskOrder order, TaskKind kind, TaskHandler handler);
     void executeRange(RenderContext& ctx, TaskOrder startOrder, TaskOrder endOrder = TaskOrder::Final);
     void execute(RenderContext& ctx) { executeRange(ctx, TaskOrder::Init, TaskOrder::Final); }
+    std::size_t taskCount(TaskOrder order) const;
+    std::size_t totalTaskCount() const;
 
 private:
     std::map<TaskOrder, std::vector<Task>> queues_;

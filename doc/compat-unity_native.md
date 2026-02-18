@@ -4,13 +4,14 @@
 
 | 項目 | D 実装 | C++ 現状 | 互換性 |
 | --- | --- | --- | --- |
-| `NjgRenderCommandKind` | 定義あり | 定義あり | ◯ |
+| `NjgRenderCommandKind` | `DrawPart, DrawMask, BeginDynamicComposite...` の順 | 同順に修正済み | ◯ |
 | `NjgQueuedCommand` | 定義あり | 定義あり | ◯ |
-| `NjgPartDrawPacket` | 定義あり | 定義あり | ◯ |
+| `NjgPartDrawPacket` | `modelMatrix, renderMatrix, renderRotation, ...` | `renderMatrix/renderRotation` を含む同一レイアウトに修正済み | ◯ |
 | `NjgMaskDrawPacket` | 定義あり | 定義あり | ◯ |
 | `NjgMaskApplyPacket` | 定義あり | 定義あり | ◯ |
-| `NjgDynamicCompositePass` | 定義あり | 定義あり | ◯ |
-| `CommandQueueView` | 定義あり | 定義あり | ◯ |
+| `MaskDrawableKind` | `Part, Mask` | `Part, Mask` の2値へ修正済み（内部 `Drawable` は export しない） | ◯ |
+| `NjgDynamicCompositePass` | `autoScaled/drawBufferCount/hasStencil` を含む | 同一レイアウトへ修正済み | ◯ |
+| `CommandQueueView` | `const NjgQueuedCommand* commands; size_t count;` | 同一レイアウトに修正済み | ◯ |
 | `TextureStats` | 定義あり | 定義あり | ◯ |
 | `SharedBufferSnapshot` | 定義あり | 定義あり | ◯ |
 | `NjgRenderTargets` | 定義あり | 定義あり | ◯ |
@@ -24,8 +25,8 @@
 | `njgLoadPuppet` | export 関数あり | あり | ◯ |
 | `njgUnloadPuppet` | export 関数あり | あり | ◯ |
 | `njgBeginFrame` | export 関数あり | あり | ◯ |
-| `njgTickPuppet` | export 関数あり | あり | ◯ |
-| `njgEmitCommands` | export 関数あり | あり | ◯ |
+| `njgTickPuppet` | `NjgResult function(void* puppet, double deltaSeconds)` | `NjgResult njgTickPuppet(void* puppet, double deltaSeconds)` | ◯ |
+| `njgEmitCommands` | `NjgResult function(void* renderer, CommandQueueView* outView)` | `NjgResult njgEmitCommands(void* renderer, CommandQueueView* outView)` | ◯ |
 | `njgFlushCommandBuffer` | export 関数あり | あり | ◯ |
 | `njgGetTextureStats` | export 関数あり | あり | ◯ |
 | `njgGetRenderTargets` | export 関数あり | あり | ◯ |
@@ -45,4 +46,4 @@
 | `njgWritePuppetToMemory` | D 側に export なし | C++ から削除済み | ◯ |
 | `njgFreeBuffer` | D 側に export なし | C++ から削除済み | ◯ |
 
-**現状**: D export API の欠落項目は埋め込み済み。残タスクは animation API の D 同等再生挙動（`AnimationPlayer` 相当）の追従。 
+**現状**: D export API の欠落項目は埋め込み済み。`njgTickPuppet`/`njgEmitCommands` に加えて `NjgRenderCommandKind`/`CommandQueueView`/`NjgPartDrawPacket`/`NjgDynamicCompositePass` の ABI 不一致も修正済み。`nijiv --test` 失敗は `njgLoadPuppet` 例外未捕捉が直接因であり、C API 境界で捕捉して `Failure` 返却へ修正済み。残タスクは animation API の D 同等再生挙動（`AnimationPlayer` 相当）。 

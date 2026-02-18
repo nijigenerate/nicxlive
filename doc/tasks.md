@@ -221,4 +221,13 @@ Status: `[ ]` todo, `[>]` in progress, `[x]` done, `[?]` blocked.
 | [x] | CP099 | remove_candidate | `compat-queue.md` | `QueueRenderBackend::sharedVerticesData()` | C++独自実装を削除、またはD側に寄せて一本化 |
 | [x] | CP100 | remove_candidate | `compat-queue.md` | `QueueRenderBackend::sharedUvData()` | C++独自実装を削除、またはD側に寄せて一本化 |
 | [x] | CP101 | remove_candidate | `compat-queue.md` | `QueueRenderBackend::sharedDeformData()` | C++独自実装を削除、またはD側に寄せて一本化 |
+| [x] | CP102 | behavior_diff | `compat-unity_native.md` | `njgTickPuppet` ABI (`float` vs `double`) | D準拠で `double deltaSeconds` に修正 |
+| [x] | CP103 | behavior_diff | `compat-unity_native.md` | `njgEmitCommands` ABI (`SharedBufferSnapshot* + const CommandQueueView**` vs `CommandQueueView*`) | D準拠で `CommandQueueView* outView` に修正し、shared は `njgGetSharedBuffers` へ分離 |
+| [x] | CP104 | behavior_diff | `compat-unity_native.md` | `NjgRenderCommandKind` 列挙値順（`DrawMask` 欠落） | `DrawMask/BeginComposite/DrawCompositeQuad/EndComposite` を含む D 準拠順へ修正 |
+| [x] | CP105 | behavior_diff | `compat-unity_native.md` | `NjgPartDrawPacket` レイアウト（`renderMatrix`/`renderRotation` 欠落） | D 準拠レイアウトへ修正、queue 詰め替えを更新 |
+| [x] | CP106 | behavior_diff | `compat-unity_native.md` | `NjgDynamicCompositePass` レイアウト（`autoScaled`/`drawBufferCount`/`hasStencil` 欠落） | D 準拠レイアウトへ修正、queue 詰め替えを更新 |
+| [x] | CP107 | behavior_diff | `compat-unity_native.md` | `CommandQueueView.commands` 型不一致（`const void*`） | D 準拠で `const NjgQueuedCommand*` へ修正 |
+| [x] | CP109 | behavior_diff | `compat-unity_native.md` | `MaskDrawableKind` 列挙値（内部 `Part/Drawable/Mask` を export） | D 準拠で export は `Part/Mask` の2値へ修正 |
+| [x] | CP108 | behavior_diff | `compat-unity_native.md` | `nijiv-opengl --test` で `0xC0000409` (BEX64) | `njgLoadPuppet` 例外未捕捉を C API 境界で捕捉し `Failure` 返却へ修正、原因切り分け可能化 |
+| [x] | CP110 | behavior_diff | `compat-binfmt.md` | `MAGIC_BYTES`/`TEX_SECTION`/`EXT_SECTION` 定数不一致（`INOCHI02` 系） | D準拠 `TRNSRTS\\0` / `TEX_SECT` / `EXT_SECT` へ修正し `.inx` 読み込みを復旧 |
 

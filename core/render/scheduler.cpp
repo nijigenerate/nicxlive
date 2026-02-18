@@ -8,8 +8,8 @@ namespace nicxlive::core {
 
 TaskScheduler::TaskScheduler() {
     orderSequence_ = {TaskOrder::Init, TaskOrder::Parameters, TaskOrder::PreProcess, TaskOrder::Dynamic,
-                      TaskOrder::Post0, TaskOrder::Post1, TaskOrder::Post2, TaskOrder::Final,
-                      TaskOrder::RenderBegin, TaskOrder::Render, TaskOrder::RenderEnd};
+                      TaskOrder::Post0, TaskOrder::Post1, TaskOrder::Post2, TaskOrder::RenderBegin,
+                      TaskOrder::Render, TaskOrder::RenderEnd, TaskOrder::Final};
     for (auto order : orderSequence_) queues_[order] = {};
 }
 
@@ -36,6 +36,18 @@ void TaskScheduler::executeRange(RenderContext& ctx, TaskOrder startOrder, TaskO
             }
         }
     }
+}
+
+std::size_t TaskScheduler::taskCount(TaskOrder order) const {
+    auto it = queues_.find(order);
+    if (it == queues_.end()) return 0;
+    return it->second.size();
+}
+
+std::size_t TaskScheduler::totalTaskCount() const {
+    std::size_t total = 0;
+    for (const auto& kv : queues_) total += kv.second.size();
+    return total;
 }
 
 } // namespace nicxlive::core

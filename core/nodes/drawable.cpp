@@ -945,6 +945,9 @@ void Drawable::serializeSelfImpl(::nicxlive::core::serde::InochiSerializer& seri
             vertices.y[i] = mesh->vertices[i].y;
         }
         deformation.resize(mesh->vertices.size());
+        updateIndices();
+        updateVertices();
+        writeSharedBuffers();
     }
     if (auto wl = data.get_child_optional("weldedLinks")) {
         weldedLinks.clear();

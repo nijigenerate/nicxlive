@@ -96,6 +96,10 @@ public:
     void rescanNodes();
     void updateTextureState();
     RenderCommandEmitter* commandEmitter();
+    void setRenderBackend(const std::shared_ptr<::nicxlive::core::RenderBackend>& backend);
+    bool isRenderGraphEmpty() const;
+    std::size_t rootPartCount() const;
+    ::nicxlive::core::serde::SerdeException deserializeFromFghj(const ::nicxlive::core::serde::Fghj& data);
 
     // textures
     uint32_t addTextureToSlot(const std::shared_ptr<::nicxlive::core::Texture>& texture);

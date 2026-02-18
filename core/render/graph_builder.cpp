@@ -27,6 +27,15 @@ bool RenderGraphBuilder::empty() const {
     return false;
 }
 
+std::size_t RenderGraphBuilder::rootItemCount() const {
+    if (passStack_.empty()) return 0;
+    return passStack_.front().items.size();
+}
+
+std::size_t RenderGraphBuilder::passDepth() const {
+    return passStack_.size();
+}
+
 void RenderGraphBuilder::enqueueItem(float zSort, RenderCommandBuilder builder) {
     enqueueItem(zSort, RenderScopeHint::root(), std::move(builder));
 }

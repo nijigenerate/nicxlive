@@ -15,8 +15,6 @@
 #include <string>
 #include <vector>
 
-using MaskDrawableKind = nicxlive::core::RenderBackend::MaskDrawableKind;
-
 extern "C" {
 
 enum class NjgResult : int {
@@ -27,12 +25,16 @@ enum class NjgResult : int {
 
 enum class NjgRenderCommandKind : uint32_t {
     DrawPart,
+    DrawMask,
     BeginDynamicComposite,
     EndDynamicComposite,
     BeginMask,
     ApplyMask,
     BeginMaskContent,
     EndMask,
+    BeginComposite,
+    DrawCompositeQuad,
+    EndComposite,
 };
 
 struct UnityRendererConfig {
@@ -97,8 +99,10 @@ struct NjgRenderTargets {
     int viewportHeight;
 };
 
+struct NjgQueuedCommand;
+
 struct CommandQueueView {
-    const void* commands;
+    const NjgQueuedCommand* commands;
     size_t count;
 };
 
@@ -106,7 +110,8 @@ struct NjgPartDrawPacket {
     bool isMask;
     bool renderable;
     nicxlive::core::nodes::Mat4 modelMatrix;
-    nicxlive::core::nodes::Mat4 puppetMatrix;
+    nicxlive::core::nodes::Mat4 renderMatrix;
+    float renderRotation;
     nicxlive::core::nodes::Vec3 clampedTint;
     nicxlive::core::nodes::Vec3 clampedScreen;
     float opacity;
@@ -148,8 +153,16 @@ struct NjgDynamicCompositePass {
     size_t stencil;
     nicxlive::core::nodes::Vec2 scale;
     float rotationZ;
+    bool autoScaled;
     size_t origBuffer;
     int origViewport[4];
+    int drawBufferCount;
+    bool hasStencil;
+};
+
+enum class MaskDrawableKind : uint32_t {
+    Part,
+    Mask,
 };
 
 struct NjgMaskApplyPacket {
@@ -184,8 +197,8 @@ NjgResult njgSeekAnimation(void* renderer, void* puppet, const char* name, int f
 NjgResult njgSetPuppetScale(void* puppet, float sx, float sy);
 NjgResult njgSetPuppetTranslation(void* puppet, float tx, float ty);
 NjgResult njgBeginFrame(void* renderer, const FrameConfig* cfg);
-NjgResult njgTickPuppet(void* puppet, float deltaSeconds);
-NjgResult njgEmitCommands(void* renderer, SharedBufferSnapshot* shared, const CommandQueueView** outView);
+NjgResult njgTickPuppet(void* puppet, double deltaSeconds);
+NjgResult njgEmitCommands(void* renderer, CommandQueueView* outView);
 NjgResult njgGetSharedBuffers(void* renderer, SharedBufferSnapshot* snapshot);
 NjgRenderTargets njgGetRenderTargets(void* renderer);
 void njgSetLogCallback(NjgLogFn callback, void* userData);

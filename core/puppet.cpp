@@ -6,6 +6,7 @@
 #include "nodes/projectable.hpp"
 
 #include <algorithm>
+#include <cstdio>
 #include <limits>
 
 namespace nicxlive::core {
@@ -117,11 +118,9 @@ void Puppet::rebuildRenderTasks(const std::shared_ptr<Node>& rootNode) {
     if (!rootNode) return;
     renderScheduler.clearTasks();
     auto rootForTasks = rootNode;
+    rootForTasks->registerRenderTasks(renderScheduler);
     renderScheduler.addTask(TaskOrder::Parameters, TaskKind::Parameters, [this, rootForTasks](RenderContext&) {
         updateParametersAndDrivers(rootForTasks);
-    });
-    renderScheduler.addTask(TaskOrder::PreProcess, TaskKind::PreProcess, [this, rootForTasks](RenderContext&) {
-        rootForTasks->registerRenderTasks(renderScheduler);
     });
     schedulerCacheValid = true;
 }
@@ -199,8 +198,17 @@ void Puppet::update() {
         frameChanges.structureDirty = frameChanges.structureDirty || additional.structureDirty;
     }
 
+    std::fprintf(stderr, "[nicxlive] puppet.update tasks total=%zu rb=%zu r=%zu re=%zu\n",
+                 renderScheduler.totalTaskCount(),
+                 renderScheduler.taskCount(TaskOrder::RenderBegin),
+                 renderScheduler.taskCount(TaskOrder::Render),
+                 renderScheduler.taskCount(TaskOrder::RenderEnd));
     renderGraph.beginFrame();
     renderScheduler.executeRange(renderContext, TaskOrder::PreProcess, TaskOrder::Final);
+    std::fprintf(stderr, "[nicxlive] puppet.update graph depth=%zu rootItems=%zu empty=%d\n",
+                 renderGraph.passDepth(),
+                 renderGraph.rootItemCount(),
+                 renderGraph.empty() ? 1 : 0);
 }
 
 void Puppet::resetDrivers() {
@@ -235,10 +243,14 @@ std::shared_ptr<nodes::Node> Puppet::actualRoot() {
 
 void Puppet::draw() {
     if (!commandEmitterOwned || !renderBackend) {
+        std::fprintf(stderr, "[nicxlive] puppet.draw fallback reason=no_emitter_or_backend\n");
         drawImmediateFallback();
         return;
     }
     if (renderGraph.empty()) {
+        std::fprintf(stderr, "[nicxlive] puppet.draw fallback reason=graph_empty rootItems=%zu depth=%zu\n",
+                     renderGraph.rootItemCount(),
+                     renderGraph.passDepth());
         drawImmediateFallback();
         return;
     }
@@ -269,6 +281,25 @@ void Puppet::updateTextureState() {
 
 RenderCommandEmitter* Puppet::commandEmitter() {
     return commandEmitterRaw;
+}
+
+void Puppet::setRenderBackend(const std::shared_ptr<::nicxlive::core::RenderBackend>& backend) {
+    if (!backend) return;
+    renderBackend = backend;
+    renderContext.renderBackend = renderBackend.get();
+    setCurrentRenderBackend(renderBackend);
+    if (auto queueBackend = std::dynamic_pointer_cast<render::QueueRenderBackend>(renderBackend)) {
+        commandEmitterOwned = std::make_unique<SimpleRenderCommandEmitter>(queueBackend);
+        commandEmitterRaw = commandEmitterOwned.get();
+    }
+}
+
+bool Puppet::isRenderGraphEmpty() const {
+    return renderGraph.empty();
+}
+
+std::size_t Puppet::rootPartCount() const {
+    return rootParts.size();
 }
 
 std::shared_ptr<nodes::Node> Puppet::findNodeByName(const std::string& name) {
@@ -384,6 +415,39 @@ void Puppet::recordNodeChange(nodes::NotifyReason reason) {
     if (reason == nodes::NotifyReason::StructureChanged) {
         forceFullRebuild = true;
     }
+}
+
+::nicxlive::core::serde::SerdeException Puppet::deserializeFromFghj(const ::nicxlive::core::serde::Fghj& data) {
+    try {
+        std::size_t topKeys = 0;
+        bool hasNodesKey = false;
+        for (const auto& kv : data) {
+            ++topKeys;
+            if (kv.first == "nodes") hasNodesKey = true;
+        }
+        std::fprintf(stderr, "[nicxlive] puppet.deserialize topKeys=%zu hasNodes=%d\n", topKeys, hasNodesKey ? 1 : 0);
+        if (auto metaNode = data.get_child_optional("meta")) {
+            if (auto preserve = metaNode->get_optional<bool>("preservePixels")) meta.preservePixels = *preserve;
+            if (auto thumb = metaNode->get_optional<uint32_t>("thumbnailId")) meta.thumbnailId = *thumb;
+        }
+        if (auto rootNode = data.get_child_optional("nodes")) {
+            std::fprintf(stderr, "[nicxlive] puppet.deserialize nodes childCount=%zu\n", rootNode->size());
+            std::string type = rootNode->get<std::string>("type", "Node");
+            auto loadedRoot = nodes::Node::inInstantiateNode(type);
+            if (!loadedRoot) loadedRoot = std::make_shared<nodes::Node>();
+            loadedRoot->deserializeFromFghj(*rootNode);
+            std::fprintf(stderr, "[nicxlive] puppet.deserialize loadedRoot children=%zu\n", loadedRoot->childrenList().size());
+            loadedRoot->setParent(puppetRootNode);
+            loadedRoot->setPuppet(shared_from_this());
+            loadedRoot->reconstruct();
+            loadedRoot->finalize();
+            root = loadedRoot;
+        }
+        rescanNodes();
+    } catch (const std::exception& ex) {
+        return std::string(ex.what());
+    }
+    return std::nullopt;
 }
 
 std::shared_ptr<nodes::Node> resolvePuppetNodeById(const std::shared_ptr<Puppet>& puppet, uint32_t uuid) {

@@ -6,10 +6,10 @@
 
 namespace nicxlive::core::fmt {
 
-// Magic bytes/section markers (big endian) matching nijilive fmt/binfmt.d
-inline const std::array<uint8_t, 8> MAGIC_BYTES{0x49, 0x4E, 0x4F, 0x43, 0x48, 0x49, 0x30, 0x32}; // "INOCHI02"
-inline const std::array<uint8_t, 8> TEX_SECTION{0x54, 0x45, 0x58, 0x42, 0x4C, 0x4F, 0x42, 0x00};    // "TEXBLOB\0"
-inline const std::array<uint8_t, 8> EXT_SECTION{0x49, 0x4E, 0x58, 0x45, 0x58, 0x54, 0x00, 0x00};    // "INXEXT\0\0"
+// Magic bytes/section markers matching nijilive fmt/binfmt.d
+inline const std::array<uint8_t, 8> MAGIC_BYTES{0x54, 0x52, 0x4E, 0x53, 0x52, 0x54, 0x53, 0x00}; // "TRNSRTS\0"
+inline const std::array<uint8_t, 8> TEX_SECTION{0x54, 0x45, 0x58, 0x5F, 0x53, 0x45, 0x43, 0x54}; // "TEX_SECT"
+inline const std::array<uint8_t, 8> EXT_SECTION{0x45, 0x58, 0x54, 0x5F, 0x53, 0x45, 0x43, 0x54}; // "EXT_SECT"
 
 inline bool inVerifyMagicBytes(const std::vector<uint8_t>& data) {
     return data.size() >= MAGIC_BYTES.size() &&

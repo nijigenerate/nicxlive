@@ -5,12 +5,14 @@
 #include <mutex>
 #include <unordered_map>
 #include <algorithm>
+#include <exception>
 #include <string>
 #if defined(_WIN32)
 #include <malloc.h>
 #include <windows.h>
 #include <psapi.h>
 #pragma comment(lib, "Psapi.lib")
+#include <cstdio>
 #elif defined(__APPLE__)
 #include <malloc/malloc.h>
 #endif
@@ -113,7 +115,7 @@ static void applyTextureCommands(RendererCtx& ctx) {
             break;
         }
         case TextureCommandKind::Params:
-            // Unity側でのパラメータ設定はAPIがないため無視
+            // Unity側でのパラメータ設定�EAPIがなぁE��め無要E
             break;
         case TextureCommandKind::Dispose: {
             auto it = ctx.externalTextureHandles.find(rc.id);
@@ -197,12 +199,16 @@ static void packQueuedCommands(RendererCtx& ctx) {
         NjgQueuedCommand out{};
         switch (qc.kind) {
         case RenderCommandKind::DrawPart: out.kind = NjgRenderCommandKind::DrawPart; break;
+        case RenderCommandKind::DrawMask: out.kind = NjgRenderCommandKind::DrawMask; break;
         case RenderCommandKind::BeginDynamicComposite: out.kind = NjgRenderCommandKind::BeginDynamicComposite; break;
         case RenderCommandKind::EndDynamicComposite: out.kind = NjgRenderCommandKind::EndDynamicComposite; break;
         case RenderCommandKind::BeginMask: out.kind = NjgRenderCommandKind::BeginMask; break;
         case RenderCommandKind::ApplyMask: out.kind = NjgRenderCommandKind::ApplyMask; break;
         case RenderCommandKind::BeginMaskContent: out.kind = NjgRenderCommandKind::BeginMaskContent; break;
         case RenderCommandKind::EndMask: out.kind = NjgRenderCommandKind::EndMask; break;
+        case RenderCommandKind::BeginComposite: out.kind = NjgRenderCommandKind::BeginComposite; break;
+        case RenderCommandKind::DrawCompositeQuad: out.kind = NjgRenderCommandKind::DrawCompositeQuad; break;
+        case RenderCommandKind::EndComposite: out.kind = NjgRenderCommandKind::EndComposite; break;
         default: out.kind = NjgRenderCommandKind::DrawPart; break;
         }
         // Part packet
@@ -210,7 +216,8 @@ static void packQueuedCommands(RendererCtx& ctx) {
         out.partPacket.isMask = pp.isMask;
         out.partPacket.renderable = pp.renderable;
         out.partPacket.modelMatrix = pp.modelMatrix;
-        out.partPacket.puppetMatrix = pp.puppetMatrix;
+        out.partPacket.renderMatrix = pp.puppetMatrix;
+        out.partPacket.renderRotation = 0.0f;
         out.partPacket.clampedTint = pp.clampedTint;
         out.partPacket.clampedScreen = pp.clampedScreen;
         out.partPacket.opacity = pp.opacity;
@@ -232,9 +239,9 @@ static void packQueuedCommands(RendererCtx& ctx) {
             out.partPacket.indices = idxBuf->data();
             out.partPacket.vertexCount = pp.vertexCount;
         } else {
-            out.partPacket.indexCount = 0;
-            out.partPacket.vertexCount = 0;
-            out.partPacket.indices = nullptr;
+            out.partPacket.indexCount = pp.indexCount;
+            out.partPacket.vertexCount = pp.vertexCount;
+            out.partPacket.indices = pp.indices.empty() ? nullptr : pp.indices.data();
         }
         size_t texCount = 0;
         for (auto t : pp.textureUUIDs) {
@@ -246,7 +253,18 @@ static void packQueuedCommands(RendererCtx& ctx) {
         out.partPacket.textureCount = texCount;
 
         // Mask apply
-        out.maskApplyPacket.kind = static_cast<nicxlive::core::RenderBackend::MaskDrawableKind>(qc.maskApplyPacket.kind);
+        switch (qc.maskApplyPacket.kind) {
+        case nicxlive::core::RenderBackend::MaskDrawableKind::Part:
+            out.maskApplyPacket.kind = ::MaskDrawableKind::Part;
+            break;
+        case nicxlive::core::RenderBackend::MaskDrawableKind::Mask:
+            out.maskApplyPacket.kind = ::MaskDrawableKind::Mask;
+            break;
+        case nicxlive::core::RenderBackend::MaskDrawableKind::Drawable:
+        default:
+            out.maskApplyPacket.kind = ::MaskDrawableKind::Part;
+            break;
+        }
         out.maskApplyPacket.isDodge = qc.maskApplyPacket.isDodge;
         // part packet for ApplyMask uses the packet embedded in maskApplyPacket
         const auto& applyPart = qc.maskApplyPacket.partPacket;
@@ -259,9 +277,9 @@ static void packQueuedCommands(RendererCtx& ctx) {
             dst.indices = applyIdx->data();
             dst.vertexCount = applyPart.vertexCount;
         } else if (qc.maskApplyPacket.kind == nicxlive::core::RenderBackend::MaskDrawableKind::Part) {
-            out.maskApplyPacket.partPacket.indexCount = 0;
-            out.maskApplyPacket.partPacket.vertexCount = 0;
-            out.maskApplyPacket.partPacket.indices = nullptr;
+            out.maskApplyPacket.partPacket.indexCount = applyPart.indexCount;
+            out.maskApplyPacket.partPacket.vertexCount = applyPart.vertexCount;
+            out.maskApplyPacket.partPacket.indices = applyPart.indices.empty() ? nullptr : applyPart.indices.data();
         }
         // mask packet from qc.maskApplyPacket.maskPacket
         const auto& mp = qc.maskApplyPacket.maskPacket;
@@ -291,8 +309,11 @@ static void packQueuedCommands(RendererCtx& ctx) {
         out.dynamicPass.stencil = qc.dynamicPass.stencil ? qc.dynamicPass.stencil->backendId() : 0;
         out.dynamicPass.scale = qc.dynamicPass.scale;
         out.dynamicPass.rotationZ = qc.dynamicPass.rotationZ;
+        out.dynamicPass.autoScaled = qc.dynamicPass.autoScaled;
         out.dynamicPass.origBuffer = qc.dynamicPass.origBuffer;
         for (int i = 0; i < 4; ++i) out.dynamicPass.origViewport[i] = qc.dynamicPass.origViewport[i];
+        out.dynamicPass.drawBufferCount = 0;
+        out.dynamicPass.hasStencil = (out.dynamicPass.stencil != 0);
         out.usesStencil = qc.usesStencil;
 
         ctx.queued.push_back(out);
@@ -365,34 +386,120 @@ void njgDestroyRenderer(void* renderer) {
 
 NjgResult njgLoadPuppet(void* renderer, const char* pathUtf8, void** outPuppet) {
     if (!renderer || !pathUtf8 || !outPuppet) return NjgResult::InvalidArgument;
-    auto pup = fmt::inLoadPuppet<Puppet>(pathUtf8);
-    auto ctx = std::make_unique<PuppetCtx>();
-    ctx->puppet = pup;
-    void* handle = ctx.get();
-    {
-        std::lock_guard<std::mutex> lock(gMutex);
-        gPuppets[handle] = std::move(ctx);
-        auto rit = gRenderers.find(renderer);
-        if (rit != gRenderers.end()) {
-            rit->second->puppetHandles.push_back(handle);
-            ensurePuppetTextures(*rit->second, pup);
-            // D版 ensureTextureHandle 相当: backend 側に再生用のテクスチャコマンドを積む
-            auto qb = rit->second->backend;
-            if (qb) {
-                for (const auto& tex : pup->textureSlots) {
-                    if (!tex) continue;
-                    uint32_t uuid = tex->getRuntimeUUID();
-                    if (uuid == 0) continue;
-                    qb->createTexture(tex->data(), tex->width(), tex->height(), tex->channels(), tex->stencil());
-                    qb->setTextureParams(uuid, ::nicxlive::core::Filtering::Linear, ::nicxlive::core::Wrapping::Clamp, 1.0f);
+    try {
+        auto pup = fmt::inLoadPuppet<Puppet>(pathUtf8);
+        std::fprintf(stderr, "[nicxlive] load: root=%p\n", pup->root.get());
+        if (pup->root) {
+            pup->root->setPuppet(pup);
+            pup->root->reconstruct();
+            pup->root->finalize();
+        }
+        if (pup->root) {            std::size_t nodeCount = 0;
+            std::size_t partCount = 0;
+            std::size_t maskCount = 0;
+            std::size_t projectableCount = 0;
+            std::size_t partWithMaskCount = 0;
+            std::size_t partWithTextureIdCount = 0;
+            std::size_t partWithTexturePtrCount = 0;
+            std::function<void(const std::shared_ptr<nodes::Node>&)> countNodes;
+            countNodes = [&](const std::shared_ptr<nodes::Node>& n) {
+                if (!n) return;
+                ++nodeCount;
+                if (auto p = std::dynamic_pointer_cast<nodes::Part>(n)) {
+                    ++partCount;
+                    if (!p->masks.empty()) ++partWithMaskCount;
+                    if (!p->textureIds.empty()) ++partWithTextureIdCount;
+                    bool hasTexPtr = false;
+                    for (const auto& t : p->textures) {
+                        if (t) {
+                            hasTexPtr = true;
+                            break;
+                        }
+                    }
+                    if (hasTexPtr) ++partWithTexturePtrCount;
+                    static int dbgPartLog = 0;
+                    if (dbgPartLog < 10) {
+                        std::fprintf(stderr, "[nicxlive] part summary uuid=%u texIds=%zu tex0=%d masks=%zu\n",
+                                     p->uuid,
+                                     p->textureIds.size(),
+                                     p->textures[0] ? 1 : 0,
+                                     p->masks.size());
+                        ++dbgPartLog;
+                    }
+                }
+                if (std::dynamic_pointer_cast<nodes::Mask>(n)) ++maskCount;
+                if (std::dynamic_pointer_cast<nodes::Projectable>(n)) ++projectableCount;
+                for (const auto& child : n->childrenList()) countNodes(child);
+            };
+            std::function<void(const std::shared_ptr<nodes::Node>&)> finalizeParts;
+            finalizeParts = [&](const std::shared_ptr<nodes::Node>& n) {
+                if (!n) return;
+                if (auto p = std::dynamic_pointer_cast<nodes::Part>(n)) {
+                    p->finalize();
+                }
+                for (const auto& child : n->childrenList()) finalizeParts(child);
+            };
+            finalizeParts(pup->root);
+            countNodes(pup->root);
+            std::fprintf(stderr, "[nicxlive] load tree: rootChildren=%zu nodes=%zu parts=%zu masks=%zu projectables=%zu parts(masked=%zu texIds=%zu texPtrs=%zu)\n",
+                         pup->root->childrenList().size(),
+                         nodeCount,
+                         partCount,
+                         maskCount,
+                         projectableCount,
+                         partWithMaskCount,
+                         partWithTextureIdCount,
+                         partWithTexturePtrCount);
+            pup->scanParts(true, pup->root);
+            auto root = pup->actualRoot();
+            if (root) {
+                std::function<void(const std::shared_ptr<nodes::Node>&)> markProjectables;
+                markProjectables = [&](const std::shared_ptr<nodes::Node>& n) {
+                    if (!n) return;
+                    if (auto proj = std::dynamic_pointer_cast<nodes::Projectable>(n)) {
+                        proj->setIgnorePuppet(true);
+                    }
+                    for (const auto& child : n->childrenList()) markProjectables(child);
+                };
+                markProjectables(root);
+                pup->rescanNodes();
+                root->build(true);
+            }
+        }
+        auto ctx = std::make_unique<PuppetCtx>();
+        ctx->puppet = pup;
+        void* handle = ctx.get();
+        {
+            std::lock_guard<std::mutex> lock(gMutex);
+            gPuppets[handle] = std::move(ctx);
+            auto rit = gRenderers.find(renderer);
+            if (rit != gRenderers.end()) {
+                pup->setRenderBackend(rit->second->backend);
+                std::fprintf(stderr, "[nicxlive] load: puppets=%zu\n", rit->second->puppetHandles.size());
+                rit->second->puppetHandles.push_back(handle);
+                ensurePuppetTextures(*rit->second, pup);
+                auto qb = rit->second->backend;
+                if (qb) {
+                    for (const auto& tex : pup->textureSlots) {
+                        if (!tex) continue;
+                        uint32_t uuid = tex->getRuntimeUUID();
+                        if (uuid == 0) continue;
+                        qb->createTexture(tex->data(), tex->width(), tex->height(), tex->channels(), tex->stencil());
+                        qb->setTextureParams(uuid, ::nicxlive::core::Filtering::Linear, ::nicxlive::core::Wrapping::Clamp, 1.0f);
+                    }
                 }
             }
         }
+        *outPuppet = handle;
+        return NjgResult::Ok;
+    } catch (const std::exception& ex) {
+        unityLog(std::string("[nicxlive] njgLoadPuppet exception: ") + ex.what());
+        return NjgResult::Failure;
+    } catch (...) {
+        unityLog("[nicxlive] njgLoadPuppet exception: unknown");
+        return NjgResult::Failure;
     }
-    *outPuppet = handle;
-    return NjgResult::Ok;
 }
-
 NjgResult njgGetParameters(void* puppetHandle, NjgParameterInfo* buffer, size_t bufferLength, size_t* outCount) {
     if (!outCount) return NjgResult::InvalidArgument;
     *outCount = 0;
@@ -408,7 +515,7 @@ NjgResult njgGetParameters(void* puppetHandle, NjgParameterInfo* buffer, size_t 
     if (!buffer) return NjgResult::Ok;
     if (bufferLength < params.size()) return NjgResult::InvalidArgument;
 
-    // 名前の寿命確保用キャッシュ
+    // 名前の寿命確保用キャチE��ュ
     thread_local std::vector<std::string> nameCache;
     nameCache.clear();
     nameCache.reserve(params.size());
@@ -676,7 +783,7 @@ NjgResult njgBeginFrame(void* renderer, const FrameConfig* cfg) {
     return NjgResult::Ok;
 }
 
-NjgResult njgTickPuppet(void* puppet, float deltaSeconds) {
+NjgResult njgTickPuppet(void* puppet, double deltaSeconds) {
     std::lock_guard<std::mutex> lock(gMutex);
     auto it = gPuppets.find(puppet);
     if (it == gPuppets.end()) return NjgResult::InvalidArgument;
@@ -687,17 +794,18 @@ NjgResult njgTickPuppet(void* puppet, float deltaSeconds) {
         for (auto& animPair : pit->second) {
             auto& state = animPair.second;
             if (!state.playing || state.paused) continue;
-            state.frame += (std::max)(1, static_cast<int>(deltaSeconds * 60.0f));
+            state.frame += (std::max)(1, static_cast<int>(deltaSeconds * 60.0));
         }
     }
     if (it->second && it->second->puppet) {
         inUpdate();
+        std::fprintf(stderr, "[nicxlive] tick update start\n");
         it->second->puppet->update();
+        std::fprintf(stderr, "[nicxlive] tick update end graphEmpty=%d rootParts=%zu\n", it->second->puppet->isRenderGraphEmpty() ? 1 : 0, it->second->puppet->rootPartCount());
     }
     return NjgResult::Ok;
 }
-
-NjgResult njgEmitCommands(void* renderer, SharedBufferSnapshot* shared, const CommandQueueView** outView) {
+NjgResult njgEmitCommands(void* renderer, CommandQueueView* outView) {
     if (!renderer || !outView) return NjgResult::InvalidArgument;
     std::lock_guard<std::mutex> lock(gMutex);
     auto it = gRenderers.find(renderer);
@@ -706,34 +814,28 @@ NjgResult njgEmitCommands(void* renderer, SharedBufferSnapshot* shared, const Co
     ctx.backend->clear();
     setCurrentRenderBackend(ctx.backend);
     // draw all puppets into queue
+    std::fprintf(stderr, "[nicxlive] emit begin puppets=%zu\n", ctx.puppetHandles.size());
+    unityLog(std::string("[nicxlive] emit begin: puppets=") + std::to_string(ctx.puppetHandles.size()));
     for (auto h : ctx.puppetHandles) {
         auto pit = gPuppets.find(h);
         if (pit == gPuppets.end()) continue;
         if (pit->second && pit->second->puppet) {
             pit->second->puppet->draw();
+            unityLog(std::string("[nicxlive] emit draw puppet: handle=") + std::to_string(reinterpret_cast<uintptr_t>(h)) + std::string(" queue=") + std::to_string(ctx.backend->queue.size()) + std::string(" graphEmpty=") + (pit->second->puppet->isRenderGraphEmpty() ? "true" : "false") + std::string(" rootParts=") + std::to_string(pit->second->puppet->rootPartCount()));
+            std::fprintf(stderr, "[nicxlive] emit drew puppet queue=%zu\n", ctx.backend->queue.size());
         }
+            std::fprintf(stderr, "[nicxlive] emit puppet state graphEmpty=%d rootParts=%zu\n", pit->second->puppet->isRenderGraphEmpty() ? 1 : 0, pit->second->puppet->rootPartCount());
     }
 
-    // 外部テクスチャコールバック処理
+    // 外部チE��スチャコールバック処琁E
     applyTextureCommands(ctx);
 
     packQueuedCommands(ctx);
-    static CommandQueueView view{};
-    view.commands = ctx.queued.empty() ? nullptr : ctx.queued.data();
-    view.count = ctx.queued.size();
-    *outView = &view;
-
-    if (shared) {
-        auto vRaw = ::nicxlive::core::render::sharedVertexBufferData().rawStorage();
-        auto uvRaw = ::nicxlive::core::render::sharedUvBufferData().rawStorage();
-        auto dRaw = ::nicxlive::core::render::sharedDeformBufferData().rawStorage();
-        shared->vertices = {vRaw.ptr, vRaw.length};
-        shared->uvs = {uvRaw.ptr, uvRaw.length};
-        shared->deform = {dRaw.ptr, dRaw.length};
-        shared->vertexCount = ::nicxlive::core::render::sharedVertexBufferData().size();
-        shared->uvCount = ::nicxlive::core::render::sharedUvBufferData().size();
-        shared->deformCount = ::nicxlive::core::render::sharedDeformBufferData().size();
-    }
+    unityLog(std::string("[nicxlive] emit packed queue=") + std::to_string(ctx.backend->queue.size()));
+    outView->commands = ctx.queued.empty() ? nullptr : ctx.queued.data();
+    std::fprintf(stderr, "[nicxlive] emit packed queue=%zu out=%zu\n", ctx.backend->queue.size(), outView->count);
+    outView->count = ctx.queued.size();
+    unityLog(std::string("[nicxlive] emit out count=") + std::to_string(outView->count));
     return NjgResult::Ok;
 }
 
@@ -793,3 +895,4 @@ TextureStats njgGetTextureStats(void* renderer) {
 }
 
 } // extern "C"
+

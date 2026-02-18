@@ -72,7 +72,7 @@ public:
     bool hasOffscreenModelMatrix{false};
     Mat4 offscreenModelMatrix{Mat4::identity()};
 
-    Part() = default;
+    Part();
     Part(const MeshData& data, const std::array<std::shared_ptr<::nicxlive::core::Texture>, 3>& tex = {}, uint32_t uuidVal = 0);
     Part(const MeshData& data, const std::vector<std::shared_ptr<::nicxlive::core::Texture>>& tex, uint32_t uuidVal = 0);
 

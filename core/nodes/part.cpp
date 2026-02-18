@@ -14,6 +14,10 @@ namespace nicxlive::core::nodes {
 static std::vector<MaskBinding> dedupMasks(const std::vector<MaskBinding>& masks);
 static void emitMasks(const std::vector<MaskBinding>& bindings, core::RenderCommandEmitter& emitter);
 
+Part::Part() {
+    initPartTasks();
+}
+
 Part::Part(const MeshData& data, const std::array<std::shared_ptr<::nicxlive::core::Texture>, 3>& tex, uint32_t uuidVal)
     : Drawable(data, uuidVal), textures(tex) {
     if (uuidVal != 0) uuid = uuidVal;
@@ -507,7 +511,7 @@ void Part::fillDrawPacket(const Node& header, PartDrawPacket& packet, bool isMas
     packet.deformAtlasStride = sharedDeformBufferData().size();
     packet.vertexCount = static_cast<uint32_t>(mesh->vertices.size());
     packet.indexCount = static_cast<uint32_t>(mesh->indices.size());
-    packet.indexBuffer = 0; // 現状はソフト配列のみ
+    packet.indexBuffer = ibo;
     for (std::size_t i = 0; i < textures.size() && i < 3; ++i) {
         packet.textureUUIDs[i] = textures[i] ? textures[i]->getRuntimeUUID() : 0;
         packet.textures[i] = textures[i];
@@ -549,9 +553,11 @@ void Part::finalize() {
     if (auto pup = puppetRef()) {
         std::vector<MaskBinding> valid;
         for (auto& m : masks) {
+            if (m.maskSrcUUID == 0) continue;
             auto node = pup->findNodeById(m.maskSrcUUID);
             m.maskSrc = std::dynamic_pointer_cast<Drawable>(node);
-            if (m.maskSrc) valid.push_back(m);
+            // Keep unresolved bindings; runtime fallback resolves by UUID.
+            valid.push_back(m);
         }
         masks = std::move(valid);
         // resolve textures from slots if ids exist
