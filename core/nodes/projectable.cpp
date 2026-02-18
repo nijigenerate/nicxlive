@@ -1,6 +1,7 @@
 #include "projectable.hpp"
 
 #include <algorithm>
+#include <cstdio>
 #include <set>
 
 #include "../puppet.hpp"
@@ -9,6 +10,8 @@ namespace nicxlive::core::nodes {
 
 namespace {
 std::size_t gProjectableFrameCounter = 0;
+int gProjectablePushLogs = 0;
+int gProjectableFailLogs = 0;
 }
 
 std::size_t advanceProjectableFrame() {
@@ -355,11 +358,65 @@ bool Projectable::autoResizeMeshOnce(bool& ran) {
 }
 
 bool Projectable::initTarget() {
+    auto prevTexture = textures[0];
+    auto prevStencil = stencil;
+
     updateBounds();
-    if (!bounds) return false;
-    auto b = *bounds;
+    std::array<float, 4> b{};
+    bool hasBounds = false;
+    if (bounds) {
+        b = *bounds;
+        hasBounds = std::isfinite(b[0]) && std::isfinite(b[1]) && std::isfinite(b[2]) && std::isfinite(b[3]);
+    }
+    if (!hasBounds) {
+        auto t = transform();
+        float minX = t.translation.x;
+        float minY = t.translation.y;
+        float maxX = t.translation.x;
+        float maxY = t.translation.y;
+        bool seeded = false;
+        Mat4 matrix = getDynamicMatrix();
+        for (std::size_t i = 0; i < mesh->vertices.size(); ++i) {
+            Vec2 pos = mesh->vertices[i];
+            if (i < deformation.size()) {
+                pos.x += deformation.x[i];
+                pos.y += deformation.y[i];
+            }
+            Vec3 v = matrix.transformPoint(Vec3{pos.x, pos.y, 0.0f});
+            if (!seeded) {
+                minX = maxX = v.x;
+                minY = maxY = v.y;
+                seeded = true;
+            } else {
+                minX = std::min(minX, v.x);
+                minY = std::min(minY, v.y);
+                maxX = std::max(maxX, v.x);
+                maxY = std::max(maxY, v.y);
+            }
+        }
+        if (seeded) {
+            b = {minX, minY, maxX, maxY};
+            bounds = b;
+            hasBounds = true;
+        }
+    }
+    if (!hasBounds) {
+        if (gProjectableFailLogs < 32) {
+            std::fprintf(stderr, "[nicxlive] projectable initTarget fail: no bounds uuid=%u\n", uuid);
+            ++gProjectableFailLogs;
+        }
+        return false;
+    }
+
     Vec2 size{b[2]-b[0], b[3]-b[1]};
-    if (size.x <= 0 || size.y <= 0) return false;
+    if (size.x <= 0 || size.y <= 0) {
+        if (gProjectableFailLogs < 32) {
+            std::fprintf(stderr, "[nicxlive] projectable initTarget fail: invalid size uuid=%u size=(%.3f,%.3f)\n",
+                         uuid, size.x, size.y);
+            ++gProjectableFailLogs;
+        }
+        return false;
+    }
     texWidth = static_cast<uint32_t>(std::ceil(size.x)) + 1;
     texHeight = static_cast<uint32_t>(std::ceil(size.y)) + 1;
     Vec2 deformOffset = deformationTranslationOffset();
@@ -367,8 +424,6 @@ bool Projectable::initTarget() {
     textureOffset = Vec2{(b[0]+b[2])/2.0f, (b[1]+b[3])/2.0f};
     textureOffset.x += deformOffset.x - t.translation.x;
     textureOffset.y += deformOffset.y - t.translation.y;
-    auto prevTexture = textures[0];
-    auto prevStencil = stencil;
     textures = {};
     textures[0] = std::make_shared<Texture>(static_cast<int>(texWidth), static_cast<int>(texHeight));
     stencil = std::make_shared<Texture>(static_cast<int>(texWidth), static_cast<int>(texHeight), 1, true);
@@ -469,6 +524,13 @@ void Projectable::dynamicRenderBegin(core::RenderContext& ctx) {
     selfSort();
     auto pass = prepareDynamicCompositePass();
     if (!pass.surface) {
+        if (gProjectableFailLogs < 32) {
+            std::fprintf(stderr, "[nicxlive] projectable skip dynamic: no surface uuid=%u tex0=%d texCount=%zu\n",
+                         uuid,
+                         (textures.size() > 0 && textures[0]) ? 1 : 0,
+                         textures.size());
+            ++gProjectableFailLogs;
+        }
         reuseCachedTextureThisFrame = true;
         loggedFirstRenderAttempt = true;
         return;
@@ -526,9 +588,18 @@ void Projectable::dynamicRenderEnd(core::RenderContext& ctx) {
         });
     } else {
         auto cleanupParts = queuedOffscreenParts;
-        for (auto& part : cleanupParts) {
-            if (auto p = std::dynamic_pointer_cast<Part>(part)) p->clearOffscreenModelMatrix();
-            else if (auto m = std::dynamic_pointer_cast<Mask>(part)) m->clearOffscreenModelMatrix();
+        if (cleanupParts.empty()) {
+            Part::enqueueRenderCommands(ctx, [cleanupParts](core::RenderCommandEmitter&) {
+                for (auto& part : cleanupParts) {
+                    if (auto p = std::dynamic_pointer_cast<Part>(part)) p->clearOffscreenModelMatrix();
+                    else if (auto m = std::dynamic_pointer_cast<Mask>(part)) m->clearOffscreenModelMatrix();
+                }
+            });
+        } else {
+            for (auto& part : cleanupParts) {
+                if (auto p = std::dynamic_pointer_cast<Part>(part)) p->clearOffscreenModelMatrix();
+                else if (auto m = std::dynamic_pointer_cast<Mask>(part)) m->clearOffscreenModelMatrix();
+            }
         }
     }
 
@@ -601,6 +672,12 @@ void Projectable::enqueueRenderCommands(core::RenderContext& ctx) {
 
     auto passData = prepareDynamicCompositePass();
     dynamicScopeToken = ctx.renderGraph->pushDynamicComposite(std::dynamic_pointer_cast<Projectable>(shared_from_this()), passData, zSort());
+    if (gProjectablePushLogs < 32) {
+        auto p = parentPtr();
+        std::fprintf(stderr, "[nicxlive] push dyn uuid=%u parent=%u z=%.6f base=%.6f rel=%.6f off=%.6f token=%zu\n",
+                     uuid, p ? p->uuid : 0u, zSort(), zSortBase(), relZSort(), offsetSort, dynamicScopeToken);
+        ++gProjectablePushLogs;
+    }
     dynamicScopeActive = true;
 
     Mat4 translate = Mat4::translation(Vec3{-textureOffset.x, -textureOffset.y, 0});

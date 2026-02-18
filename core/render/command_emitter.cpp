@@ -1,5 +1,6 @@
 #include "command_emitter.hpp"
 #include "backend_queue.hpp"
+#include <cstdio>
 
 namespace nicxlive::core::render {
 
@@ -77,6 +78,15 @@ void QueueCommandEmitter::endMask() {
 }
 
 void QueueCommandEmitter::drawPartPacket(const nodes::PartDrawPacket& packet) {
+    if (packet.textureUUIDs[0] == 0 && packet.textureUUIDs[1] == 0 && packet.textureUUIDs[2] == 0) {
+        if (auto node = packet.node.lock()) {
+            std::fprintf(stderr, "[nicxlive] enqueue tex0 uuid=%u vo=%u idx=%u vtx=%u isMask=%d\n",
+                         node->uuid, packet.vertexOffset, packet.indexCount, packet.vertexCount, packet.isMask ? 1 : 0);
+        } else {
+            std::fprintf(stderr, "[nicxlive] enqueue tex0 uuid=<expired> vo=%u idx=%u vtx=%u isMask=%d\n",
+                         packet.vertexOffset, packet.indexCount, packet.vertexCount, packet.isMask ? 1 : 0);
+        }
+    }
     QueuedCommand cmd{};
     cmd.kind = RenderCommandKind::DrawPart;
     cmd.partPacket = packet;

@@ -5,8 +5,11 @@
 #include "../render/commands.hpp"
 #include "../render/backend_queue.hpp"
 #include "../texture.hpp"
+#include "../../fmt/fmt.hpp"
 
 #include <algorithm>
+#include <cstdio>
+#include <limits>
 #include <set>
 
 namespace nicxlive::core::nodes {
@@ -212,7 +215,7 @@ void Part::serializeSelfImpl(::nicxlive::core::serde::InochiSerializer& serializ
         auto arr = serializer.listBegin();
         for (const auto& m : masks) {
             serializer.elemBegin();
-            serializer.putKey("maskSrcUUID");
+            serializer.putKey("source");
             serializer.putValue(m.maskSrcUUID);
             serializer.putKey("mode");
             serializer.putValue(static_cast<int>(m.mode));
@@ -224,8 +227,12 @@ void Part::serializeSelfImpl(::nicxlive::core::serde::InochiSerializer& serializ
 ::nicxlive::core::serde::SerdeException Part::deserializeFromFghj(const ::nicxlive::core::serde::Fghj& data) {
     if (auto err = Drawable::deserializeFromFghj(data)) return err;
     if (auto bm = data.get_optional<int>("blend_mode")) {
-        if (*bm >= 0 && *bm <= static_cast<int>(BlendMode::Multiply)) {
+        if (*bm >= 0 && *bm <= static_cast<int>(BlendMode::SliceFromLower)) {
             blendMode = static_cast<BlendMode>(*bm);
+        }
+    } else if (auto bs = data.get_optional<std::string>("blend_mode")) {
+        if (auto parsed = parseBlendMode(*bs)) {
+            blendMode = *parsed;
         }
     }
     if (auto th = data.get_optional<float>("mask_threshold")) maskAlphaThreshold = *th;
@@ -254,8 +261,13 @@ void Part::serializeSelfImpl(::nicxlive::core::serde::InochiSerializer& serializ
     }
     textureIds.clear();
     if (auto tx = data.get_child_optional("textures")) {
+        // Keep texture slots compact like D implementation:
+        // skip NO_TEXTURE sentinels instead of reserving empty entries.
+        constexpr uint32_t kNoTexture = std::numeric_limits<uint32_t>::max();
         for (const auto& e : *tx) {
-            textureIds.push_back(static_cast<int32_t>(e.second.get_value<std::size_t>()));
+            const uint32_t raw = static_cast<uint32_t>(e.second.get_value<std::size_t>());
+            if (raw == kNoTexture) continue;
+            textureIds.push_back(static_cast<int32_t>(raw));
         }
     }
     if (auto mb = data.get_child_optional("masked_by")) {
@@ -280,7 +292,7 @@ void Part::serializeSelfImpl(::nicxlive::core::serde::InochiSerializer& serializ
     if (auto ml = data.get_child_optional("masks")) {
         for (const auto& e : *ml) {
             MaskBinding mb;
-            mb.maskSrcUUID = e.second.get<uint32_t>("maskSrcUUID", 0);
+            mb.maskSrcUUID = e.second.get<uint32_t>("source", 0);
             int modeVal = e.second.get<int>("mode", 0);
             if (modeVal >= 0 && modeVal <= static_cast<int>(MaskingMode::DodgeMask)) {
                 mb.mode = static_cast<MaskingMode>(modeVal);
@@ -423,7 +435,39 @@ void Part::markTextureDirty(std::size_t slot) {
 }
 
 void Part::syncTextureIds() {
+    auto pup = puppetRef();
+    const bool inpMode = ::nicxlive::core::fmt::inIsINPMode();
+
+    if (pup) {
+        for (std::size_t i = 0; i < textureIds.size() && i < textures.size(); ++i) {
+            if (textureIds[i] < 0) continue;
+            const uint32_t id = static_cast<uint32_t>(textureIds[i]);
+            if (id < pup->textureSlots.size() && pup->textureSlots[id]) {
+                textures[i] = pup->textureSlots[id];
+            } else if (!inpMode) {
+                textures[i] = pup->resolveTextureSlot(id);
+            }
+        }
+    }
     if (textureIds.size() < textures.size()) textureIds.resize(textures.size(), -1);
+
+    if (inpMode) {
+        if (pup) {
+            for (std::size_t i = 0; i < textures.size(); ++i) {
+                if (textureIds[i] < 0 && textures[i]) {
+                    auto idx = pup->getTextureSlotIndexFor(textures[i]);
+                    if (idx >= 0) {
+                        textureIds[i] = static_cast<int32_t>(idx);
+                    }
+                }
+                if (textures[i]) {
+                    textureDirty[i] = false;
+                }
+            }
+        }
+        return;
+    }
+
     for (std::size_t i = 0; i < textures.size(); ++i) {
         if (textures[i]) {
             textureIds[i] = static_cast<int32_t>(textures[i]->getRuntimeUUID());
@@ -513,8 +557,41 @@ void Part::fillDrawPacket(const Node& header, PartDrawPacket& packet, bool isMas
     packet.indexCount = static_cast<uint32_t>(mesh->indices.size());
     packet.indexBuffer = ibo;
     for (std::size_t i = 0; i < textures.size() && i < 3; ++i) {
-        packet.textureUUIDs[i] = textures[i] ? textures[i]->getRuntimeUUID() : 0;
-        packet.textures[i] = textures[i];
+        std::shared_ptr<::nicxlive::core::Texture> tex = textures[i];
+        bool usedSlot = false;
+        if (auto pup = puppetRef()) {
+            if (i < textureIds.size() && textureIds[i] >= 0) {
+                const uint32_t id = static_cast<uint32_t>(textureIds[i]);
+                if (id < pup->textureSlots.size() && pup->textureSlots[id]) {
+                    tex = pup->textureSlots[id];
+                    usedSlot = true;
+                } else if (!tex || tex->getRuntimeUUID() == 0) {
+                    tex = pup->resolveTextureSlot(id);
+                }
+            }
+        }
+        if (tex) {
+            uint32_t texId = tex->getRuntimeUUID();
+            if (texId == 0) texId = tex->backendId();
+            packet.textureUUIDs[i] = texId;
+            if (uuid == 4079733156u && i == 0) {
+                static int sDbg = 0;
+                if (sDbg < 4) {
+                    std::fprintf(stderr, "[nicxlive] fill packet uuid=%u usedSlot=%d texId=%u texRuntime=%u texBackend=%u hasPup=%d texIds=%zu\n",
+                                 uuid,
+                                 usedSlot ? 1 : 0,
+                                 texId,
+                                 tex->getRuntimeUUID(),
+                                 tex->backendId(),
+                                 puppetRef() ? 1 : 0,
+                                 textureIds.size());
+                    ++sDbg;
+                }
+            }
+        } else {
+            packet.textureUUIDs[i] = 0;
+        }
+        packet.textures[i] = tex;
     }
     packet.vertices = mesh->vertices;
     packet.uvs = mesh->uvs;
@@ -577,6 +654,12 @@ void Part::finalize() {
                 mb.mode = maskedByMode;
                 masks.push_back(mb);
             }
+        }
+        if (uuid == 4079733156u) {
+            const int32_t id0 = textureIds.empty() ? -9999 : textureIds[0];
+            const uint32_t tex0 = textures[0] ? textures[0]->getRuntimeUUID() : 0;
+            std::fprintf(stderr, "[nicxlive] part %u finalize texId0=%d texUuid0=%u hasTex0=%d\n",
+                         uuid, id0, tex0, textures[0] ? 1 : 0);
         }
     }
 }
@@ -647,6 +730,12 @@ void Part::enqueueRenderCommands(core::RenderContext& ctx, const std::function<v
 
     auto scopeHint = determineRenderScopeHint();
     if (scopeHint.skip) return;
+    if (vertexOffset == 1621 || vertexOffset == 1563 || vertexOffset == 1504) {
+        auto p = parentPtr();
+        std::fprintf(stderr, "[nicxlive] enqueue part uuid=%u parent=%u vo=%u z=%.6f base=%.6f rel=%.6f off=%.6f scope(kind=%d token=%zu)\n",
+                     uuid, p ? p->uuid : 0u, vertexOffset, zSort(), zSortBase(), relZSort(), offsetSort,
+                     static_cast<int>(scopeHint.kind), scopeHint.token);
+    }
     auto self = std::dynamic_pointer_cast<Part>(shared_from_this());
     auto cleanup = post;
     ctx.renderGraph->enqueueItem(zSort(), scopeHint, [self, maskBindings, useStencil, cleanup](core::RenderCommandEmitter& emitter) {

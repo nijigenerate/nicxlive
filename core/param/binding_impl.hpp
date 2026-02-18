@@ -657,33 +657,31 @@ inline void Parameter::makeIndexable() {
 inline void Parameter::update() {
     if (!active) return;
     previousInternal = latestInternal;
-    switch (mergeMode) {
-    case ParamMergeMode::Additive:
-        latestInternal.x += value.x;
-        latestInternal.y += value.y;
-        break;
-    case ParamMergeMode::Weighted:
-        latestInternal.x = (latestInternal.x + value.x) * 0.5f;
-        latestInternal.y = (latestInternal.y + value.y) * 0.5f;
-        break;
-    case ParamMergeMode::Multiplicative:
-        latestInternal.x *= value.x;
-        latestInternal.y *= value.y;
-        break;
-    case ParamMergeMode::Forced:
-        latestInternal = value;
-        break;
-    case ParamMergeMode::Passthrough:
-    default:
-        latestInternal = value;
-        break;
-    }
+    // Match D behavior: when no external combinators are pushed this frame,
+    // effective internal value is the parameter value itself.
+    latestInternal = value;
+
+    auto mapInternalValue = [&](const Vec2& in) {
+        const float rx = (max.x - min.x);
+        const float ry = (max.y - min.y);
+        float ox = (rx == 0.0f) ? 0.0f : (in.x - min.x) / rx;
+        float oy = (ry == 0.0f) ? 0.0f : (in.y - min.y) / ry;
+        ox = std::clamp(ox, 0.0f, 1.0f);
+        oy = std::clamp(oy, 0.0f, 1.0f);
+        return Vec2{ox, oy};
+    };
 
     Vec2u left{};
     Vec2 sub{};
-    findOffset(normalizedValue(), left, sub);
+    findOffset(mapInternalValue(latestInternal), left, sub);
     for (auto& [_, b] : bindingMap) {
-        if (b) b->apply(left, sub);
+        if (!b) continue;
+        b->apply(left, sub);
+        if (auto node = b->getTarget().target.lock()) {
+            if (latestInternal.x != previousInternal.x || latestInternal.y != previousInternal.y) {
+                node->notifyChange(node);
+            }
+        }
     }
 }
 

@@ -155,6 +155,41 @@ static void ensurePuppetTextures(RendererCtx& ctx, const std::shared_ptr<Puppet>
     }
 }
 
+static size_t ensureDynamicTextureHandle(RendererCtx& ctx, const std::shared_ptr<Texture>& tex, bool renderTarget, bool stencil) {
+    if (!tex) return 0;
+    const uint32_t backendId = tex->backendId();
+    if (backendId == 0) return 0;
+
+    auto found = ctx.externalTextureHandles.find(backendId);
+    if (found != ctx.externalTextureHandles.end()) {
+        return found->second;
+    }
+
+    if (!ctx.callbacks.createTexture) {
+        return backendId;
+    }
+
+    const int w = tex->width();
+    const int h = tex->height();
+    const int c = tex->channels();
+    size_t handle = ctx.callbacks.createTexture(w, h, c, 1, c, renderTarget, stencil, ctx.callbacks.userData);
+    if (handle == 0) {
+        return backendId;
+    }
+
+    ctx.externalTextureHandles[backendId] = handle;
+    ctx.stats.created++;
+    ctx.stats.current++;
+
+    if (ctx.callbacks.updateTexture) {
+        const auto& data = tex->data();
+        if (!data.empty()) {
+            ctx.callbacks.updateTexture(handle, data.data(), data.size(), w, h, c, ctx.callbacks.userData);
+        }
+    }
+
+    return handle;
+}
 static void releaseExternalTexture(RendererCtx& ctx, size_t handle) {
     if (handle == 0) return;
     if (ctx.callbacks.releaseTexture) {
@@ -302,11 +337,26 @@ static void packQueuedCommands(RendererCtx& ctx) {
         }
 
         // Dynamic pass
-        out.dynamicPass.textureCount = qc.dynamicPass.textures.size();
-        for (size_t i = 0; i < qc.dynamicPass.textures.size() && i < 3; ++i) {
-            out.dynamicPass.textures[i] = qc.dynamicPass.textures[i] ? qc.dynamicPass.textures[i]->backendId() : 0;
+        size_t dynTexCount = 0;
+        if (qc.dynamicPass.surface) {
+            dynTexCount = qc.dynamicPass.surface->textureCount;
+        } else {
+            dynTexCount = qc.dynamicPass.textures.size();
         }
-        out.dynamicPass.stencil = qc.dynamicPass.stencil ? qc.dynamicPass.stencil->backendId() : 0;
+        if (dynTexCount > 3) dynTexCount = 3;
+        out.dynamicPass.textureCount = dynTexCount;
+        for (size_t i = 0; i < dynTexCount; ++i) {
+            auto tex = qc.dynamicPass.textures[i];
+            out.dynamicPass.textures[i] = ensureDynamicTextureHandle(ctx, tex, /*renderTarget*/ true, /*stencil*/ false);
+        }
+        for (size_t i = dynTexCount; i < 3; ++i) {
+            out.dynamicPass.textures[i] = 0;
+        }
+        auto stencilTex = qc.dynamicPass.stencil;
+        if (!stencilTex && qc.dynamicPass.surface) {
+            stencilTex = qc.dynamicPass.surface->stencil;
+        }
+        out.dynamicPass.stencil = ensureDynamicTextureHandle(ctx, stencilTex, /*renderTarget*/ true, /*stencil*/ true);
         out.dynamicPass.scale = qc.dynamicPass.scale;
         out.dynamicPass.rotationZ = qc.dynamicPass.rotationZ;
         out.dynamicPass.autoScaled = qc.dynamicPass.autoScaled;
@@ -452,17 +502,7 @@ NjgResult njgLoadPuppet(void* renderer, const char* pathUtf8, void** outPuppet) 
                          partWithTexturePtrCount);
             pup->scanParts(true, pup->root);
             auto root = pup->actualRoot();
-            if (root) {
-                std::function<void(const std::shared_ptr<nodes::Node>&)> markProjectables;
-                markProjectables = [&](const std::shared_ptr<nodes::Node>& n) {
-                    if (!n) return;
-                    if (auto proj = std::dynamic_pointer_cast<nodes::Projectable>(n)) {
-                        proj->setIgnorePuppet(true);
-                    }
-                    for (const auto& child : n->childrenList()) markProjectables(child);
-                };
-                markProjectables(root);
-                pup->rescanNodes();
+            if (root) {                pup->rescanNodes();
                 root->build(true);
             }
         }
@@ -478,16 +518,6 @@ NjgResult njgLoadPuppet(void* renderer, const char* pathUtf8, void** outPuppet) 
                 std::fprintf(stderr, "[nicxlive] load: puppets=%zu\n", rit->second->puppetHandles.size());
                 rit->second->puppetHandles.push_back(handle);
                 ensurePuppetTextures(*rit->second, pup);
-                auto qb = rit->second->backend;
-                if (qb) {
-                    for (const auto& tex : pup->textureSlots) {
-                        if (!tex) continue;
-                        uint32_t uuid = tex->getRuntimeUUID();
-                        if (uuid == 0) continue;
-                        qb->createTexture(tex->data(), tex->width(), tex->height(), tex->channels(), tex->stencil());
-                        qb->setTextureParams(uuid, ::nicxlive::core::Filtering::Linear, ::nicxlive::core::Wrapping::Clamp, 1.0f);
-                    }
-                }
             }
         }
         *outPuppet = handle;

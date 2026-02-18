@@ -52,7 +52,9 @@ void Composite::serializeSelfImpl(::nicxlive::core::serde::InochiSerializer& ser
         auto state = serializer.listBegin();
         for (const auto& m : masks) {
             serializer.elemBegin();
+            serializer.putKey("source");
             serializer.putValue(static_cast<std::size_t>(m.maskSrcUUID));
+            serializer.putKey("mode");
             serializer.putValue(static_cast<int>(m.mode));
         }
         serializer.listEnd(state);
@@ -88,8 +90,12 @@ void Composite::serializeSelfImpl(::nicxlive::core::serde::InochiSerializer& ser
         screenTint.z = st->get<float>("z", screenTint.z);
     }
     if (auto bm = data.get_optional<int>("blend_mode")) {
-        if (*bm >= 0 && *bm <= static_cast<int>(BlendMode::Multiply)) {
+        if (*bm >= 0 && *bm <= static_cast<int>(BlendMode::SliceFromLower)) {
             blendMode = static_cast<BlendMode>(*bm);
+        }
+    } else if (auto bs = data.get_optional<std::string>("blend_mode")) {
+        if (auto parsed = parseBlendMode(*bs)) {
+            blendMode = *parsed;
         }
     }
     if (auto pmg = data.get_optional<bool>("propagate_meshgroup")) {
@@ -101,8 +107,11 @@ void Composite::serializeSelfImpl(::nicxlive::core::serde::InochiSerializer& ser
     if (auto ml = data.get_child_optional("masks")) {
         for (const auto& e : *ml) {
             MaskBinding mb;
-            mb.maskSrcUUID = e.second.get_value<uint32_t>();
-            mb.mode = static_cast<MaskingMode>(e.second.get_value<int>());
+            mb.maskSrcUUID = e.second.get<uint32_t>("source", 0);
+            int modeVal = e.second.get<int>("mode", 0);
+            if (modeVal >= 0 && modeVal <= static_cast<int>(MaskingMode::DodgeMask)) {
+                mb.mode = static_cast<MaskingMode>(modeVal);
+            }
             masks.push_back(mb);
         }
     }

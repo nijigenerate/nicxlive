@@ -371,6 +371,11 @@ std::shared_ptr<Texture> Puppet::findTextureByRuntimeUUID(uint32_t uuid) {
 }
 
 std::shared_ptr<Texture> Puppet::resolveTextureSlot(uint32_t runtimeUUID) {
+    if (runtimeUUID < textureSlots.size()) {
+        if (auto byIndex = textureSlots[static_cast<std::size_t>(runtimeUUID)]) {
+            return byIndex;
+        }
+    }
     if (auto t = findTextureByRuntimeUUID(runtimeUUID)) return t;
     auto tex = std::make_shared<Texture>();
     tex->setRuntimeUUID(runtimeUUID);

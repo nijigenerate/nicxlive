@@ -869,7 +869,13 @@ void Drawable::fillDrawPacket(const Node& header, PartDrawPacket& packet, bool /
     packet.vertexCount = static_cast<uint32_t>(mesh->vertices.size());
     packet.indexCount = static_cast<uint32_t>(mesh->indices.size());
     for (std::size_t i = 0; i < textures.size() && i < 3; ++i) {
-        packet.textureUUIDs[i] = textures[i] ? textures[i]->getRuntimeUUID() : 0;
+        if (textures[i]) {
+            uint32_t texId = textures[i]->getRuntimeUUID();
+            if (texId == 0) texId = textures[i]->backendId();
+            packet.textureUUIDs[i] = texId;
+        } else {
+            packet.textureUUIDs[i] = 0;
+        }
     }
     packet.vertices = mesh->vertices;
     packet.uvs = mesh->uvs;

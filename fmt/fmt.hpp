@@ -103,10 +103,13 @@ std::shared_ptr<T> inLoadPuppetFromMemory(const std::vector<uint8_t>& data) {
             (void)texType;
             std::vector<uint8_t> payload(data.begin() + offset, data.begin() + offset + texLen);
             offset += texLen;
-            if constexpr (requires(T t) { t->textureSlots; }) {
+            if constexpr (requires(std::shared_ptr<T> p) { p->textureSlots; }) {
                 auto shallow = ::nicxlive::core::ShallowTexture(payload);
                 auto tex = std::make_shared<::nicxlive::core::Texture>(shallow);
-                puppet->textureSlots.push_back(tex);
+                if (puppet->textureSlots.size() <= i) {
+                    puppet->textureSlots.resize(static_cast<std::size_t>(i) + 1);
+                }
+                puppet->textureSlots[static_cast<std::size_t>(i)] = tex;
             }
         }
     }
@@ -125,7 +128,7 @@ std::shared_ptr<T> inLoadPuppetFromMemory(const std::vector<uint8_t>& data) {
             if (offset + payloadLen > data.size()) throw std::runtime_error("Invalid ext payload length");
             std::vector<uint8_t> payload(data.begin() + offset, data.begin() + offset + payloadLen);
             offset += payloadLen;
-            if constexpr (requires(T t) { t->extData; }) {
+            if constexpr (requires(std::shared_ptr<T> p) { p->extData; }) {
                 puppet->extData[name] = payload;
             }
         }

@@ -708,9 +708,14 @@ void Node::registerRenderTasks(core::TaskScheduler& scheduler) {
     scheduler.addTask(core::TaskOrder::Final, core::TaskKind::Finalize, [this](core::RenderContext& ctx) { runFinalTask(ctx); });
 
     auto orderedChildren = children;
-    std::stable_sort(orderedChildren.begin(), orderedChildren.end(), [](const std::shared_ptr<Node>& a, const std::shared_ptr<Node>& b) {
-        if (!a || !b) return false;
-        return a->zSort() > b->zSort();
+    std::sort(orderedChildren.begin(), orderedChildren.end(), [](const std::shared_ptr<Node>& a, const std::shared_ptr<Node>& b) {
+        if (!a && !b) return false;
+        if (!a) return false;
+        if (!b) return true;
+        const float az = a->zSort();
+        const float bz = b->zSort();
+        if (az == bz) return a->uuid < b->uuid;
+        return az > bz;
     });
     for (auto& child : orderedChildren) {
         if (child) child->registerRenderTasks(scheduler);

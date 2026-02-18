@@ -2,11 +2,16 @@
 #include "../nodes/projectable.hpp"
 
 #include <algorithm>
+#include <cstdio>
 #include <limits>
 #include <stdexcept>
 #include <string>
 
 namespace nicxlive::core {
+namespace {
+int gGraphDebugLogs = 0;
+int gGraphAddLogs = 0;
+}
 
 RenderGraphBuilder::RenderGraphBuilder() { ensureRootPass(); }
 
@@ -119,6 +124,11 @@ void RenderGraphBuilder::addItemToPass(RenderPass& pass, float zSort, RenderComm
     item.sequence = pass.nextSequence++;
     item.builder = std::move(builder);
     pass.items.push_back(item);
+    if (gGraphAddLogs < 64 && pass.kind == RenderPassKind::Root && zSort < -0.6f && zSort > -0.95f) {
+        std::fprintf(stderr, "[nicxlive] graph add root z=%.6f seq=%zu passToken=%zu kind=%d\n",
+                     zSort, item.sequence, pass.token, static_cast<int>(pass.kind));
+        ++gGraphAddLogs;
+    }
 }
 
 void RenderGraphBuilder::finalizeDynamicCompositePass(bool autoClose, RenderCommandBuilder postCommands) {
@@ -144,6 +154,19 @@ void RenderGraphBuilder::finalizeDynamicCompositePass(bool autoClose, RenderComm
     auto dynamicNode = pass.projectable.lock();
     auto passData = pass.dynamicPass;
     auto finalizer = postCommands ? postCommands : pass.dynamicPostCommands;
+    if (!finalizer && autoClose && dynamicNode) {
+        // D parity: even auto-closed dynamic scopes should still draw their composed surface.
+        finalizer = [dynamicNode](RenderCommandEmitter& emitter) {
+            emitter.drawPart(dynamicNode, false);
+        };
+    }
+    std::fprintf(stderr, "[nicxlive] graph finalize dyn token=%llu z=%.6f autoClose=%d hasFinalizer=%d childItems=%llu stencil=%u\n",
+                 static_cast<unsigned long long>(pass.token),
+                 pass.scopeZSort,
+                 autoClose ? 1 : 0,
+                 finalizer ? 1 : 0,
+                 static_cast<unsigned long long>(childItems.size()),
+                 passData.stencil ? passData.stencil->backendId() : 0u);
     RenderCommandBuilder builder = [childItems, dynamicNode, passData, finalizer](RenderCommandEmitter& emitter) {
         emitter.beginDynamicComposite(dynamicNode, passData);
         playbackItems(childItems, emitter);
