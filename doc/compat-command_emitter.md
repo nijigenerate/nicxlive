@@ -6,26 +6,26 @@
 | --- | --- | --- | --- |
 | `beginFrame(RenderBackend, ref RenderGpuState)` | state を初期化、バックエンド設定 | state=init、backend 設定、共有バッファ upload | ◯ |
 | `endFrame(RenderBackend, ref RenderGpuState)` | 終了処理 | backend/state クリア | ◯ |
-| `drawPart(Part, bool)` | backend->drawPart | `drawPartPacket(const PartDrawPacket&)` に名称変更 | △ |
+| `drawPart(Part, bool)` | backend->drawPart | 基底 `drawPart` から `drawPartPacket` へ委譲 | ◯ |
 | `beginDynamicComposite(Projectable, DynamicCompositePass)` | backend に pass 渡し | 同等（`pass.surface` 必須チェックあり） | ◯ |
 | `endDynamicComposite(Projectable, DynamicCompositePass)` | backend に pass 渡し | 同等（`pass.surface` 必須チェックあり） | ◯ |
-| `beginMask(bool useStencil)` | 即時に backend->beginMask | QueueEmitter は pendingMask に保持し、applyMask 成立時に BeginMask を記録 | △ |
+| `beginMask(bool useStencil)` | 遅延 begin（applyMask 成立時に記録） | `pendingMask` で同等実装 | ◯ |
 | `applyMask(Drawable, bool)` | backend->applyMask | tryMakeMaskApplyPacket 成功時のみ ApplyMask 記録 | ◯ |
 | `beginMaskContent()` | backend->beginMaskContent | pendingMask 中は記録せず破棄（D と同様） | ◯ |
-| `endMask()` | backend->endMask | pendingMask 時は EndMask を記録しない（遅延 begin 前提） | △ |
-| `QueueCommandEmitter::playback(RenderBackend*)` | D interface には非定義 | 記録済み queue を backend に再生 | ✗（削除候補） |
-| `QueueCommandEmitter::queue() const` | D 側に対応項目なし | queue 参照アクセサ | ✗（削除候補） |
-| `QueueCommandEmitter::recorded() const` | D 側に対応項目なし | queue 参照アクセサ（`queue()` と同義） | ✗（削除候補） |
-| `QueueCommandEmitter::backendQueue()` | D 側に対応項目なし | backend queue 取得用 private メソッド | ✗（削除候補） |
-| `QueueCommandEmitter::record(...)` | D 側に対応項目なし | `QueuedCommand` 追加用 private メソッド | ✗（削除候補） |
-| `RenderQueue::ready()` | D 側に明示メソッドなし | backend/state の有効性チェック用 private メソッド | ✗（削除候補） |
-| `RenderQueue::uploadSharedBuffers()` | beginFrame 経由で共有バッファ upload | 同等（dirty 判定 + markUploaded） | ◯ |
+| `endMask()` | backend->endMask | pendingMask 時は EndMask を記録しない（D と同等） | ◯ |
+| `QueueCommandEmitter::playback(RenderBackend*)` | D interface には非定義 | 削除済み | ◯ |
+| `QueueCommandEmitter::queue() const` | D 側に対応項目なし | 削除済み | ◯ |
+| `QueueCommandEmitter::recorded() const` | D 側に対応項目なし | 削除済み | ◯ |
+| `QueueCommandEmitter::backendQueue()` | D 側に対応項目なし | 削除済み | ◯ |
+| `QueueCommandEmitter::record(...)` | D 側に対応項目なし | 削除済み | ◯ |
+| `RenderQueue::ready()` | D 側に明示メソッドなし | `RenderQueue` クラスごと削除済み | ◯ |
+| `RenderQueue::uploadSharedBuffers()` | beginFrame 経由で共有バッファ upload | `RenderQueue` クラスごと削除済み | ◯ |
 | `QueueCommandEmitter::uploadSharedBuffers()` | beginFrame 経由で共有バッファ upload | 同等（dirty 判定 + markUploaded） | ◯ |
-| フィールド `RenderQueue.activeBackend_` | D 側は実装詳細非公開 | current backend ポインタ保持 | △ |
-| フィールド `RenderQueue.frameState_` | D 側は実装詳細非公開 | frame state ポインタ保持 | △ |
+| フィールド `RenderQueue.activeBackend_` | D 側は実装詳細非公開 | `RenderQueue` クラスごと削除済み | ◯ |
+| フィールド `RenderQueue.frameState_` | D 側は実装詳細非公開 | `RenderQueue` クラスごと削除済み | ◯ |
 | フィールド `QueueCommandEmitter.backend_` | D 側は backend 参照保持（実装言語差あり） | `shared_ptr<QueueRenderBackend>` 保持 | ◯ |
-| フィールド `QueueCommandEmitter.activeBackend_` | D 側は実装詳細非公開 | beginFrame/endFrame で設定/クリア | △ |
+| フィールド `QueueCommandEmitter.activeBackend_` | D 側は実装詳細非公開 | beginFrame/endFrame で設定/クリア | ◯ |
 | フィールド `QueueCommandEmitter.pendingMask` | D 側は beginMask 遅延発行の内部状態 | 同等に保持 | ◯ |
 | フィールド `QueueCommandEmitter.pendingMaskUsesStencil` | D 側は beginMask 遅延発行の内部状態 | 同等に保持 | ◯ |
 
-**現状**: 1項目1行で再整理。D 正準で見ると、C++ 側の queue 専用補助 API は削除候補、インターフェース差分は `drawPart` 名称差と mask 遅延発行挙動。 
+**現状**: D 正準との差分（削除候補 API / mask 挙動）は反映済み。 

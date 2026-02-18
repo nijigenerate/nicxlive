@@ -18,7 +18,7 @@
 | フィールド `curveType` | Bezier/Spline | enum＋曲線生成で利用 | ◯ |
 | フィールド `physicsType` | Pendulum/SpringPendulum | enum＋driver生成で利用 | ◯ |
 | フィールド `frameCounter` | フレームカウント | 診断フレームで更新 | ◯ |
-| フィールド `diagnostics` | invalid カウント/log | 連続カウント・閾値無効化・曲線スケールログあり（詳細ログ簡略） | △ |
+| フィールド `diagnostics` | invalid カウント/log | `DiagnosticsState diagnostics` を保持し、既存の invalid 追跡と同期 | ◯ |
 | ctor | parent+タスク登録+初期化 | preProcess登録＋曲線/driver初期化 | ◯ |
 | `typeId` | "PathDeformer"/alias | 同等 | ◯ |
 | `runPreProcessTask` | transform更新＋安全逆行列＋deform更新 | 有限検証→inverse→Deformable→applyPathDeform＋診断ログ | ◯ |

@@ -9,6 +9,14 @@
 #include <vector>
 #include <string>
 
+namespace nicxlive::core {
+class Puppet;
+std::shared_ptr<nodes::Node> resolvePuppetNodeById(const std::shared_ptr<Puppet>& puppet, uint32_t uuid);
+}
+namespace nicxlive::core::nodes {
+bool areDeformationNodesCompatible(const std::shared_ptr<Node>& lhs, const std::shared_ptr<Node>& rhs);
+}
+
 namespace nicxlive::core::param {
 
 template <typename T>
@@ -26,9 +34,9 @@ public:
     }
 
     BindTarget getTarget() const override { return target; }
-    std::shared_ptr<Node> getNode() const override { return target.node.lock(); }
+    std::shared_ptr<Node> getNode() const override { return target.target.lock(); }
     void setTarget(const std::shared_ptr<Node>& node, const std::string& paramName) override {
-        target.node = node;
+        target.target = node;
         target.name = paramName;
         target.uuid = node ? node->uuid : 0;
         nodeUuid_ = target.uuid;
@@ -42,15 +50,16 @@ public:
         applyToTarget(interpolate(leftKeypoint, offset));
     }
 
-    void reconstruct(const std::shared_ptr<::nicxlive::core::Puppet>& /*puppet*/) override {
-        if (auto locked = target.node.lock()) {
-            target.uuid = locked->uuid;
-            nodeUuid_ = target.uuid;
-        }
-    }
+    void reconstruct(const std::shared_ptr<::nicxlive::core::Puppet>& /*puppet*/) override {}
 
     void finalize(const std::shared_ptr<::nicxlive::core::Puppet>& puppet) override {
-        reconstruct(puppet);
+        if (!puppet) return;
+        auto uuid = nodeUuid_ != 0 ? nodeUuid_ : target.uuid;
+        if (uuid == 0) return;
+        auto resolved = ::nicxlive::core::resolvePuppetNodeById(puppet, uuid);
+        target.target = resolved;
+        target.uuid = uuid;
+        nodeUuid_ = uuid;
     }
 
     void clear() override {
@@ -413,9 +422,6 @@ public:
     }
 
     uint32_t getNodeUUID() const override {
-        if (auto node = target.node.lock()) {
-            return node->uuid;
-        }
         return nodeUuid_;
     }
 
@@ -497,13 +503,13 @@ public:
         : ParameterBindingImpl<float>(parameter) {}
 
     void applyToTarget(const float& value) override {
-        if (auto n = target.node.lock()) {
+        if (auto n = target.target.lock()) {
             n->setValue(target.name, value);
         }
     }
 
     void clearValue(float& v) override {
-        if (auto n = target.node.lock()) {
+        if (auto n = target.target.lock()) {
             v = n->getDefaultValue(target.name);
         } else {
             v = 0.0f;
@@ -511,7 +517,7 @@ public:
     }
 
     void scaleValueAt(const Vec2u& index, int axis, float scale) override {
-        if (auto n = target.node.lock()) {
+        if (auto n = target.target.lock()) {
             auto cur = getValue(index);
             setValue(index, n->scaleValue(target.name, cur, axis, scale));
         } else {
@@ -533,7 +539,7 @@ public:
         : ParameterBindingImpl<DeformSlot>(parameter) {}
 
     void applyToTarget(const DeformSlot& value) override {
-        if (auto n = target.node.lock()) {
+        if (auto n = target.target.lock()) {
             if (value.vertexOffsets.size() > 0) {
                 n->setValue("transform.t.x", value.vertexOffsets.x[0]);
                 n->setValue("transform.t.y", value.vertexOffsets.y[0]);
@@ -581,8 +587,7 @@ public:
     }
 
     bool isCompatibleWithNode(const std::shared_ptr<Node>& other) const override {
-        (void)other;
-        return true;
+        return ::nicxlive::core::nodes::areDeformationNodesCompatible(target.target.lock(), other);
     }
 
     void remapOffsets(const std::vector<std::size_t>& remap, const ::nicxlive::core::common::Vec2Array& replacement, std::size_t newLength) {
@@ -851,6 +856,19 @@ template <typename T>
             yi++;
         }
         xi++;
+    }
+
+    if (parameter) {
+        const auto xCount = parameter->axisPointCount(0);
+        const auto yCount = parameter->axisPointCount(1);
+        if (values.size() != xCount) return std::string("Mismatched X value count");
+        for (const auto& row : values) {
+            if (row.size() != yCount) return std::string("Mismatched Y value count");
+        }
+        if (isSetFlags.size() != xCount) return std::string("Mismatched X isSet count");
+        for (const auto& row : isSetFlags) {
+            if (row.size() != yCount) return std::string("Mismatched Y isSet count");
+        }
     }
 
     return std::nullopt;

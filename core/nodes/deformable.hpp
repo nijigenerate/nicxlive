@@ -81,4 +81,6 @@ protected:
     virtual void onDeformPushed(const Vec2Array&) {}
 };
 
+bool areDeformationNodesCompatible(const std::shared_ptr<Node>& lhs, const std::shared_ptr<Node>& rhs);
+
 } // namespace nicxlive::core::nodes

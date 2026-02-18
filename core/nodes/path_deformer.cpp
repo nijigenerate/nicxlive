@@ -368,6 +368,7 @@ void PathDeformer::cacheClosestPoints(const std::shared_ptr<Node>& node, const M
 void PathDeformer::recordInvalid(const std::string& ctx, std::size_t idx, const Vec2& value) {
     ensureDiagnosticCapacity(idx + 1);
     invalidThisFrame = true;
+    diagnostics.invalidThisFrame = true;
     if (!diagnosticsEnabled) return;
     invalidIndexThisFrame[idx] = true;
     if (invalidStreakStartFrame[idx] == 0) invalidStreakStartFrame[idx] = frameCounter;
@@ -379,6 +380,16 @@ void PathDeformer::recordInvalid(const std::string& ctx, std::size_t idx, const 
     }
     invalidLastFrame[idx] = frameCounter;
     invalidLastValue[idx] = value;
+    diagnostics.invalidTotalPerIndex[idx] = invalidPerIndex[idx];
+    diagnostics.invalidConsecutivePerIndex[idx] = invalidConsecutive[idx];
+    diagnostics.invalidIndexThisFrame[idx] = invalidIndexThisFrame[idx];
+    diagnostics.invalidStreakStartFrame[idx] = invalidStreakStartFrame[idx];
+    diagnostics.invalidLastLoggedFrame[idx] = invalidLastLoggedFrame[idx];
+    diagnostics.invalidLastLoggedCount[idx] = invalidLastLoggedCount[idx];
+    diagnostics.invalidLastLoggedValueWasNaN[idx] = invalidLastLoggedValueWasNaN[idx];
+    diagnostics.invalidLastLoggedValue[idx] = invalidLastLoggedValue[idx];
+    diagnostics.invalidLastLoggedContext[idx] = invalidLastLoggedContext[idx];
+    diagnostics.totalInvalidCount = totalInvalidCount;
     lastInvalidContext = ctx;
     std::stringstream ss;
     ss << "[PathDeformer][Invalid] frame=" << frameCounter << " idx=" << idx
@@ -444,6 +455,7 @@ void PathDeformer::resetDiagnostics() {
     if (!preserveInvalidLog) invalidLog.clear();
     matrixInvalidThisFrame = false;
     consecutiveInvalidFrames = 0;
+    diagnostics = DiagnosticsState{};
 }
 
 bool beginDiagnosticFrameFlag(bool& flag) {
@@ -525,9 +537,11 @@ bool guardFinite(const Vec2& v) {
 bool PathDeformer::beginDiagnosticFrame() {
     if (diagnosticsFrameActive) return false;
     diagnosticsFrameActive = true;
+    diagnostics.diagnosticsFrameActive = true;
     ++frameCounter;
     ensureDiagnosticCapacity(deformation.size());
     clearInvalidFlags();
+    diagnostics.invalidThisFrame = false;
     return true;
 }
 
@@ -558,6 +572,10 @@ void PathDeformer::endDiagnosticFrame() {
         }
     }
     diagnosticsFrameActive = false;
+    diagnostics.invalidFrameCount = invalidFrameCount;
+    diagnostics.totalInvalidCount = totalInvalidCount;
+    diagnostics.invalidThisFrame = invalidThisFrame;
+    diagnostics.diagnosticsFrameActive = false;
 }
 
 void PathDeformer::logTransformFailure(const std::string& ctx, const Mat4& m) {
@@ -623,6 +641,15 @@ void PathDeformer::ensureDiagnosticCapacity(std::size_t n) {
     if (curveDiagCollapsed.size() < n) curveDiagCollapsed.resize(n, false);
     if (invalidLastLoggedValue.size() < n) invalidLastLoggedValue.resize(n, Vec2{});
     if (invalidLastLoggedContext.size() < n) invalidLastLoggedContext.resize(n, std::string{});
+    if (diagnostics.invalidTotalPerIndex.size() < n) diagnostics.invalidTotalPerIndex.resize(n, 0);
+    if (diagnostics.invalidConsecutivePerIndex.size() < n) diagnostics.invalidConsecutivePerIndex.resize(n, 0);
+    if (diagnostics.invalidIndexThisFrame.size() < n) diagnostics.invalidIndexThisFrame.resize(n, false);
+    if (diagnostics.invalidStreakStartFrame.size() < n) diagnostics.invalidStreakStartFrame.resize(n, 0);
+    if (diagnostics.invalidLastLoggedFrame.size() < n) diagnostics.invalidLastLoggedFrame.resize(n, 0);
+    if (diagnostics.invalidLastLoggedCount.size() < n) diagnostics.invalidLastLoggedCount.resize(n, 0);
+    if (diagnostics.invalidLastLoggedValueWasNaN.size() < n) diagnostics.invalidLastLoggedValueWasNaN.resize(n, false);
+    if (diagnostics.invalidLastLoggedValue.size() < n) diagnostics.invalidLastLoggedValue.resize(n, Vec2{});
+    if (diagnostics.invalidLastLoggedContext.size() < n) diagnostics.invalidLastLoggedContext.resize(n, std::string{});
 }
 
 void PathDeformer::checkBaselineDegeneracy(const std::vector<Vec2>& pts) {

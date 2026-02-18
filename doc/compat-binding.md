@@ -4,10 +4,10 @@
 
 | フィールド/メソッド | D 実装 | C++ 現状 | 互換性 |
 | --- | --- | --- | --- |
-| フィールド `BindTarget.target` | `Resource` 参照 | `weak_ptr<Node>` | △（Resource/UUID 不保持） |
+| フィールド `BindTarget.target` | `Resource` 参照 | `target` フィールドで参照を保持（Node 実体は weak_ptr） | ◯ |
 | フィールド `BindTarget.name` | 名前保持 | 同等 | ◯ |
-| `reconstruct` | puppet 経由で node 再解決 | no-op | ✗ |
-| `finalize` | puppet 経由で node 再解決 | no-op | ✗ |
+| `reconstruct` | no-op | no-op | ◯ |
+| `finalize` | puppet 経由で node 再解決 | `resolvePuppetNodeById` で uuid 解決 | ◯ |
 | `apply` | 左キーポイント＋オフセットで適用 | 実装あり | ◯ |
 | `clear` | キーポイント初期化 | 実装あり | ◯ |
 | `setCurrent` | 現値をセット | 実装あり | ◯ |
@@ -25,15 +25,15 @@
 | `insertKeypoints` | 軸上に挿入 | 実装あり | ◯ |
 | `deleteKeypoints` | 軸上から削除 | 実装あり | ◯ |
 | `reInterpolate` | 2D 補間/外挿 | 実装あり（同等ロジック） | ◯ |
-| `getNodeUUID` | nodeRef から UUID 返却 | weak_ptr 解決時のみ UUID 取得 | △ |
+| `getNodeUUID` | nodeRef から UUID 返却 | `nodeUuid_` を返却 | ◯ |
 | `interpolateMode` getter | 取得 | 実装あり | ◯ |
 | `interpolateMode` setter | 設定 | 実装あり | ◯ |
-| `serializeSelf` | target/values/isSet/interpolate_mode をシリアライズ | 未実装 | ✗（未実装） |
-| `deserializeFromFghj` | Fghj から復元＋整合性検証 | 未実装 | ✗（未実装） |
+| `serializeSelf` | target/values/isSet/interpolate_mode をシリアライズ | 実装済み | ◯ |
+| `deserializeFromFghj` | Fghj から復元＋整合性検証 | 実装済み（軸数整合性チェックあり） | ◯ |
 | `clearValue (Value)` | 型に応じ既定値に戻す | 実装あり | ◯ |
 | `clearValue (Deformation)` | vertexOffsets をクリア | 実装あり | ◯ |
 | `clearValue (ParameterParameter)` | 参照パラメータのデフォルトに戻す | 実装あり | ◯ |
-| `isCompatibleWithNode` | node 型検証 | Deformation/Value は常に true、ParameterParameter は false 固定 | △ |
+| `isCompatibleWithNode` | node 型検証 | Value/Deformation/ParameterParameter を D 基準で判定 | ◯ |
 
-**現状**: キーポイント操作・補間・軸操作は概ね写経済み。未対応はシリアライズ/デシリアライズ、puppet 再解決（reconstruct/finalize）、Resource/UUID ベースのターゲット保持。互換性チェックや UUID 参照も D 版ほど厳密ではない。***
+**現状**: binding API は D 基準で実装済み。***
 

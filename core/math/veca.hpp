@@ -3,9 +3,11 @@
 #include "types.hpp"
 
 #include <cassert>
+#include <array>
 #include <cstddef>
 #include <functional>
 #include <initializer_list>
+#include <immintrin.h>
 #include <memory>
 #include <utility>
 #include <vector>
@@ -21,6 +23,7 @@ struct RawStorage {
 };
 
 struct Vec2Array {
+    static constexpr std::size_t kSimdAlignment = 16;
     // lanes (shared to allow views)
     std::vector<float> x{};
     std::vector<float> y{};
@@ -31,7 +34,8 @@ struct Vec2Array {
     std::size_t laneBase_{0};
     std::size_t viewCapacity_{0};
     bool ownsStorage_{true};
-    mutable std::vector<float> rawCache_{};
+    std::size_t alignment_{kSimdAlignment};
+    mutable std::vector<float> backing_{};
 
     Vec2Array() = default;
     explicit Vec2Array(std::size_t n) { ensureLength(n); }
@@ -143,24 +147,53 @@ struct Vec2Array {
     }
     Vec2Array& operator+=(const Vec2Array& rhs) {
         auto n = std::min(size(), rhs.size());
+        if (n == 0) return *this;
+        float* dstX = xPtr_ + laneBase_;
+        float* dstY = yPtr_ + laneBase_;
+        const float* srcX = rhs.xPtr_ + rhs.laneBase_;
+        const float* srcY = rhs.yPtr_ + rhs.laneBase_;
+        if (canApplySIMD(dstX, srcX, n) && canApplySIMD(dstY, srcY, n)) {
+            applySIMD<'+'>(dstX, srcX, n);
+            applySIMD<'+'>(dstY, srcY, n);
+            return *this;
+        }
         for (std::size_t i = 0; i < n; ++i) {
-            xPtr_[laneBase_ + i] += rhs.at(i).x;
-            yPtr_[laneBase_ + i] += rhs.at(i).y;
+            dstX[i] += srcX[i];
+            dstY[i] += srcY[i];
         }
         return *this;
     }
     Vec2Array& operator-=(const Vec2Array& rhs) {
         auto n = std::min(size(), rhs.size());
+        if (n == 0) return *this;
+        float* dstX = xPtr_ + laneBase_;
+        float* dstY = yPtr_ + laneBase_;
+        const float* srcX = rhs.xPtr_ + rhs.laneBase_;
+        const float* srcY = rhs.yPtr_ + rhs.laneBase_;
+        if (canApplySIMD(dstX, srcX, n) && canApplySIMD(dstY, srcY, n)) {
+            applySIMD<'-'>(dstX, srcX, n);
+            applySIMD<'-'>(dstY, srcY, n);
+            return *this;
+        }
         for (std::size_t i = 0; i < n; ++i) {
-            xPtr_[laneBase_ + i] -= rhs.at(i).x;
-            yPtr_[laneBase_ + i] -= rhs.at(i).y;
+            dstX[i] -= srcX[i];
+            dstY[i] -= srcY[i];
         }
         return *this;
     }
     Vec2Array& operator*=(float s) {
-        for (std::size_t i = 0; i < size(); ++i) {
-            xPtr_[laneBase_ + i] *= s;
-            yPtr_[laneBase_ + i] *= s;
+        auto n = size();
+        if (n == 0) return *this;
+        float* dstX = xPtr_ + laneBase_;
+        float* dstY = yPtr_ + laneBase_;
+        if (canApplySIMD(dstX, dstX, n) && canApplySIMD(dstY, dstY, n)) {
+            applySIMDScalarMul(dstX, s, n);
+            applySIMDScalarMul(dstY, s, n);
+            return *this;
+        }
+        for (std::size_t i = 0; i < n; ++i) {
+            dstX[i] *= s;
+            dstY[i] *= s;
         }
         return *this;
     }
@@ -210,16 +243,19 @@ struct Vec2Array {
 
     RawStorage rawStorage() const {
         auto n = size();
-        rawCache_.resize(n * 2);
+        backing_.resize(n * 2);
         if (n == 0 || !xPtr_ || !yPtr_) {
-            return {rawCache_.data(), rawCache_.size()};
+            return {backing_.data(), backing_.size()};
         }
         for (std::size_t i = 0; i < n; ++i) {
-            rawCache_[i] = xPtr_[laneBase_ + i];
-            rawCache_[n + i] = yPtr_[laneBase_ + i];
+            backing_[i] = xPtr_[laneBase_ + i];
+            backing_[n + i] = yPtr_[laneBase_ + i];
         }
-        return {rawCache_.data(), rawCache_.size()};
+        return {backing_.data(), backing_.size()};
     }
+
+    std::size_t alignment() const { return alignment_; }
+    const std::vector<float>& backing() const { return backing_; }
 
     // lane view (only for owned contiguous)
     std::vector<float>& lane(std::size_t component) {
@@ -233,6 +269,14 @@ struct Vec2Array {
         if (component == 0) return x;
         assert(component == 1);
         return y;
+    }
+    std::array<std::vector<float>*, 2> lanes() {
+        assert(ownsStorage_ && laneBase_ == 0 && (laneStride_ == logicalLength_ || laneStride_ == 0));
+        return {&x, &y};
+    }
+    std::array<const std::vector<float>*, 2> lanes() const {
+        assert(ownsStorage_ && laneBase_ == 0 && (laneStride_ == logicalLength_ || laneStride_ == 0));
+        return {&x, &y};
     }
 
     // bind external storage (view, non-owning)
@@ -264,6 +308,49 @@ struct Vec2Array {
     int forEach(const std::function<int(std::size_t, Vec2ViewConst)>& dg) const;
 
 private:
+    static bool canApplySIMD(const float* dst, const float* src, std::size_t len) {
+        return dst != nullptr && src != nullptr && len >= 4;
+    }
+
+    template <char Op>
+    static void applySIMD(float* dst, const float* src, std::size_t len) {
+        std::size_t i = 0;
+#if defined(__SSE__) || defined(_M_X64) || (defined(_M_IX86_FP) && _M_IX86_FP >= 1)
+        for (; i + 4 <= len; i += 4) {
+            __m128 a = _mm_loadu_ps(dst + i);
+            __m128 b = _mm_loadu_ps(src + i);
+            if constexpr (Op == '+') {
+                a = _mm_add_ps(a, b);
+            } else if constexpr (Op == '-') {
+                a = _mm_sub_ps(a, b);
+            }
+            _mm_storeu_ps(dst + i, a);
+        }
+#endif
+        for (; i < len; ++i) {
+            if constexpr (Op == '+') {
+                dst[i] += src[i];
+            } else if constexpr (Op == '-') {
+                dst[i] -= src[i];
+            }
+        }
+    }
+
+    static void applySIMDScalarMul(float* dst, float scalar, std::size_t len) {
+        std::size_t i = 0;
+#if defined(__SSE__) || defined(_M_X64) || (defined(_M_IX86_FP) && _M_IX86_FP >= 1)
+        const __m128 s = _mm_set1_ps(scalar);
+        for (; i + 4 <= len; i += 4) {
+            __m128 a = _mm_loadu_ps(dst + i);
+            a = _mm_mul_ps(a, s);
+            _mm_storeu_ps(dst + i, a);
+        }
+#endif
+        for (; i < len; ++i) {
+            dst[i] *= scalar;
+        }
+    }
+
     friend struct Vec2View;
     friend struct Vec2ViewConst;
 };

@@ -80,6 +80,17 @@ public:
     void endDynamicComposite(const ::nicxlive::core::DynamicCompositePass& pass) override;
     void destroyDynamicComposite(const std::shared_ptr<::nicxlive::core::DynamicCompositeSurface>&) override;
     void drawPartPacket(const PartDrawPacket& packet) override;
+    void resizeViewportTargets(int width, int height) override;
+    void dumpViewport(std::vector<uint8_t>& dumpTo, int width, int height) override;
+    RenderResourceHandle renderImageHandle() override;
+    RenderResourceHandle framebufferHandle() override;
+    RenderResourceHandle mainAlbedoHandle() override;
+    RenderResourceHandle mainEmissiveHandle() override;
+    RenderResourceHandle mainBumpHandle() override;
+    RenderResourceHandle blendFramebufferHandle() override;
+    RenderResourceHandle blendAlbedoHandle() override;
+    RenderResourceHandle blendEmissiveHandle() override;
+    RenderResourceHandle blendBumpHandle() override;
     void drawTextureAtPart(const Texture&, const std::shared_ptr<::nicxlive::core::nodes::Part>&) override;
     void drawTextureAtPosition(const Texture&, const Vec2&, float, const Vec3&, const Vec3&) override;
     void drawTextureAtRect(const Texture&, const Rect&, const Rect&, float, const Vec3&, const Vec3&, void*, void*) override;
@@ -101,30 +112,10 @@ public:
     std::vector<TextureCommand> resourceQueue{};
 
     // キューを別 backend に再生（D: RenderingBackend.playback 相当）
-    void playback(RenderBackend* backend) const;
-
-    // Hooks to export packets for Unity
-    const std::vector<QueuedCommand>& recorded() const { return queue; }
-
-    const std::vector<QueuedCommand>& backendQueue() const { return queue; }
-    std::vector<QueuedCommand>& backendQueue() { return queue; }
-    const std::vector<TextureCommand>& backendResourceQueue() const { return resourceQueue; }
-    void clearResourceQueue() { resourceQueue.clear(); }
     void setRenderTargets(std::size_t renderHandle, std::size_t compositeHandle) {
         renderTargetHandle = renderHandle;
         compositeTargetHandle = compositeHandle;
     }
-    std::size_t renderTarget() const { return renderTargetHandle; }
-    std::size_t compositeTarget() const { return compositeTargetHandle; }
-    ::nicxlive::core::math::RawStorage sharedVerticesRaw() const { return sharedVertices.rawStorage(); }
-    ::nicxlive::core::math::RawStorage sharedUvRaw() const { return sharedUvs.rawStorage(); }
-    ::nicxlive::core::math::RawStorage sharedDeformRaw() const { return sharedDeform.rawStorage(); }
-    std::size_t sharedVertexCount() const { return sharedVertices.size(); }
-    std::size_t sharedUvCount() const { return sharedUvs.size(); }
-    std::size_t sharedDeformCount() const { return sharedDeform.size(); }
-    const ::nicxlive::core::common::Vec2Array& sharedVerticesData() const { return sharedVertices; }
-    const ::nicxlive::core::common::Vec2Array& sharedUvData() const { return sharedUvs; }
-    const ::nicxlive::core::common::Vec2Array& sharedDeformData() const { return sharedDeform; }
 
     const std::vector<uint16_t>* getDrawableIndices(uint32_t id) const {
         auto it = indexBuffers.find(id);

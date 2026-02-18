@@ -40,6 +40,8 @@ struct UnityRendererConfig {
     int viewportHeight;
 };
 
+using NjgLogFn = void (*)(const char* message, size_t length, void* userData);
+
 struct FrameConfig {
     int viewportWidth;
     int viewportHeight;
@@ -85,6 +87,14 @@ struct TextureStats {
     size_t created;
     size_t released;
     size_t current;
+};
+
+struct NjgRenderTargets {
+    size_t renderFramebuffer;
+    size_t compositeFramebuffer;
+    size_t blendFramebuffer;
+    int viewportWidth;
+    int viewportHeight;
 };
 
 struct CommandQueueView {
@@ -158,18 +168,27 @@ struct NjgQueuedCommand {
 };
 
 // Renderer/Puppet handles
+void njgRuntimeInit();
+void njgRuntimeTerm();
 NjgResult njgCreateRenderer(const UnityRendererConfig* config, const UnityResourceCallbacks* callbacks, void** outRenderer);
 void njgDestroyRenderer(void* renderer);
 NjgResult njgLoadPuppet(void* renderer, const char* pathUtf8, void** outPuppet);
-NjgResult njgLoadPuppetFromMemory(void* renderer, const uint8_t* data, size_t length, void** outPuppet);
-NjgResult njgWritePuppetToMemory(void* puppet, const uint8_t** outData, size_t* outLength);
-void njgFreeBuffer(const void* buffer);
 NjgResult njgUnloadPuppet(void* renderer, void* puppet);
 NjgResult njgGetParameters(void* puppet, NjgParameterInfo* buffer, size_t bufferLength, size_t* outCount);
 NjgResult njgUpdateParameters(void* puppet, const PuppetParameterUpdate* updates, size_t updateCount);
+NjgResult njgGetPuppetExtData(void* puppet, const char* key, const uint8_t** outData, size_t* outLength);
+NjgResult njgPlayAnimation(void* renderer, void* puppet, const char* name, bool loop, bool playLeadOut);
+NjgResult njgPauseAnimation(void* renderer, void* puppet, const char* name);
+NjgResult njgStopAnimation(void* renderer, void* puppet, const char* name, bool immediate);
+NjgResult njgSeekAnimation(void* renderer, void* puppet, const char* name, int frame);
+NjgResult njgSetPuppetScale(void* puppet, float sx, float sy);
+NjgResult njgSetPuppetTranslation(void* puppet, float tx, float ty);
 NjgResult njgBeginFrame(void* renderer, const FrameConfig* cfg);
 NjgResult njgTickPuppet(void* puppet, float deltaSeconds);
 NjgResult njgEmitCommands(void* renderer, SharedBufferSnapshot* shared, const CommandQueueView** outView);
+NjgResult njgGetSharedBuffers(void* renderer, SharedBufferSnapshot* snapshot);
+NjgRenderTargets njgGetRenderTargets(void* renderer);
+void njgSetLogCallback(NjgLogFn callback, void* userData);
 void njgFlushCommandBuffer(void* renderer);
 size_t njgGetGcHeapSize();
 TextureStats njgGetTextureStats(void* renderer);

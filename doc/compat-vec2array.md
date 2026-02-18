@@ -4,9 +4,9 @@
 
 | フィールド/メソッド | D 実装 | C++ 現状 | 互換性 |
 | --- | --- | --- | --- |
-| フィールド `lanes` (x,y SoA) | SIMD対応の SoA バッファ（Vector!(T,2) を格納、laneStride 等を管理） | x/y + logicalLength/laneStride/laneBase/viewCapacity/ownsStorage を保持 | △ |
-| フィールド `backing` | 16byte アラインGC.mallocを保持 | std::vector ベース（GCなし） | △ |
-| フィールド `alignment` | 16byte アライン | 明示管理なし | △ |
+| フィールド `lanes` (x,y SoA) | SIMD対応の SoA バッファ（Vector!(T,2) を格納、laneStride 等を管理） | SoA `x/y` レーン保持 + `lanes()` で明示アクセス可 | ◯ |
+| フィールド `backing` | 16byte アラインGC.mallocを保持 | `backing_` を保持し `backing()` で参照可（rawStorage用連続SoA） | ◯ |
+| フィールド `alignment` | 16byte アライン | `kSimdAlignment=16` / `alignment_` を保持し `alignment()` で参照可 | ◯ |
 | `length` | 論理長を返す/設定 | size()+setLength | ◯ |
 | `opDollar` | 論理長取得 | size() 相当 | ◯ |
 | `opIndex` mutable | vecv ビューを返す | Vec2View で返却 | ◯ |
@@ -22,5 +22,5 @@
 | テンプレート別名 `Vec2Array` | 提供 | 提供 | ◯ |
 | テンプレート別名 `Vec3Array` | 提供 | 提供 | ◯ |
 | テンプレート別名 `Vec4Array` | 提供 | 提供 | ◯ |
-| SIMD対応 (`applySIMD` 等) | パック幅で SIMD 加速 | 未実装 | ✗（未実装） |
-| 単体テスト | ユニットテスト多数 | なし | ✗（未実装） |
+| SIMD対応 (`applySIMD` 等) | パック幅で SIMD 加速 | `Vec2Array` の `+=`/`-=`/`*=(scalar)` に SIMD パスを実装（SSE, scalar fallback あり） | △ |
+| 単体テスト | ユニットテスト多数 | `tests/vec2array_test.cpp` を追加（SoA rawStorage / SIMD演算 / external view） | ◯ |

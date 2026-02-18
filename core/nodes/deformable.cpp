@@ -159,4 +159,11 @@ void Deformable::runPostTaskImpl(std::size_t priority, core::RenderContext& ctx)
 
 void Deformable::notifyDeformPushed(const Vec2Array& deform) { onDeformPushed(deform); }
 
+bool areDeformationNodesCompatible(const std::shared_ptr<Node>& lhs, const std::shared_ptr<Node>& rhs) {
+    auto dl = std::dynamic_pointer_cast<Deformable>(lhs);
+    auto dr = std::dynamic_pointer_cast<Deformable>(rhs);
+    if (!dl || !dr) return false;
+    return dl->vertices.size() == dr->vertices.size();
+}
+
 } // namespace nicxlive::core::nodes

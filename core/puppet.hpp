@@ -144,4 +144,6 @@ private:
     std::shared_ptr<Parameter> findParameterInternal(uint32_t uuid) { return findParameter(uuid); }
 };
 
+std::shared_ptr<nodes::Node> resolvePuppetNodeById(const std::shared_ptr<Puppet>& puppet, uint32_t uuid);
+
 } // namespace nicxlive::core

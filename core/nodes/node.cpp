@@ -62,7 +62,6 @@ Transform combine(const Transform& a, const Transform& b) {
     out.rotation.z += b.rotation.z;
     out.scale.x *= b.scale.x;
     out.scale.y *= b.scale.y;
-    out.scale.z *= b.scale.z;
     return out;
 }
 
@@ -1053,7 +1052,6 @@ bool Node::canReparent(const std::shared_ptr<Node>& to) const {
         if (auto rz = data.get_optional<float>("rz")) localTransform.rotation.z = *rz;
         if (auto sx = data.get_optional<float>("sx")) localTransform.scale.x = *sx;
         if (auto sy = data.get_optional<float>("sy")) localTransform.scale.y = *sy;
-        if (auto sz = data.get_optional<float>("sz")) localTransform.scale.z = *sz;
         if (auto ot = data.get_child_optional("offsetTransform")) {
             if (auto tx = ot->get_optional<float>("x")) offsetTransform.translation.x = *tx;
             if (auto ty = ot->get_optional<float>("y")) offsetTransform.translation.y = *ty;
@@ -1063,7 +1061,6 @@ bool Node::canReparent(const std::shared_ptr<Node>& to) const {
             if (auto rz = ot->get_optional<float>("rz")) offsetTransform.rotation.z = *rz;
             if (auto sx = ot->get_optional<float>("sx")) offsetTransform.scale.x = *sx;
             if (auto sy = ot->get_optional<float>("sy")) offsetTransform.scale.y = *sy;
-            if (auto sz = ot->get_optional<float>("sz")) offsetTransform.scale.z = *sz;
         }
     } catch (const std::exception& e) {
         return std::string(e.what());
@@ -1096,7 +1093,6 @@ void Node::serializeSelfImpl(::nicxlive::core::serde::InochiSerializer& serializ
         tser.putKey("rz"); tser.putValue(localTransform.rotation.z);
         tser.putKey("sx"); tser.putValue(localTransform.scale.x);
         tser.putKey("sy"); tser.putValue(localTransform.scale.y);
-        tser.putKey("sz"); tser.putValue(localTransform.scale.z);
         serializer.root.add_child("transform", tser.root);
         ::nicxlive::core::serde::InochiSerializer ot;
         ot.putKey("x"); ot.putValue(offsetTransform.translation.x);
@@ -1107,7 +1103,6 @@ void Node::serializeSelfImpl(::nicxlive::core::serde::InochiSerializer& serializ
         ot.putKey("rz"); ot.putValue(offsetTransform.rotation.z);
         ot.putKey("sx"); ot.putValue(offsetTransform.scale.x);
         ot.putKey("sy"); ot.putValue(offsetTransform.scale.y);
-        ot.putKey("sz"); ot.putValue(offsetTransform.scale.z);
         serializer.root.add_child("offsetTransform", ot.root);
         serializer.putKey("lockToRoot");
         serializer.putValue(lockToRoot);
@@ -1160,7 +1155,6 @@ void Node::serializePartial(::nicxlive::core::serde::InochiSerializer& serialize
             if (auto rz = ot->get_optional<float>("rz")) offsetTransform.rotation.z = *rz;
             if (auto sx = ot->get_optional<float>("sx")) offsetTransform.scale.x = *sx;
             if (auto sy = ot->get_optional<float>("sy")) offsetTransform.scale.y = *sy;
-            if (auto sz = ot->get_optional<float>("sz")) offsetTransform.scale.z = *sz;
         }
         if (auto childrenTree = data.get_child_optional("children")) {
             for (const auto& childNode : *childrenTree) {

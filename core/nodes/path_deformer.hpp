@@ -93,6 +93,21 @@ public:
     std::vector<float> curveDiagReferenceScale{};
     std::vector<bool> curveDiagHasNaN{};
     std::vector<bool> curveDiagCollapsed{};
+    struct DiagnosticsState {
+        uint64_t invalidFrameCount{0};
+        uint64_t totalInvalidCount{0};
+        bool invalidThisFrame{false};
+        bool diagnosticsFrameActive{false};
+        std::vector<uint64_t> invalidTotalPerIndex{};
+        std::vector<uint64_t> invalidConsecutivePerIndex{};
+        std::vector<bool> invalidIndexThisFrame{};
+        std::vector<std::size_t> invalidStreakStartFrame{};
+        std::vector<uint64_t> invalidLastLoggedFrame{};
+        std::vector<uint64_t> invalidLastLoggedCount{};
+        std::vector<bool> invalidLastLoggedValueWasNaN{};
+        std::vector<Vec2> invalidLastLoggedValue{};
+        std::vector<std::string> invalidLastLoggedContext{};
+    } diagnostics{};
     // diagnostics (簡易)
     uint64_t invalidFrameCount{0};
     uint64_t totalInvalidCount{0};

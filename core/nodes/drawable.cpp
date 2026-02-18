@@ -428,7 +428,7 @@ std::tuple<Vec2Array, std::optional<Mat4>, bool> Drawable::nodeAttachProcessor(c
     auto triIt = attachedIndex.find(node->uuid);
     std::array<std::size_t, 3> tri{};
     if (triIt == attachedIndex.end()) {
-        auto triFound = findSurroundingTriangle(nodeOrigin, *mesh);
+        auto triFound = findSurroundingTriangle(nodeOrigin, static_cast<const MeshData&>(*mesh));
         if (!triFound) return {origDeformation, std::nullopt, false};
         tri = *triFound;
         attachedIndex[node->uuid] = tri;

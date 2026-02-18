@@ -151,8 +151,13 @@ void Texture::setAnisotropy(float val) {
 }
 
 void Texture::setData(const std::vector<uint8_t>& data, int inChannels) {
-    data_ = data;
     channels_ = inChannels;
+    if (locked_) {
+        lockedData_ = data;
+        modified_ = true;
+        return;
+    }
+    data_ = data;
     modified_ = true;
     if (auto backend = std::dynamic_pointer_cast<render::QueueRenderBackend>(getCurrentRenderBackend())) {
         if (backendId_ == 0) {
@@ -174,11 +179,27 @@ void Texture::dispose() {
 }
 
 void Texture::lock() {
+    if (locked_) return;
+    lockedData_ = data_;
+    modified_ = false;
     locked_ = true;
 }
 
 void Texture::unlock() {
+    if (!locked_) return;
     locked_ = false;
+    if (modified_) {
+        data_ = lockedData_;
+        if (auto backend = std::dynamic_pointer_cast<render::QueueRenderBackend>(getCurrentRenderBackend())) {
+            if (backendId_ == 0) {
+                backendId_ = backend->createTexture(data_, width_, height_, channels_, stencil_);
+            } else {
+                backend->updateTexture(backendId_, data_, width_, height_, channels_);
+            }
+        }
+    }
+    modified_ = false;
+    lockedData_.clear();
 }
 
 uint32_t Texture::nextUUID() {

@@ -200,7 +200,6 @@ void Puppet::update() {
     }
 
     renderGraph.beginFrame();
-    renderContext.frameId = nodes::currentProjectableFrame();
     renderScheduler.executeRange(renderContext, TaskOrder::PreProcess, TaskOrder::Final);
 }
 
@@ -385,6 +384,11 @@ void Puppet::recordNodeChange(nodes::NotifyReason reason) {
     if (reason == nodes::NotifyReason::StructureChanged) {
         forceFullRebuild = true;
     }
+}
+
+std::shared_ptr<nodes::Node> resolvePuppetNodeById(const std::shared_ptr<Puppet>& puppet, uint32_t uuid) {
+    if (!puppet || uuid == 0) return nullptr;
+    return puppet->findNodeById(uuid);
 }
 
 } // namespace nicxlive::core

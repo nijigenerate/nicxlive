@@ -1,81 +1,9 @@
 #include "command_emitter.hpp"
 #include "backend_queue.hpp"
 
-#include <functional>
-
 namespace nicxlive::core::render {
 
 namespace nodes = ::nicxlive::core::nodes;
-
-// --- RenderQueue (リアルバックエンド向け) ---
-
-void RenderQueue::beginFrame(RenderBackend* backend, RenderGpuState& state) {
-    activeBackend_ = backend;
-    frameState_ = &state;
-    state = RenderGpuState::init();
-    uploadSharedBuffers();
-}
-
-void RenderQueue::endFrame(RenderBackend*, RenderGpuState&) {
-    activeBackend_ = nullptr;
-    frameState_ = nullptr;
-}
-
-bool RenderQueue::ready() const { return activeBackend_ != nullptr && frameState_ != nullptr; }
-
-void RenderQueue::beginMask(bool useStencil) {
-    if (!ready()) return;
-    activeBackend_->beginMask(useStencil);
-}
-
-void RenderQueue::applyMask(const std::shared_ptr<nodes::Drawable>& mask, bool dodge) {
-    if (!ready() || !mask) return;
-    RenderBackend::MaskApplyPacket packet{};
-    if (tryMakeMaskApplyPacket(mask, dodge, packet)) {
-        activeBackend_->applyMask(packet);
-    }
-}
-
-void RenderQueue::beginMaskContent() {
-    if (!ready()) return;
-    activeBackend_->beginMaskContent();
-}
-
-void RenderQueue::endMask() {
-    if (!ready()) return;
-    activeBackend_->endMask();
-}
-
-void RenderQueue::drawPartPacket(const nodes::PartDrawPacket& packet) {
-    if (!ready()) return;
-    activeBackend_->drawPartPacket(packet);
-}
-
-void RenderQueue::beginDynamicComposite(const std::shared_ptr<nodes::Projectable>& composite, const DynamicCompositePass& pass) {
-    if (!ready() || !pass.surface) return;
-    activeBackend_->beginDynamicComposite(pass);
-}
-
-void RenderQueue::endDynamicComposite(const std::shared_ptr<nodes::Projectable>& composite, const DynamicCompositePass& pass) {
-    if (!ready() || !pass.surface) return;
-    activeBackend_->endDynamicComposite(pass);
-}
-
-void RenderQueue::uploadSharedBuffers() {
-    if (!activeBackend_) return;
-    if (sharedVertexBufferDirty()) {
-        activeBackend_->uploadSharedVertexBuffer(sharedVertexBufferData());
-        sharedVertexMarkUploaded();
-    }
-    if (sharedUvBufferDirty()) {
-        activeBackend_->uploadSharedUvBuffer(sharedUvBufferData());
-        sharedUvMarkUploaded();
-    }
-    if (sharedDeformBufferDirty()) {
-        activeBackend_->uploadSharedDeformBuffer(sharedDeformBufferData());
-        sharedDeformMarkUploaded();
-    }
-}
 
 // --- QueueCommandEmitter (キュー収集用) ---
 
@@ -86,7 +14,9 @@ void QueueCommandEmitter::beginFrame(RenderBackend* backend, RenderGpuState& sta
     state = RenderGpuState::init();
     pendingMask = false;
     pendingMaskUsesStencil = false;
-    backendQueue().clear();
+    if (backend_) {
+        backend_->queue.clear();
+    }
     uploadSharedBuffers();
 }
 
@@ -111,10 +41,16 @@ void QueueCommandEmitter::applyMask(const std::shared_ptr<nodes::Drawable>& mask
         return;
     }
     if (pendingMask) {
-        record(RenderCommandKind::BeginMask, [&](QueuedCommand& cmd) { cmd.usesStencil = pendingMaskUsesStencil; });
+        QueuedCommand cmd{};
+        cmd.kind = RenderCommandKind::BeginMask;
+        cmd.usesStencil = pendingMaskUsesStencil;
+        if (backend_) backend_->queue.push_back(std::move(cmd));
         pendingMask = false;
     }
-    record(RenderCommandKind::ApplyMask, [&](QueuedCommand& cmd) { cmd.maskApplyPacket = packet; });
+    QueuedCommand cmd{};
+    cmd.kind = RenderCommandKind::ApplyMask;
+    cmd.maskApplyPacket = packet;
+    if (backend_) backend_->queue.push_back(std::move(cmd));
 }
 
 void QueueCommandEmitter::beginMaskContent() {
@@ -123,7 +59,9 @@ void QueueCommandEmitter::beginMaskContent() {
         // ApplyMask が来ずに BeginMaskContent だけ来た場合は何もせず破棄。
         return;
     }
-    record(RenderCommandKind::BeginMaskContent, [](QueuedCommand&) {});
+    QueuedCommand cmd{};
+    cmd.kind = RenderCommandKind::BeginMaskContent;
+    if (backend_) backend_->queue.push_back(std::move(cmd));
 }
 
 void QueueCommandEmitter::endMask() {
@@ -131,75 +69,36 @@ void QueueCommandEmitter::endMask() {
         pendingMask = false;
         return;
     }
-    record(RenderCommandKind::EndMask, [](QueuedCommand&) {});
+    QueuedCommand cmd{};
+    cmd.kind = RenderCommandKind::EndMask;
+    if (backend_) backend_->queue.push_back(std::move(cmd));
     pendingMask = false;
     pendingMaskUsesStencil = false;
 }
 
 void QueueCommandEmitter::drawPartPacket(const nodes::PartDrawPacket& packet) {
-    record(RenderCommandKind::DrawPart, [&](QueuedCommand& cmd) {
-        cmd.partPacket = packet;
-    });
+    QueuedCommand cmd{};
+    cmd.kind = RenderCommandKind::DrawPart;
+    cmd.partPacket = packet;
+    if (backend_) backend_->queue.push_back(std::move(cmd));
 }
 
 void QueueCommandEmitter::beginDynamicComposite(const std::shared_ptr<nodes::Projectable>&, const DynamicCompositePass& pass) {
-    record(RenderCommandKind::BeginDynamicComposite, [&](QueuedCommand& cmd) { cmd.dynamicPass = pass; });
+    QueuedCommand cmd{};
+    cmd.kind = RenderCommandKind::BeginDynamicComposite;
+    cmd.dynamicPass = pass;
+    if (backend_) backend_->queue.push_back(std::move(cmd));
 }
 
 void QueueCommandEmitter::endDynamicComposite(const std::shared_ptr<nodes::Projectable>&, const DynamicCompositePass& pass) {
-    record(RenderCommandKind::EndDynamicComposite, [&](QueuedCommand& cmd) { cmd.dynamicPass = pass; });
-}
-
-void QueueCommandEmitter::playback(RenderBackend* backend) {
-    if (!backend) return;
-    for (const auto& cmd : backendQueue()) {
-        switch (cmd.kind) {
-        case RenderCommandKind::DrawPart:
-            backend->drawPartPacket(cmd.partPacket);
-            break;
-        case RenderCommandKind::BeginDynamicComposite:
-            backend->beginDynamicComposite(cmd.dynamicPass);
-            break;
-        case RenderCommandKind::EndDynamicComposite:
-            backend->endDynamicComposite(cmd.dynamicPass);
-            break;
-        case RenderCommandKind::BeginMask:
-            backend->beginMask(cmd.usesStencil);
-            break;
-        case RenderCommandKind::ApplyMask:
-            backend->applyMask(cmd.maskApplyPacket);
-            break;
-        case RenderCommandKind::BeginMaskContent:
-            backend->beginMaskContent();
-            break;
-        case RenderCommandKind::EndMask:
-            backend->endMask();
-            break;
-        default:
-            break;
-        }
-    }
-}
-
-const std::vector<QueuedCommand>& QueueCommandEmitter::backendQueue() const {
-    static const std::vector<QueuedCommand> empty;
-    return backend_ ? backend_->backendQueue() : empty;
-}
-
-std::vector<QueuedCommand>& QueueCommandEmitter::backendQueue() {
-    static std::vector<QueuedCommand> dummy;
-    return backend_ ? backend_->backendQueue() : dummy;
+    QueuedCommand cmd{};
+    cmd.kind = RenderCommandKind::EndDynamicComposite;
+    cmd.dynamicPass = pass;
+    if (backend_) backend_->queue.push_back(std::move(cmd));
 }
 
 bool QueueCommandEmitter::tryMakeMaskApplyPacket(const std::shared_ptr<nodes::Drawable>& drawable, bool isDodge, RenderBackend::MaskApplyPacket& packet) {
     return ::nicxlive::core::render::tryMakeMaskApplyPacket(drawable, isDodge, packet);
-}
-
-void QueueCommandEmitter::record(RenderCommandKind kind, const std::function<void(QueuedCommand&)>& fill) {
-    QueuedCommand cmd{};
-    cmd.kind = kind;
-    fill(cmd);
-    backendQueue().push_back(std::move(cmd));
 }
 
 void QueueCommandEmitter::uploadSharedBuffers() {

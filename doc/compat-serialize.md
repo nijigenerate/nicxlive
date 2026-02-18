@@ -4,15 +4,15 @@
 
 | フィールド/メソッド | D 実装 | C++ 現状 | 互換性 |
 | --- | --- | --- | --- |
-| ISerializable | serialize を要求 | インターフェイスなし | △ |
-| IDeserializable | deserialize を要求 | インターフェイスなし | △ |
-| Ignore | 属性エイリアス（serdeIgnore 等） | ダミー using (int) のみ | △ |
-| Optional | 属性エイリアス（serdeOptional 等） | ダミー using (int) のみ | △ |
-| Name | 属性エイリアス（serdeName 等） | ダミー using (int) のみ | △ |
+| ISerializable | serialize を要求 | `ISerializable` を追加（`serialize(InochiSerializer&)`） | ◯ |
+| IDeserializable | deserialize を要求 | `IDeserializable<T>::deserialize(Fghj)` を追加 | ◯ |
+| Ignore | 属性エイリアス（serdeIgnore 等） | `Ignore` マーカー型を追加 | ◯ |
+| Optional | 属性エイリアス（serdeOptional 等） | `Optional` マーカー型を追加 | ◯ |
+| Name | 属性エイリアス（serdeName 等） | `Name{jsonKey, displayName}` マーカー型を追加 | ◯ |
 | `inLoadJsonData` | ファイルを読んで `deserialize!T(parseJson(...))` | Boost ptree で JSON 読み込み → `deserializeFromFghj` | ◯ |
 | `inLoadJsonDataFromMemory` | メモリ文字列からデシリアライズ | 同上 (ptree + deserializeFromFghj) | ◯ |
 | `inToJson` | JsonSerializer でシリアライズ | ptree に serialize() を流し write_json | ◯ |
 | `inToJsonPretty` | pretty 出力 | 同上 | ◯ |
 
-備考: fghj を ptree に置き換える前提の簡易実装だが、現行要件では許容。***
+備考: C++側はコンパイル時属性反映機構は持たないため、マーカーは互換表現（メタ情報）として実装。***
 

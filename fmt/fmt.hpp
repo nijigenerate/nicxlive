@@ -8,6 +8,7 @@
 #include "../utils/stb_image_write.h"
 #include <algorithm>
 #include <cstdint>
+#include <filesystem>
 #include <fstream>
 #include <optional>
 #include <stdexcept>
@@ -55,6 +56,7 @@ inline bool inIsINPMode() {
 // JSON-based load/save
 template <typename T>
 std::shared_ptr<T> inLoadJSONPuppet(const std::string& data) {
+    inpModeFlag() = false;
     return inLoadJsonDataFromMemory<T>(data);
 }
 
@@ -129,14 +131,24 @@ std::shared_ptr<T> inLoadPuppetFromMemory(const std::vector<uint8_t>& data) {
         }
     }
 
-    inpModeFlag() = false;
     return puppet;
 }
 
 template <typename T>
 std::shared_ptr<T> inLoadPuppet(const std::string& file) {
-    // For now route to JSON loader; INP binary loader is TODO.
-    return inLoadJsonData<T>(file);
+    std::ifstream ifs(file, std::ios::binary);
+    if (!ifs) {
+        throw std::runtime_error("Failed to open puppet file: " + file);
+    }
+    std::vector<uint8_t> buffer((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
+    const auto ext = std::filesystem::path(file).extension().string();
+    if (ext == ".inp" || ext == ".inx") {
+        if (!inVerifyMagicBytes(buffer)) {
+            throw std::runtime_error("Invalid data format for INP/INX puppet");
+        }
+        return inLoadPuppetFromMemory<T>(buffer);
+    }
+    throw std::runtime_error("Invalid file format for puppet: " + ext);
 }
 
 inline std::vector<uint8_t> inWriteINPPuppetMemory(const class Puppet& p) {
@@ -190,7 +202,6 @@ inline std::vector<uint8_t> inWriteINPPuppetMemory(const class Puppet& p) {
         }
     }
 
-    inpModeFlag() = false;
     return app;
 }
 

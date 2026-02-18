@@ -12,7 +12,6 @@ public:
     RenderGraphBuilder* renderGraph{nullptr};
     RenderBackend* renderBackend{nullptr};
     RenderGpuState gpuState{};
-    std::size_t frameId{0};
 };
 
 } // namespace nicxlive::core

@@ -7,7 +7,7 @@
 | struct `RenderGpuState` | framebuffer/drawBuffers/colorMask/blendEnabled | 同等フィールドを保持 | ◯ |
 | class `RenderBackend` | バックエンド実体（OpenGL/Queue等） | インターフェースを同等化（Mask/Composite/DrawPart含む） | ◯ |
 | class `RenderCommandEmitter.beginFrame` | backend/gpustateでフレーム開始 | state初期化＋キュークリア | ◯ |
-| class `RenderCommandEmitter.playback` | D には存在しない | QueueEmitterは記録済みキューを保持（Queue用途） | ✗（削除候補） |
+| class `RenderCommandEmitter.playback` | D には存在しない | 削除済み | ◯ |
 | class `RenderCommandEmitter.endFrame` | フレーム終了 | No-Op（Queue用途） | ◯ |
 | `beginMask` | マスク設定を発行 | 同等の記録を行う | ◯ |
 | `applyMask` | マスク設定を発行 | 同等の記録を行う | ◯ |
