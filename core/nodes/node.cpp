@@ -712,10 +712,7 @@ void Node::registerRenderTasks(core::TaskScheduler& scheduler) {
         if (!a && !b) return false;
         if (!a) return false;
         if (!b) return true;
-        const float az = a->zSort();
-        const float bz = b->zSort();
-        if (az == bz) return a->uuid < b->uuid;
-        return az > bz;
+        return a->zSort() > b->zSort();
     });
     for (auto& child : orderedChildren) {
         if (child) child->registerRenderTasks(scheduler);

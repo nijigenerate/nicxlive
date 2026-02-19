@@ -448,6 +448,25 @@ void Puppet::recordNodeChange(nodes::NotifyReason reason) {
             loadedRoot->finalize();
             root = loadedRoot;
         }
+        parameters.clear();
+        if (auto paramNode = data.get_child_optional("param")) {
+            for (const auto& child : *paramNode) {
+                auto p = std::make_shared<param::Parameter>();
+                if (!p) continue;
+                if (auto err = p->deserializeFromFghj(child.second)) {
+                    std::fprintf(stderr, "[nicxlive] puppet.deserialize param parse error: %s\n", err->c_str());
+                    continue;
+                }
+                parameters.push_back(p);
+            }
+            std::fprintf(stderr, "[nicxlive] puppet.deserialize params=%zu\n", parameters.size());
+        }
+        auto self = shared_from_this();
+        for (auto& p : parameters) {
+            if (!p) continue;
+            p->reconstruct(self);
+            p->finalize(self);
+        }
         rescanNodes();
     } catch (const std::exception& ex) {
         return std::string(ex.what());

@@ -621,22 +621,38 @@ public:
     }
 };
 
-inline std::shared_ptr<ParameterBinding> Parameter::getBinding(const std::shared_ptr<Node>& /*self*/, const std::string& key) const {
-    auto it = bindingMap.find(key);
-    if (it != bindingMap.end()) return it->second;
+inline std::shared_ptr<ParameterBinding> Parameter::getBinding(const std::shared_ptr<Node>& self, const std::string& key) const {
+    const auto selfUuid = self ? self->uuid : 0u;
+    for (const auto& kv : bindingMap) {
+        const auto& b = kv.second;
+        if (!b) continue;
+        if (b->getName() != key) continue;
+        auto bt = b->getTarget();
+        if (selfUuid != 0 && bt.uuid != selfUuid) continue;
+        return b;
+    }
     return nullptr;
 }
 
 inline std::shared_ptr<ParameterBinding> Parameter::getOrAddBinding(const std::shared_ptr<Node>& target, const std::string& key) {
-    auto it = bindingMap.find(key);
-    if (it != bindingMap.end()) return it->second;
+    const auto targetUuid = target ? target->uuid : 0u;
+    for (const auto& kv : bindingMap) {
+        const auto& b = kv.second;
+        if (!b) continue;
+        auto bt = b->getTarget();
+        if (bt.uuid == targetUuid && bt.name == key) return b;
+    }
+
+    auto makeMapKey = [&](const std::string& name) {
+        return std::to_string(targetUuid) + ":" + name + ":" + std::to_string(bindingMap.size());
+    };
     if (key == "deform") {
         auto b = std::make_shared<DeformationParameterBinding>(this, target, key);
-        bindingMap[key] = b;
+        bindingMap[makeMapKey(key)] = b;
         return b;
     } else {
         auto b = std::make_shared<ValueParameterBinding>(this, target, key);
-        bindingMap[key] = b;
+        bindingMap[makeMapKey(key)] = b;
         return b;
     }
 }
@@ -652,6 +668,101 @@ inline void Parameter::removeBinding(const std::shared_ptr<ParameterBinding>& bi
 
 inline void Parameter::makeIndexable() {
     indexableName = name;
+}
+
+inline ::nicxlive::core::serde::SerdeException Parameter::deserializeFromFghj(const ::nicxlive::core::serde::Fghj& data) {
+    auto readVec2 = [](const ::nicxlive::core::serde::Fghj& node, Vec2& out) {
+        if (node.empty()) return;
+        std::size_t i = 0;
+        for (const auto& elem : node) {
+            float v = elem.second.get_value<float>();
+            if (i == 0) out.x = v;
+            else if (i == 1) out.y = v;
+            ++i;
+            if (i >= 2) break;
+        }
+    };
+
+    try {
+        if (auto u = data.get_optional<uint32_t>("uuid")) uuid = *u;
+        if (auto n = data.get_optional<std::string>("name")) name = *n;
+        if (auto vec2 = data.get_optional<bool>("is_vec2")) isVec2 = *vec2;
+        if (auto d = data.get_child_optional("defaults")) readVec2(*d, defaults);
+        if (auto mn = data.get_child_optional("min")) readVec2(*mn, min);
+        if (auto mx = data.get_child_optional("max")) readVec2(*mx, max);
+
+        if (auto mode = data.get_optional<std::string>("merge_mode")) {
+            if (*mode == "Additive") mergeMode = ParamMergeMode::Additive;
+            else if (*mode == "Weighted") mergeMode = ParamMergeMode::Weighted;
+            else if (*mode == "Multiplicative") mergeMode = ParamMergeMode::Multiplicative;
+            else if (*mode == "Forced") mergeMode = ParamMergeMode::Forced;
+            else mergeMode = ParamMergeMode::Passthrough;
+        }
+
+        if (auto points = data.get_child_optional("axis_points")) {
+            axisPoints[0].clear();
+            axisPoints[1].clear();
+            std::size_t axis = 0;
+            for (const auto& axisNode : *points) {
+                if (axis > 1) break;
+                for (const auto& valNode : axisNode.second) {
+                    axisPoints[axis].push_back(valNode.second.get_value<float>());
+                }
+                ++axis;
+            }
+            if (axisPoints[0].empty()) axisPoints[0] = {0.0f, 1.0f};
+            if (!isVec2 || axisPoints[1].empty()) axisPoints[1] = {0.0f};
+        }
+
+        bindingMap.clear();
+        if (auto bindings = data.get_child_optional("bindings")) {
+            for (const auto& bindingNode : *bindings) {
+                const auto& child = bindingNode.second;
+                auto paramName = child.get<std::string>("param_name", "");
+                if (paramName.empty()) continue;
+                int paramId = child.get<int>("param_name", -1);
+
+                std::shared_ptr<ParameterBinding> binding;
+                if (paramName == "deform") {
+                    binding = std::make_shared<DeformationParameterBinding>(this);
+                } else {
+                    binding = std::make_shared<ValueParameterBinding>(this);
+                }
+                if (!binding) continue;
+                if (auto err = binding->deserializeFromFghj(child)) return err;
+                auto t = binding->getTarget();
+                auto mapKey = std::to_string(t.uuid) + ":" + binding->getName() + ":" + std::to_string(bindingMap.size());
+                bindingMap[mapKey] = binding;
+            }
+        }
+    } catch (const std::exception& ex) {
+        return std::string(ex.what());
+    }
+    return std::nullopt;
+}
+
+inline void Parameter::reconstruct(const std::shared_ptr<::nicxlive::core::Puppet>& puppet) {
+    for (auto& kv : bindingMap) {
+        if (kv.second) kv.second->reconstruct(puppet);
+    }
+}
+
+inline void Parameter::finalize(const std::shared_ptr<::nicxlive::core::Puppet>& puppet) {
+    makeIndexable();
+    value = defaults;
+
+    std::map<std::string, std::shared_ptr<ParameterBinding>> valid;
+    for (auto& kv : bindingMap) {
+        auto& b = kv.second;
+        if (!b) continue;
+        auto targetUuid = b->getNodeUUID();
+        if (targetUuid == 0) continue;
+        if (::nicxlive::core::resolvePuppetNodeById(puppet, targetUuid)) {
+            b->finalize(puppet);
+            valid.emplace(kv.first, b);
+        }
+    }
+    bindingMap.swap(valid);
 }
 
 inline void Parameter::update() {

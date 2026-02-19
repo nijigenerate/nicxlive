@@ -64,10 +64,6 @@ std::size_t RenderGraphBuilder::pushDynamicComposite(const std::shared_ptr<nodes
     pass.nextSequence = 0;
     pass.dynamicPostCommands = nullptr;
     passStack_.push_back(pass);
-    if (auto c = composite) {
-        c->dynamicScopeActive = true;
-        c->dynamicScopeToken = pass.token;
-    }
     return pass.token;
 }
 
@@ -154,12 +150,6 @@ void RenderGraphBuilder::finalizeDynamicCompositePass(bool autoClose, RenderComm
     auto dynamicNode = pass.projectable.lock();
     auto passData = pass.dynamicPass;
     auto finalizer = postCommands ? postCommands : pass.dynamicPostCommands;
-    if (!finalizer && autoClose && dynamicNode) {
-        // D parity: even auto-closed dynamic scopes should still draw their composed surface.
-        finalizer = [dynamicNode](RenderCommandEmitter& emitter) {
-            emitter.drawPart(dynamicNode, false);
-        };
-    }
     std::fprintf(stderr, "[nicxlive] graph finalize dyn token=%llu z=%.6f autoClose=%d hasFinalizer=%d childItems=%llu stencil=%u\n",
                  static_cast<unsigned long long>(pass.token),
                  pass.scopeZSort,

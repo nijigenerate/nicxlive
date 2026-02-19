@@ -535,8 +535,41 @@ void Projectable::dynamicRenderBegin(core::RenderContext& ctx) {
         loggedFirstRenderAttempt = true;
         return;
     }
+    dynamicScopeToken = ctx.renderGraph->pushDynamicComposite(std::dynamic_pointer_cast<Projectable>(shared_from_this()), pass, zSort());
+    if (gProjectablePushLogs < 32) {
+        auto p = parentPtr();
+        std::fprintf(stderr, "[nicxlive] push dyn uuid=%u parent=%u z=%.6f base=%.6f rel=%.6f off=%.6f token=%zu\n",
+                     uuid, p ? p->uuid : 0u, zSort(), zSortBase(), relZSort(), offsetSort, dynamicScopeToken);
+        ++gProjectablePushLogs;
+    }
+    dynamicScopeActive = true;
 
-    enqueueRenderCommands(ctx);
+    Mat4 translate = Mat4::translation(Vec3{-textureOffset.x, -textureOffset.y, 0});
+    Mat4 correction = Mat4::multiply(fullTransformMatrix(), Mat4::inverse(transform().toMat4()));
+    Mat4 childBasis = Mat4::multiply(translate, Mat4::inverse(transform().toMat4()));
+    queuedOffscreenParts.clear();
+
+    for (auto& p : subParts) {
+        if (!p) continue;
+        if (std::dynamic_pointer_cast<Mask>(p)) continue;
+        Mat4 childMatrix = Mat4::multiply(correction, p->transform().toMat4());
+        Mat4 finalMatrix = Mat4::multiply(childBasis, childMatrix);
+        p->setOffscreenModelMatrix(finalMatrix);
+        if (auto dynChild = std::dynamic_pointer_cast<Projectable>(p)) {
+            dynChild->renderNestedOffscreen(ctx);
+        } else {
+            p->enqueueRenderCommands(ctx);
+        }
+        queuedOffscreenParts.push_back(p);
+    }
+    for (auto& m : maskParts) {
+        if (!m) continue;
+        Mat4 maskMatrix = Mat4::multiply(correction, m->transform().toMat4());
+        Mat4 finalMatrix = Mat4::multiply(translate, maskMatrix);
+        m->setOffscreenModelMatrix(finalMatrix);
+        m->enqueueRenderCommands(ctx);
+        queuedOffscreenParts.push_back(m);
+    }
 }
 
 void Projectable::dynamicRenderEnd(core::RenderContext& ctx) {
@@ -588,19 +621,12 @@ void Projectable::dynamicRenderEnd(core::RenderContext& ctx) {
         });
     } else {
         auto cleanupParts = queuedOffscreenParts;
-        if (cleanupParts.empty()) {
-            Part::enqueueRenderCommands(ctx, [cleanupParts](core::RenderCommandEmitter&) {
-                for (auto& part : cleanupParts) {
-                    if (auto p = std::dynamic_pointer_cast<Part>(part)) p->clearOffscreenModelMatrix();
-                    else if (auto m = std::dynamic_pointer_cast<Mask>(part)) m->clearOffscreenModelMatrix();
-                }
-            });
-        } else {
+        Part::enqueueRenderCommands(ctx, [cleanupParts](core::RenderCommandEmitter&) {
             for (auto& part : cleanupParts) {
                 if (auto p = std::dynamic_pointer_cast<Part>(part)) p->clearOffscreenModelMatrix();
                 else if (auto m = std::dynamic_pointer_cast<Mask>(part)) m->clearOffscreenModelMatrix();
             }
-        }
+        });
     }
 
     reuseCachedTextureThisFrame = false;
@@ -636,7 +662,7 @@ void Projectable::registerRenderTasks(core::TaskScheduler& scheduler) {
     scheduler.addTask(core::TaskOrder::Final, core::TaskKind::Finalize, [this](core::RenderContext& ctx) { runFinalTask(ctx); });
 
     auto orderedChildren = childrenRef();
-    std::stable_sort(orderedChildren.begin(), orderedChildren.end(), [](const std::shared_ptr<Node>& a, const std::shared_ptr<Node>& b) {
+    std::sort(orderedChildren.begin(), orderedChildren.end(), [](const std::shared_ptr<Node>& a, const std::shared_ptr<Node>& b) {
         if (!a || !b) return false;
         return a->zSort() > b->zSort();
     });

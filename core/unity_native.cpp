@@ -4,6 +4,7 @@
 
 #include <mutex>
 #include <unordered_map>
+#include <unordered_set>
 #include <algorithm>
 #include <exception>
 #include <string>
@@ -41,7 +42,10 @@ struct RendererCtx {
     std::vector<float> packedDeform{};
     std::vector<NjgQueuedCommand> queued{};
     std::vector<void*> puppetHandles{};
-    std::unordered_map<uint32_t, size_t> externalTextureHandles{};
+    // Runtime texture UUIDs (loaded from puppet slots) -> Unity texture handles
+    std::unordered_map<uint32_t, size_t> runtimeTextureHandles{};
+    // Queue backend texture IDs (including dynamic RT/stencil) -> Unity texture handles
+    std::unordered_map<uint32_t, size_t> backendTextureHandles{};
     size_t renderHandle{0};
     size_t compositeHandle{0};
     int lastViewportW{0};
@@ -98,32 +102,21 @@ static void applyTextureCommands(RendererCtx& ctx) {
     for (const auto& rc : ctx.backend->resourceQueue) {
         switch (rc.kind) {
         case TextureCommandKind::Create: {
-            if (!ctx.callbacks.createTexture) break;
-            size_t handle = ctx.callbacks.createTexture(rc.width, rc.height, rc.inChannels, 1, rc.outChannels,
-                                                        /*renderTarget*/ false, rc.stencil, ctx.callbacks.userData);
-            ctx.externalTextureHandles[rc.id] = handle;
-            ctx.stats.created++;
-            ctx.stats.current++;
             break;
         }
         case TextureCommandKind::Update: {
-            auto it = ctx.externalTextureHandles.find(rc.id);
-            if (it == ctx.externalTextureHandles.end()) break;
-            if (ctx.callbacks.updateTexture) {
-                ctx.callbacks.updateTexture(it->second, rc.data.data(), rc.data.size(), rc.width, rc.height, rc.inChannels, ctx.callbacks.userData);
-            }
             break;
         }
         case TextureCommandKind::Params:
             // Unity側でのパラメータ設定�EAPIがなぁE��め無要E
             break;
         case TextureCommandKind::Dispose: {
-            auto it = ctx.externalTextureHandles.find(rc.id);
-            if (it != ctx.externalTextureHandles.end()) {
+            auto it = ctx.backendTextureHandles.find(rc.id);
+            if (it != ctx.backendTextureHandles.end()) {
                 if (ctx.callbacks.releaseTexture) {
                     ctx.callbacks.releaseTexture(it->second, ctx.callbacks.userData);
                 }
-                ctx.externalTextureHandles.erase(it);
+                ctx.backendTextureHandles.erase(it);
                 ctx.stats.released++;
                 if (ctx.stats.current > 0) ctx.stats.current--;
             }
@@ -140,11 +133,11 @@ static void ensurePuppetTextures(RendererCtx& ctx, const std::shared_ptr<Puppet>
         if (!tex) continue;
         uint32_t uuid = tex->getRuntimeUUID();
         if (uuid == 0) continue;
-        if (ctx.externalTextureHandles.find(uuid) != ctx.externalTextureHandles.end()) continue;
+        if (ctx.runtimeTextureHandles.find(uuid) != ctx.runtimeTextureHandles.end()) continue;
         size_t handle = ctx.callbacks.createTexture(tex->width(), tex->height(), tex->channels(), 1, tex->channels(),
                                                     /*renderTarget*/ false, tex->stencil(), ctx.callbacks.userData);
         if (handle != 0) {
-            ctx.externalTextureHandles[uuid] = handle;
+            ctx.runtimeTextureHandles[uuid] = handle;
             const auto& data = tex->data();
             if (!data.empty() && ctx.callbacks.updateTexture) {
                 ctx.callbacks.updateTexture(handle, data.data(), data.size(), tex->width(), tex->height(), tex->channels(), ctx.callbacks.userData);
@@ -160,8 +153,8 @@ static size_t ensureDynamicTextureHandle(RendererCtx& ctx, const std::shared_ptr
     const uint32_t backendId = tex->backendId();
     if (backendId == 0) return 0;
 
-    auto found = ctx.externalTextureHandles.find(backendId);
-    if (found != ctx.externalTextureHandles.end()) {
+    auto found = ctx.backendTextureHandles.find(backendId);
+    if (found != ctx.backendTextureHandles.end()) {
         return found->second;
     }
 
@@ -177,7 +170,7 @@ static size_t ensureDynamicTextureHandle(RendererCtx& ctx, const std::shared_ptr
         return backendId;
     }
 
-    ctx.externalTextureHandles[backendId] = handle;
+    ctx.backendTextureHandles[backendId] = handle;
     ctx.stats.created++;
     ctx.stats.current++;
 
@@ -205,10 +198,10 @@ static void releasePuppetTextures(RendererCtx& ctx, const std::shared_ptr<Puppet
         if (!tex) continue;
         uint32_t uuid = tex->getRuntimeUUID();
         if (uuid == 0) continue;
-        auto it = ctx.externalTextureHandles.find(uuid);
-        if (it != ctx.externalTextureHandles.end()) {
+        auto it = ctx.runtimeTextureHandles.find(uuid);
+        if (it != ctx.runtimeTextureHandles.end()) {
             releaseExternalTexture(ctx, it->second);
-            ctx.externalTextureHandles.erase(it);
+            ctx.runtimeTextureHandles.erase(it);
         }
     }
 }
@@ -278,12 +271,15 @@ static void packQueuedCommands(RendererCtx& ctx) {
             out.partPacket.vertexCount = pp.vertexCount;
             out.partPacket.indices = pp.indices.empty() ? nullptr : pp.indices.data();
         }
-        size_t texCount = 0;
-        for (auto t : pp.textureUUIDs) {
-            if (t != 0 && texCount < 3) {
-                auto hit = ctx.externalTextureHandles.find(t);
-                out.partPacket.textureHandles[texCount++] = (hit != ctx.externalTextureHandles.end()) ? hit->second : t;
+        const size_t texCount = (qc.kind == RenderCommandKind::DrawPart || qc.kind == RenderCommandKind::DrawMask) ? 3 : 0;
+        for (size_t ti = 0; ti < texCount; ++ti) {
+            const auto t = pp.textureUUIDs[ti];
+            if (t == 0) {
+                out.partPacket.textureHandles[ti] = 0;
+                continue;
             }
+            auto hit = ctx.runtimeTextureHandles.find(t);
+            out.partPacket.textureHandles[ti] = (hit != ctx.runtimeTextureHandles.end()) ? hit->second : t;
         }
         out.partPacket.textureCount = texCount;
 
@@ -424,11 +420,20 @@ void njgDestroyRenderer(void* renderer) {
         // release RTs
         releaseExternalTexture(*it->second, it->second->renderHandle);
         releaseExternalTexture(*it->second, it->second->compositeHandle);
-        // release remaining external textures
-        for (auto& kv : it->second->externalTextureHandles) {
-            releaseExternalTexture(*it->second, kv.second);
+        // release remaining external textures (dedup handles shared across maps)
+        std::unordered_set<size_t> released{};
+        for (const auto& kv : it->second->runtimeTextureHandles) {
+            if (kv.second != 0 && released.insert(kv.second).second) {
+                releaseExternalTexture(*it->second, kv.second);
+            }
         }
-        it->second->externalTextureHandles.clear();
+        for (const auto& kv : it->second->backendTextureHandles) {
+            if (kv.second != 0 && released.insert(kv.second).second) {
+                releaseExternalTexture(*it->second, kv.second);
+            }
+        }
+        it->second->runtimeTextureHandles.clear();
+        it->second->backendTextureHandles.clear();
         it->second->animationStates.clear();
         gRenderers.erase(it);
     }
@@ -925,4 +930,3 @@ TextureStats njgGetTextureStats(void* renderer) {
 }
 
 } // extern "C"
-

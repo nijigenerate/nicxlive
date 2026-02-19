@@ -8,8 +8,8 @@ namespace nicxlive::core {
 
 TaskScheduler::TaskScheduler() {
     orderSequence_ = {TaskOrder::Init, TaskOrder::Parameters, TaskOrder::PreProcess, TaskOrder::Dynamic,
-                      TaskOrder::Post0, TaskOrder::Post1, TaskOrder::Post2, TaskOrder::RenderBegin,
-                      TaskOrder::Render, TaskOrder::RenderEnd, TaskOrder::Final};
+                      TaskOrder::Post0, TaskOrder::Post1, TaskOrder::Post2, TaskOrder::Final,
+                      TaskOrder::RenderBegin, TaskOrder::Render, TaskOrder::RenderEnd};
     for (auto order : orderSequence_) queues_[order] = {};
 }
 

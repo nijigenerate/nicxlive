@@ -197,6 +197,9 @@ public:
     void removeBinding(const std::shared_ptr<ParameterBinding>& binding);
     void makeIndexable();
     void update();
+    ::nicxlive::core::serde::SerdeException deserializeFromFghj(const ::nicxlive::core::serde::Fghj& data);
+    void reconstruct(const std::shared_ptr<::nicxlive::core::Puppet>& puppet);
+    void finalize(const std::shared_ptr<::nicxlive::core::Puppet>& puppet);
 };
 
 

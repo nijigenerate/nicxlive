@@ -90,21 +90,38 @@ void QueueCommandEmitter::drawPartPacket(const nodes::PartDrawPacket& packet) {
     QueuedCommand cmd{};
     cmd.kind = RenderCommandKind::DrawPart;
     cmd.partPacket = packet;
-    if (backend_) backend_->queue.push_back(std::move(cmd));
+    if (backend_) {
+        if (packet.vertexOffset == 1621 || packet.vertexOffset == 1563 || packet.vertexOffset == 1504) {
+            std::fprintf(stderr, "[nicxlive] emit push idx=%zu kind=DrawPart vo=%u\n",
+                         backend_->queue.size(),
+                         packet.vertexOffset);
+        }
+        backend_->queue.push_back(std::move(cmd));
+    }
 }
 
 void QueueCommandEmitter::beginDynamicComposite(const std::shared_ptr<nodes::Projectable>&, const DynamicCompositePass& pass) {
     QueuedCommand cmd{};
     cmd.kind = RenderCommandKind::BeginDynamicComposite;
     cmd.dynamicPass = pass;
-    if (backend_) backend_->queue.push_back(std::move(cmd));
+    if (backend_) {
+        std::fprintf(stderr, "[nicxlive] emit push idx=%zu kind=BeginDynamicComposite stencil=%u\n",
+                     backend_->queue.size(),
+                     pass.stencil ? pass.stencil->backendId() : 0u);
+        backend_->queue.push_back(std::move(cmd));
+    }
 }
 
 void QueueCommandEmitter::endDynamicComposite(const std::shared_ptr<nodes::Projectable>&, const DynamicCompositePass& pass) {
     QueuedCommand cmd{};
     cmd.kind = RenderCommandKind::EndDynamicComposite;
     cmd.dynamicPass = pass;
-    if (backend_) backend_->queue.push_back(std::move(cmd));
+    if (backend_) {
+        std::fprintf(stderr, "[nicxlive] emit push idx=%zu kind=EndDynamicComposite stencil=%u\n",
+                     backend_->queue.size(),
+                     pass.stencil ? pass.stencil->backendId() : 0u);
+        backend_->queue.push_back(std::move(cmd));
+    }
 }
 
 bool QueueCommandEmitter::tryMakeMaskApplyPacket(const std::shared_ptr<nodes::Drawable>& drawable, bool isDodge, RenderBackend::MaskApplyPacket& packet) {
