@@ -60,12 +60,33 @@ struct SharedVecAtlas {
     }
 
     std::size_t stride() const { return storage.size(); }
-    Vec2Array& data() { return storage; }
+    Vec2Array& data() {
+        syncInPlace();
+        return storage;
+    }
     bool isDirty() const { return dirty; }
     void markDirty() { dirty = true; }
     void markUploaded() { dirty = false; }
 
 private:
+    void syncInPlace() {
+        for (const auto& binding : bindings) {
+            auto len = binding.length;
+            if (len == 0) continue;
+            auto copyLen = std::min(len, binding.target->size());
+            for (std::size_t i = 0; i < copyLen; ++i) {
+                storage.x[binding.offset + i] = binding.target->x[i];
+                storage.y[binding.offset + i] = binding.target->y[i];
+            }
+            if (copyLen < len) {
+                std::fill(storage.x.begin() + static_cast<std::ptrdiff_t>(binding.offset + copyLen),
+                          storage.x.begin() + static_cast<std::ptrdiff_t>(binding.offset + len), 0.0f);
+                std::fill(storage.y.begin() + static_cast<std::ptrdiff_t>(binding.offset + copyLen),
+                          storage.y.begin() + static_cast<std::ptrdiff_t>(binding.offset + len), 0.0f);
+            }
+        }
+    }
+
     void rebuild() {
         std::size_t total = 0;
         for (const auto& binding : bindings) total += binding.length;

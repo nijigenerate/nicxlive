@@ -95,26 +95,61 @@ struct Transform {
     }
 
     void serialize(::nicxlive::core::serde::InochiSerializer& serializer) const {
-        serializer.putKey("trans.x"); serializer.putValue(translation.x);
-        serializer.putKey("trans.y"); serializer.putValue(translation.y);
-        serializer.putKey("trans.z"); serializer.putValue(translation.z);
-        serializer.putKey("rot.x"); serializer.putValue(rotation.x);
-        serializer.putKey("rot.y"); serializer.putValue(rotation.y);
-        serializer.putKey("rot.z"); serializer.putValue(rotation.z);
-        serializer.putKey("scale.x"); serializer.putValue(scale.x);
-        serializer.putKey("scale.y"); serializer.putValue(scale.y);
+        auto writeVec = [&](const char* key, const float* src, std::size_t n) {
+            boost::property_tree::ptree arr;
+            for (std::size_t i = 0; i < n; ++i) {
+                boost::property_tree::ptree v;
+                v.put("", src[i]);
+                arr.push_back({"", v});
+            }
+            serializer.root.add_child(key, arr);
+        };
+        const float trans[3]{translation.x, translation.y, translation.z};
+        const float rot[3]{rotation.x, rotation.y, rotation.z};
+        const float scl[2]{scale.x, scale.y};
+        writeVec("trans", trans, 3);
+        writeVec("rot", rot, 3);
+        writeVec("scale", scl, 2);
     }
 
     ::nicxlive::core::serde::SerdeException deserializeFromFghj(const ::nicxlive::core::serde::Fghj& data) {
         try {
-            translation.x = data.get<float>("trans.x", translation.x);
-            translation.y = data.get<float>("trans.y", translation.y);
-            translation.z = data.get<float>("trans.z", translation.z);
-            rotation.x = data.get<float>("rot.x", rotation.x);
-            rotation.y = data.get<float>("rot.y", rotation.y);
-            rotation.z = data.get<float>("rot.z", rotation.z);
-            scale.x = data.get<float>("scale.x", scale.x);
-            scale.y = data.get<float>("scale.y", scale.y);
+            auto readVec = [](const ::nicxlive::core::serde::Fghj& node, float* dst, std::size_t n) {
+                std::size_t i = 0;
+                for (const auto& elem : node) {
+                    if (i >= n) break;
+                    dst[i++] = elem.second.get_value<float>();
+                }
+            };
+
+            if (auto trans = data.get_child_optional("trans")) {
+                float dst[3]{translation.x, translation.y, translation.z};
+                readVec(*trans, dst, 3);
+                translation = Vec3{dst[0], dst[1], dst[2]};
+            } else {
+                translation.x = data.get<float>("trans.x", translation.x);
+                translation.y = data.get<float>("trans.y", translation.y);
+                translation.z = data.get<float>("trans.z", translation.z);
+            }
+
+            if (auto rot = data.get_child_optional("rot")) {
+                float dst[3]{rotation.x, rotation.y, rotation.z};
+                readVec(*rot, dst, 3);
+                rotation = Vec3{dst[0], dst[1], dst[2]};
+            } else {
+                rotation.x = data.get<float>("rot.x", rotation.x);
+                rotation.y = data.get<float>("rot.y", rotation.y);
+                rotation.z = data.get<float>("rot.z", rotation.z);
+            }
+
+            if (auto scl = data.get_child_optional("scale")) {
+                float dst[2]{scale.x, scale.y};
+                readVec(*scl, dst, 2);
+                scale = Vec2{dst[0], dst[1]};
+            } else {
+                scale.x = data.get<float>("scale.x", scale.x);
+                scale.y = data.get<float>("scale.y", scale.y);
+            }
             update();
         } catch (const std::exception& e) {
             return std::string(e.what());
@@ -125,7 +160,7 @@ struct Transform {
     Transform operator*(const Transform& other) const {
         Transform tnew;
         Mat4 strs = Mat4::multiply(other.trs, trs);
-        tnew.translation = Vec3{strs.a.a[0][3], strs.a.a[1][3], strs.a.a[2][3]};
+        tnew.translation = strs.transformPoint(Vec3{1.0f, 1.0f, 1.0f});
         tnew.rotation = Vec3{rotation.x + other.rotation.x,
                              rotation.y + other.rotation.y,
                              rotation.z + other.rotation.z};
