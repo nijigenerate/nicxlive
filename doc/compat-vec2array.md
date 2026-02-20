@@ -15,6 +15,8 @@
 | `toArrayInto` | AoS 配列化 | 実装あり | ◯ |
 | `rawStorage` | 外部バッファ参照取得 | 非オーナービュー対応 | ◯ |
 | `bindExternalStorage` | 外部バッファビューを構築 | 長さチェックあり | ◯ |
+| コピー構築/コピー代入 | 値型（レーン実体を複製） | `Vec2Array/Vec3Array/Vec4Array` で copy ctor/copy assign を明示実装し、内部ポインタ再同期込みで値コピー | ◯ |
+| `copyFrom` 初期化 | コピー前に内部状態を一貫初期化 | `logicalLength_` を含む状態初期化を実装し、`ensureLength` 早期 return による不正ポインタ書き込みを解消 | ◯ |
 | `front` mutable | vecv を返す | Vec2View | ◯ |
 | `front` const | vecvConst を返す | Vec2ViewConst | ◯ |
 | `back` mutable | vecv を返す | Vec2View | ◯ |

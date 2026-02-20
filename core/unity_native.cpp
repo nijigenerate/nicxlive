@@ -244,7 +244,7 @@ static void packQueuedCommands(RendererCtx& ctx) {
         out.partPacket.isMask = pp.isMask;
         out.partPacket.renderable = pp.renderable;
         out.partPacket.modelMatrix = pp.modelMatrix;
-        out.partPacket.renderMatrix = pp.puppetMatrix;
+        out.partPacket.renderMatrix = ::nicxlive::core::inGetCamera().matrix() * pp.puppetMatrix;
         out.partPacket.renderRotation = 0.0f;
         out.partPacket.clampedTint = pp.clampedTint;
         out.partPacket.clampedScreen = pp.clampedScreen;
@@ -930,3 +930,6 @@ TextureStats njgGetTextureStats(void* renderer) {
 }
 
 } // extern "C"
+
+
+

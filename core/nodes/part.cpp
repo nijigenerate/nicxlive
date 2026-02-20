@@ -597,6 +597,10 @@ void Part::fillDrawPacket(const Node& header, PartDrawPacket& packet, bool isMas
     packet.uvs = mesh->uvs;
     packet.indices = mesh->indices;
     packet.deformation = deformation;
+    if (packet.vertexOffset == 1947 && packet.deformation.size() > 0) {
+        std::fprintf(stderr, "[nicxlive] dbg vo=1947 uuid=%u name=%s deform0=(%g,%g)\n",
+                     uuid, name.c_str(), packet.deformation.x[0], packet.deformation.y[0]);
+    }
     packet.node = std::dynamic_pointer_cast<Part>(const_cast<Part*>(this)->shared_from_this());
 }
 

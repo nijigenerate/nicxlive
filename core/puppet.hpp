@@ -93,6 +93,7 @@ public:
     // rendering
     void draw();
     void drawImmediateFallback();
+    void applyDeformToChildren();
     void rescanNodes();
     void updateTextureState();
     RenderCommandEmitter* commandEmitter();

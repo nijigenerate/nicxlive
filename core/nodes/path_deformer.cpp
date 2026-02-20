@@ -1128,23 +1128,12 @@ void PathDeformer::applyDeformToChildren(const std::vector<std::shared_ptr<core:
                 if (!param) continue;
                 auto binding = std::dynamic_pointer_cast<core::param::DeformationParameterBinding>(param->getBinding(c, "deform"));
                 if (!binding) continue;
-                uint32_t xCount = param->axisPointCount(0);
-                uint32_t yCount = param->axisPointCount(1);
-                if (yCount == 0) yCount = 1;
-                core::param::Vec2u idx{0, 0};
-                bool found = false;
-                for (uint32_t x = 0; x < std::max<uint32_t>(1, xCount); ++x) {
-                    for (uint32_t y = 0; y < std::max<uint32_t>(1, yCount); ++y) {
-                        core::param::Vec2u id{x, y};
-                        if (binding->isSetAt(id)) { idx = id; found = true; break; }
-                    }
-                    if (found) break;
-                }
-                if (found) {
-                    auto slot = binding->valueAt(idx);
-                    if (slot.vertexOffsets.size() == deformable->deformation.size()) {
-                        deformable->deformation = slot.vertexOffsets;
-                    }
+                core::param::Vec2u left{};
+                Vec2 sub{};
+                param->findOffset(param->value, left, sub);
+                auto slot = binding->sample(left, sub);
+                if (slot.vertexOffsets.size() == deformable->deformation.size()) {
+                    deformable->deformation = slot.vertexOffsets;
                 }
             }
             auto m = c->transform().toMat4();

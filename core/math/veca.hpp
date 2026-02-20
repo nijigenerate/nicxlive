@@ -38,6 +38,14 @@ struct Vec2Array {
     mutable std::vector<float> backing_{};
 
     Vec2Array() = default;
+    Vec2Array(const Vec2Array& rhs) { copyFrom(rhs); }
+    Vec2Array& operator=(const Vec2Array& rhs) {
+        if (this == &rhs) return *this;
+        copyFrom(rhs);
+        return *this;
+    }
+    Vec2Array(Vec2Array&&) noexcept = default;
+    Vec2Array& operator=(Vec2Array&&) noexcept = default;
     explicit Vec2Array(std::size_t n) { ensureLength(n); }
     Vec2Array(std::initializer_list<Vec2> init) { assign(std::vector<Vec2>(init)); }
     explicit Vec2Array(const Vec2& v) { ensureLength(1); xPtr_[0] = v.x; yPtr_[0] = v.y; }
@@ -136,8 +144,14 @@ struct Vec2Array {
             yPtr_[i] = source[i].y;
         }
     }
-    void operator=(const Vec2Array& rhs) { copyFrom(rhs); }
     void copyFrom(const Vec2Array& rhs) {
+        ownsStorage_ = true;
+        xPtr_ = nullptr;
+        yPtr_ = nullptr;
+        logicalLength_ = 0;
+        laneStride_ = 0;
+        laneBase_ = 0;
+        viewCapacity_ = 0;
         ensureLength(rhs.size());
         if (rhs.size() == 0) return;
         for (std::size_t i = 0; i < rhs.size(); ++i) {
@@ -457,6 +471,14 @@ struct Vec3Array {
     mutable std::vector<float> rawCache_{};
 
     Vec3Array() = default;
+    Vec3Array(const Vec3Array& rhs) { copyFrom(rhs); }
+    Vec3Array& operator=(const Vec3Array& rhs) {
+        if (this == &rhs) return *this;
+        copyFrom(rhs);
+        return *this;
+    }
+    Vec3Array(Vec3Array&&) noexcept = default;
+    Vec3Array& operator=(Vec3Array&&) noexcept = default;
     explicit Vec3Array(std::size_t n) { ensureLength(n); }
     Vec3Array(std::initializer_list<Vec3> init) { assign(std::vector<Vec3>(init)); }
 
@@ -562,8 +584,15 @@ struct Vec3Array {
             zPtr_[i] = source[i].z;
         }
     }
-    void operator=(const Vec3Array& rhs) { copyFrom(rhs); }
     void copyFrom(const Vec3Array& rhs) {
+        ownsStorage_ = true;
+        xPtr_ = nullptr;
+        yPtr_ = nullptr;
+        zPtr_ = nullptr;
+        logicalLength_ = 0;
+        laneStride_ = 0;
+        laneBase_ = 0;
+        viewCapacity_ = 0;
         ensureLength(rhs.size());
         if (rhs.size() == 0) return;
         for (std::size_t i = 0; i < rhs.size(); ++i) {
@@ -707,6 +736,14 @@ struct Vec4Array {
     bool ownsStorage_{true};
 
     Vec4Array() = default;
+    Vec4Array(const Vec4Array& rhs) { copyFrom(rhs); }
+    Vec4Array& operator=(const Vec4Array& rhs) {
+        if (this == &rhs) return *this;
+        copyFrom(rhs);
+        return *this;
+    }
+    Vec4Array(Vec4Array&&) noexcept = default;
+    Vec4Array& operator=(Vec4Array&&) noexcept = default;
     explicit Vec4Array(std::size_t n) { ensureLength(n); }
     Vec4Array(std::initializer_list<Vec4> init) { assign(std::vector<Vec4>(init)); }
 
@@ -819,8 +856,16 @@ struct Vec4Array {
             wPtr_[i] = source[i].w;
         }
     }
-    void operator=(const Vec4Array& rhs) { copyFrom(rhs); }
     void copyFrom(const Vec4Array& rhs) {
+        ownsStorage_ = true;
+        xPtr_ = nullptr;
+        yPtr_ = nullptr;
+        zPtr_ = nullptr;
+        wPtr_ = nullptr;
+        logicalLength_ = 0;
+        laneStride_ = 0;
+        laneBase_ = 0;
+        viewCapacity_ = 0;
         ensureLength(rhs.size());
         if (rhs.size() == 0) return;
         for (std::size_t i = 0; i < rhs.size(); ++i) {

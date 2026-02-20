@@ -6,8 +6,10 @@
 #include "nodes/projectable.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <limits>
+#include <map>
 
 namespace nicxlive::core {
 
@@ -268,6 +270,20 @@ void Puppet::drawImmediateFallback() {
     }
 }
 
+void Puppet::applyDeformToChildren() {
+    if (!root) return;
+    std::function<void(const std::shared_ptr<Node>&)> walk = [&](const std::shared_ptr<Node>& node) {
+        if (!node) return;
+        if (auto filter = std::dynamic_pointer_cast<nodes::NodeFilter>(node)) {
+            filter->applyDeformToChildren(parameters, true);
+        }
+        for (const auto& child : node->childrenRef()) {
+            walk(child);
+        }
+    };
+    walk(root);
+}
+
 void Puppet::rescanNodes() {
     auto node = actualRoot();
     scanParts(false, node);
@@ -466,7 +482,43 @@ void Puppet::recordNodeChange(nodes::NotifyReason reason) {
             if (!p) continue;
             p->reconstruct(self);
             p->finalize(self);
+            for (auto& kv : p->bindingMap) {
+                auto deform = std::dynamic_pointer_cast<param::DeformationParameterBinding>(kv.second);
+                if (!deform) continue;
+                if (deform->getNodeUUID() != 3755828177u) continue;
+                float maxAbs = 0.0f;
+                const auto xc = p->axisPointCount(0);
+                const auto yc = p->axisPointCount(1);
+                for (std::size_t x = 0; x < xc; ++x) {
+                    for (std::size_t y = 0; y < yc; ++y) {
+                        auto slot = deform->valueAt(param::Vec2u{x, y});
+                        for (std::size_t i = 0; i < slot.vertexOffsets.size(); ++i) {
+                            maxAbs = std::max(maxAbs, std::fabs(slot.vertexOffsets.x[i]));
+                            maxAbs = std::max(maxAbs, std::fabs(slot.vertexOffsets.y[i]));
+                        }
+                    }
+                }
+                std::fprintf(stderr, "[nicxlive] bind-check param=%s target=3755828177 maxAbs=%g\n", p->name.c_str(), maxAbs);
+            }
         }
+        std::map<std::string, std::size_t> deformTypeCounts;
+        for (auto& p : parameters) {
+            if (!p) continue;
+            for (auto& kv : p->bindingMap) {
+                auto& b = kv.second;
+                if (!b) continue;
+                if (b->getName() != "deform") continue;
+                auto node = findNodeById(b->getNodeUUID());
+                if (!node) continue;
+                ++deformTypeCounts[node->typeId()];
+            }
+        }
+        std::fprintf(stderr, "[nicxlive] self-deform binding types:");
+        for (const auto& kv : deformTypeCounts) {
+            std::fprintf(stderr, " %s=%zu", kv.first.c_str(), kv.second);
+        }
+        std::fprintf(stderr, "\n");
+        applyDeformToChildren();
         rescanNodes();
     } catch (const std::exception& ex) {
         return std::string(ex.what());

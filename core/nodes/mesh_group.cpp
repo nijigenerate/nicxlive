@@ -1,11 +1,13 @@
 #include "mesh_group.hpp"
 
+#include "../puppet.hpp"
 #include "../render.hpp"
 #include "../serde.hpp"
 #include "../param/parameter.hpp"
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <limits>
 
 namespace nicxlive::core::nodes {
@@ -34,61 +36,140 @@ void MeshGroup::releaseTarget(const std::shared_ptr<Node>& target) {
 void MeshGroup::applyDeformToChildren(const std::vector<std::shared_ptr<core::param::Parameter>>& params, bool recursive) {
     if (dynamic || mesh->indices.empty()) return;
     if (!precalculated) precalculate();
+    transform();
     forwardMatrix = transform().toMat4();
-    inverseMatrix = forwardMatrix.inverse();
+    inverseMatrix = globalTransform.toMat4().inverse();
 
-    // Traverse children and apply deformation from parameter bindings, then map through MeshGroup filter.
-    std::function<void(const std::shared_ptr<Node>&)> apply;
-    apply = [&](const std::shared_ptr<Node>& n) {
-        if (!n) return;
-        auto deformable = std::dynamic_pointer_cast<Deformable>(n);
-        if (deformable) {
-            // 1) pull deformation from params if binding exists
-            for (auto& param : params) {
-                if (!param) continue;
-                auto binding = std::dynamic_pointer_cast<core::param::DeformationParameterBinding>(param->getBinding(n, "deform"));
-                if (!binding) continue;
-                uint32_t xCount = param->axisPointCount(0);
-                uint32_t yCount = param->axisPointCount(1);
-                if (yCount == 0) yCount = 1;
-                core::param::Vec2u chosen{0, 0};
-                bool found = false;
-                for (uint32_t x = 0; x < std::max<uint32_t>(1, xCount); ++x) {
-                    for (uint32_t y = 0; y < std::max<uint32_t>(1, yCount); ++y) {
-                        core::param::Vec2u idx{x, y};
-                        if (binding->isSetAt(idx)) {
-                            chosen = idx;
-                            found = true;
-                            break;
-                        }
-                    }
-                    if (found) break;
-                }
-                if (found) {
-                    auto slot = binding->valueAt(chosen);
-                    if (slot.vertexOffsets.size() == deformable->deformation.size()) {
-                        deformable->deformation = slot.vertexOffsets;
-                        deformable->transformChanged();
-                    }
-                }
-            }
-
-            // 2) apply MeshGroup mapping
-            auto m = n->transform().toMat4();
-            auto res = filterChildren(n, deformable->vertices, deformable->deformation, &m);
-            const auto& deformOut = std::get<0>(res);
-            bool changed = std::get<2>(res);
-            if (changed && deformOut.size() == deformable->deformation.size()) {
-                deformable->deformation = deformOut;
-                deformable->updateBounds();
-                deformable->transformChanged();
-            }
-        }
-        if (recursive && n->mustPropagate()) {
-            for (auto& c : n->childrenRef()) apply(c);
+    auto update = [&](const Vec2Array& deformationValues) {
+        transformedVertices.resize(vertices.size());
+        transformedVertices = vertices;
+        transformedVertices += deformationValues;
+        for (std::size_t index = 0; index < triangles.size(); ++index) {
+            auto p1 = transformedVertices[mesh->indices[index * 3]];
+            auto p2 = transformedVertices[mesh->indices[index * 3 + 1]];
+            auto p3 = transformedVertices[mesh->indices[index * 3 + 2]];
+            Mat3 mat{};
+            mat[0][0] = p2.x - p1.x; mat[0][1] = p3.x - p1.x; mat[0][2] = p1.x;
+            mat[1][0] = p2.y - p1.y; mat[1][1] = p3.y - p1.y; mat[1][2] = p1.y;
+            mat[2][0] = 0.0f;        mat[2][1] = 0.0f;        mat[2][2] = 1.0f;
+            triangles[index].transformMatrix = mat * triangles[index].offsetMatrices;
         }
     };
-    for (auto& c : children) apply(c);
+
+    auto resetOffset = [&](const std::shared_ptr<Node>& node, const auto& selfRef) -> void {
+        if (!node) return;
+        node->offsetTransform.clear();
+        node->offsetSort = 0.0f;
+        node->transformChanged();
+        for (auto& c : node->childrenRef()) {
+            selfRef(c, selfRef);
+        }
+    };
+
+    for (auto& param : params) {
+        if (!param) continue;
+        auto selfBinding = std::dynamic_pointer_cast<core::param::DeformationParameterBinding>(
+            param->getBinding(shared_from_this(), "deform"));
+        if (!selfBinding) continue;
+        std::fprintf(stderr, "[nicxlive] meshgroup bake selfBinding param=%s node=%u\n", param->name.c_str(), uuid);
+
+        const auto xCount = param->axisPointCount(0);
+        const auto yCount = param->axisPointCount(1);
+        if (xCount == 0 || yCount == 0) continue;
+
+        for (std::size_t x = 0; x < xCount; ++x) {
+            for (std::size_t y = 0; y < yCount; ++y) {
+                if (auto pup = puppetRef()) {
+                    if (pup->root) resetOffset(pup->root, resetOffset);
+                }
+
+                core::param::Vec2u key{x, y};
+                Vec2 ofs{0.0f, 0.0f};
+                if (x + 1 == xCount && x > 0) { key.x = x - 1; ofs.x = 1.0f; }
+                if (param->isVec2 && y + 1 == yCount && y > 0) { key.y = y - 1; ofs.y = 1.0f; }
+
+                core::param::DeformSlot selfSlot;
+                if (selfBinding->isSetAt(core::param::Vec2u{x, y})) {
+                    selfSlot = selfBinding->valueAt(core::param::Vec2u{x, y});
+                } else {
+                    selfSlot = selfBinding->sample(key, ofs);
+                }
+                update(selfSlot.vertexOffsets);
+
+                auto transfer = [&](const std::shared_ptr<Node>& node, const auto& selfRef) -> void {
+                    if (!node) return;
+                    auto deformable = std::dynamic_pointer_cast<Deformable>(node);
+                    auto composite = std::dynamic_pointer_cast<Composite>(node);
+                    bool isComposite = static_cast<bool>(composite);
+                    bool shouldTransferTranslate = translateChildren;
+                    if (deformable) {
+                        static const char* kTransformBindingNames[] = {
+                            "transform.t.x",
+                            "transform.t.y",
+                            "transform.r.z",
+                            "transform.s.x",
+                            "transform.s.y",
+                        };
+                        for (const char* bindingName : kTransformBindingNames) {
+                            for (auto& kv : param->bindingMap) {
+                                auto& binding = kv.second;
+                                if (!binding) continue;
+                                if (binding->getName() != bindingName) continue;
+                                if (binding->getNodeUUID() != node->uuid) continue;
+                                binding->apply(key, ofs);
+                            }
+                        }
+                        node->transformChanged();
+
+                        auto nodeBinding = std::dynamic_pointer_cast<core::param::DeformationParameterBinding>(
+                            param->getOrAddBinding(node, "deform"));
+                        if (nodeBinding) {
+                            Vec2Array nodeDeform = nodeBinding->valueAt(core::param::Vec2u{x, y}).vertexOffsets;
+                            auto matrix = node->transform().toMat4();
+                            auto filtered = filterChildren(node, deformable->vertices, nodeDeform, &matrix);
+                            const auto& outDeform = std::get<0>(filtered);
+                            if (outDeform.size() > 0) {
+                                nodeBinding->update(core::param::Vec2u{x, y}, outDeform);
+                            }
+                        }
+                    } else if (shouldTransferTranslate && !isComposite) {
+                        Vec2Array oneVertex;
+                        oneVertex.resize(1);
+                        oneVertex.x[0] = node->localTransform.translation.x;
+                        oneVertex.y[0] = node->localTransform.translation.y;
+
+                        auto parentNode = node->parent.lock();
+                        Mat4 matrix = parentNode ? parentNode->transform().toMat4() : Mat4::identity();
+
+                        auto nodeBindingX = std::dynamic_pointer_cast<core::param::ValueParameterBinding>(
+                            param->getOrAddBinding(node, "transform.t.x"));
+                        auto nodeBindingY = std::dynamic_pointer_cast<core::param::ValueParameterBinding>(
+                            param->getOrAddBinding(node, "transform.t.y"));
+                        Vec2Array nodeDeform;
+                        nodeDeform.resize(1);
+                        nodeDeform.x[0] = node->offsetTransform.translation.x;
+                        nodeDeform.y[0] = node->offsetTransform.translation.y;
+
+                        auto filtered = filterChildren(node, oneVertex, nodeDeform, &matrix);
+                        const auto& outDeform = std::get<0>(filtered);
+                        if (outDeform.size() > 0 && nodeBindingX && nodeBindingY) {
+                            float curX = nodeBindingX->valueAt(core::param::Vec2u{x, y});
+                            float curY = nodeBindingY->valueAt(core::param::Vec2u{x, y});
+                            nodeBindingX->update(core::param::Vec2u{x, y}, curX + outDeform.x[0]);
+                            nodeBindingY->update(core::param::Vec2u{x, y}, curY + outDeform.y[0]);
+                        }
+                    }
+
+                    if (recursive && node->mustPropagate()) {
+                        for (auto& c : node->childrenRef()) selfRef(c, selfRef);
+                    }
+                };
+
+                for (auto& c : children) transfer(c, transfer);
+            }
+        }
+        param->removeBinding(selfBinding);
+    }
 
     // After deform transfer, clear own mesh and disable translateChildren like D 実装
     *mesh = MeshData{};

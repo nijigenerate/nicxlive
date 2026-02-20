@@ -19,6 +19,9 @@ bool areDeformationNodesCompatible(const std::shared_ptr<Node>& lhs, const std::
 
 namespace nicxlive::core::param {
 
+bool pushDeformationToNode(const std::shared_ptr<Node>& node, const DeformSlot& value);
+bool getDeformationNodeVertexCount(const std::shared_ptr<Node>& node, std::size_t& outVertexCount);
+
 template <typename T>
 class ParameterBindingImpl : public ParameterBinding {
 public:
@@ -502,6 +505,17 @@ public:
     explicit ValueParameterBinding(Parameter* parameter)
         : ParameterBindingImpl<float>(parameter) {}
 
+    float valueAt(const Vec2u& idx) const {
+        if (idx.x < values.size() && idx.y < values[idx.x].size()) {
+            return values[idx.x][idx.y];
+        }
+        return 0.0f;
+    }
+
+    void update(const Vec2u& point, float value) {
+        setValue(point, value);
+    }
+
     void applyToTarget(const float& value) override {
         if (auto n = target.target.lock()) {
             n->setValue(target.name, value);
@@ -539,15 +553,18 @@ public:
         : ParameterBindingImpl<DeformSlot>(parameter) {}
 
     void applyToTarget(const DeformSlot& value) override {
-        if (auto n = target.target.lock()) {
-            if (value.vertexOffsets.size() > 0) {
-                n->setValue("transform.t.x", value.vertexOffsets.x[0]);
-                n->setValue("transform.t.y", value.vertexOffsets.y[0]);
-            }
-        }
+        if (target.name != "deform") return;
+        pushDeformationToNode(target.target.lock(), value);
     }
 
     void clearValue(DeformSlot& v) override {
+        std::size_t vertexCount = 0;
+        if (getDeformationNodeVertexCount(target.target.lock(), vertexCount)) {
+            v.vertexOffsets.resize(vertexCount);
+            std::fill(v.vertexOffsets.x.begin(), v.vertexOffsets.x.end(), 0.0f);
+            std::fill(v.vertexOffsets.y.begin(), v.vertexOffsets.y.end(), 0.0f);
+            return;
+        }
         v.vertexOffsets.clear();
     }
 
@@ -564,6 +581,13 @@ public:
 
     DeformSlot sample(const Vec2u& leftKey, const Vec2& offset) {
         return this->interpolate(leftKey, offset);
+    }
+
+    void update(const Vec2u& point, const Vec2Array& offsets) {
+        if (point.x >= values.size() || point.y >= values[point.x].size()) return;
+        values[point.x][point.y].vertexOffsets = offsets;
+        isSetFlags[point.x][point.y] = true;
+        reInterpolate();
     }
 
     void scaleValueAt(const Vec2u& index, int axis, float scale) override {
@@ -872,19 +896,62 @@ inline void deserializeValueNode(const boost::property_tree::ptree& node, float&
 
 inline void deserializeValueNode(const boost::property_tree::ptree& node, DeformSlot& out) {
     static const boost::property_tree::ptree empty{};
+    if (const auto voIt = node.find("vertexOffsets"); voIt != node.not_found()) {
+        deserializeValueNode(voIt->second, out);
+        return;
+    }
     const auto xsIt = node.find("x");
     const auto ysIt = node.find("y");
-    const auto& xs = xsIt != node.not_found() ? xsIt->second : empty;
-    const auto& ys = ysIt != node.not_found() ? ysIt->second : empty;
-    std::size_t n = std::min(xs.size(), ys.size());
-    out.vertexOffsets.resize(n);
-    std::size_t idx = 0;
-    for (auto it = xs.begin(); it != xs.end() && idx < n; ++it, ++idx) {
-        out.vertexOffsets.x[idx] = it->second.get_value<float>();
+    if (xsIt != node.not_found() && ysIt != node.not_found()) {
+        const auto& xs = xsIt->second;
+        const auto& ys = ysIt->second;
+        std::size_t n = std::min(xs.size(), ys.size());
+        out.vertexOffsets.resize(n);
+        std::size_t idx = 0;
+        for (auto it = xs.begin(); it != xs.end() && idx < n; ++it, ++idx) {
+            out.vertexOffsets.x[idx] = it->second.get_value<float>();
+        }
+        idx = 0;
+        for (auto it = ys.begin(); it != ys.end() && idx < n; ++it, ++idx) {
+            out.vertexOffsets.y[idx] = it->second.get_value<float>();
+        }
+        return;
     }
-    idx = 0;
-    for (auto it = ys.begin(); it != ys.end() && idx < n; ++it, ++idx) {
-        out.vertexOffsets.y[idx] = it->second.get_value<float>();
+
+    // D nijilive format: deform slot is a list of vec2 entries (each vec2 serialized as [x, y]).
+    std::vector<float> xs;
+    std::vector<float> ys;
+    xs.reserve(node.size());
+    ys.reserve(node.size());
+    for (const auto& elem : node) {
+        const auto& v = elem.second;
+        float x = 0.0f;
+        float y = 0.0f;
+        bool parsed = false;
+
+        if (auto ox = v.get_optional<float>("x")) {
+            x = *ox;
+            y = v.get<float>("y", 0.0f);
+            parsed = true;
+        } else {
+            auto it = v.begin();
+            if (it != v.end()) {
+                x = it->second.get_value<float>();
+                ++it;
+                if (it != v.end()) y = it->second.get_value<float>();
+                parsed = true;
+            }
+        }
+
+        if (parsed) {
+            xs.push_back(x);
+            ys.push_back(y);
+        }
+    }
+    out.vertexOffsets.resize(xs.size());
+    for (std::size_t i = 0; i < xs.size(); ++i) {
+        out.vertexOffsets.x[i] = xs[i];
+        out.vertexOffsets.y[i] = ys[i];
     }
 }
 } // namespace detail

@@ -230,4 +230,6 @@ Status: `[ ]` todo, `[>]` in progress, `[x]` done, `[?]` blocked.
 | [x] | CP109 | behavior_diff | `compat-unity_native.md` | `MaskDrawableKind` 列挙値（内部 `Part/Drawable/Mask` を export） | D 準拠で export は `Part/Mask` の2値へ修正 |
 | [x] | CP108 | behavior_diff | `compat-unity_native.md` | `nijiv-opengl --test` で `0xC0000409` (BEX64) | `njgLoadPuppet` 例外未捕捉を C API 境界で捕捉し `Failure` 返却へ修正、原因切り分け可能化 |
 | [x] | CP110 | behavior_diff | `compat-binfmt.md` | `MAGIC_BYTES`/`TEX_SECTION`/`EXT_SECTION` 定数不一致（`INOCHI02` 系） | D準拠 `TRNSRTS\\0` / `TEX_SECT` / `EXT_SECT` へ修正し `.inx` 読み込みを復旧 |
+| [x] | CP111 | behavior_diff | `compat-vec2array.md` | `Vec2Array/Vec3Array/Vec4Array` の copy semantics（浅いポインタコピー） | D準拠の値型動作に修正（copy ctor/copy assign で実データ複製、内部ポインタ再同期） |
+| [x] | CP112 | behavior_diff | `compat-vec2array.md` | `copyFrom` 初期化漏れ（`logicalLength_` 未リセットで `ensureLength` 早期 return） | `logicalLength_=0` を含む完全初期化へ修正し、`nijiv --test` の AV (`0xC0000005`) を解消 |
 

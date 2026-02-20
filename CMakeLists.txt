@@ -90,6 +90,7 @@ set(NICXLIVE_SOURCES
     core/nodes/deformable.cpp
     core/nodes/filter.cpp
     core/nodes/deformer/drivers/phys.cpp
+    core/param/binding_deformation.cpp
     core/math/triangle.cpp
     core/math/mat3.cpp
     # math/transform.hpp is header-only

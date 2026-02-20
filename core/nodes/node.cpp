@@ -1163,6 +1163,7 @@ void Node::serializePartial(::nicxlive::core::serde::InochiSerializer& serialize
                 std::string type = childNode.second.get<std::string>("type", "Node");
                 if (!Node::inHasNodeType(type)) continue;
                 auto child = Node::inInstantiateNode(type);
+                if (!child) continue;
                 child->deserializeFromFghj(childNode.second);
                 addChild(child);
             }
