@@ -49,7 +49,10 @@ struct PuppetMeta {
     bool preservePixels{false};
     uint32_t thumbnailId{std::numeric_limits<uint32_t>::max()};
 };
-struct PuppetPhysics {};
+struct PuppetPhysics {
+    float pixelsPerMeter{1000.0f};
+    float gravity{9.8f};
+};
 
 class Puppet : public std::enable_shared_from_this<Puppet> {
 public:

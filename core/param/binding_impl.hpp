@@ -4,6 +4,7 @@
 #include "../nodes/common.hpp"
 #include "../serde.hpp"
 #include <algorithm>
+#include <cstdio>
 #include <limits>
 #include <memory>
 #include <vector>
@@ -12,6 +13,7 @@
 namespace nicxlive::core {
 class Puppet;
 std::shared_ptr<nodes::Node> resolvePuppetNodeById(const std::shared_ptr<Puppet>& puppet, uint32_t uuid);
+std::shared_ptr<::nicxlive::core::param::Parameter> resolvePuppetParameterById(const std::shared_ptr<Puppet>& puppet, uint32_t uuid);
 }
 namespace nicxlive::core::nodes {
 bool areDeformationNodesCompatible(const std::shared_ptr<Node>& lhs, const std::shared_ptr<Node>& rhs);
@@ -296,11 +298,6 @@ public:
             extendAndIntersect(true);
             if (!commitPoints.empty()) continue;
             break;
-        }
-        for (auto x = 0u; x < xCount; ++x) {
-            for (auto y = 0u; y < yCount; ++y) {
-                isSetFlags[x][y] = true;
-            }
         }
     }
 
@@ -645,6 +642,9 @@ public:
     }
 };
 
+class ParameterParameterBinding;
+std::shared_ptr<ParameterBinding> makeParameterParameterBinding(Parameter* parameter);
+
 inline std::shared_ptr<ParameterBinding> Parameter::getBinding(const std::shared_ptr<Node>& self, const std::string& key) const {
     const auto selfUuid = self ? self->uuid : 0u;
     for (const auto& kv : bindingMap) {
@@ -749,6 +749,8 @@ inline ::nicxlive::core::serde::SerdeException Parameter::deserializeFromFghj(co
                 std::shared_ptr<ParameterBinding> binding;
                 if (paramName == "deform") {
                     binding = std::make_shared<DeformationParameterBinding>(this);
+                } else if (paramName == "X" || paramName == "Y" || paramId == 0 || paramId == 1) {
+                    binding = makeParameterParameterBinding(this);
                 } else {
                     binding = std::make_shared<ValueParameterBinding>(this);
                 }
@@ -781,7 +783,13 @@ inline void Parameter::finalize(const std::shared_ptr<::nicxlive::core::Puppet>&
         if (!b) continue;
         auto targetUuid = b->getNodeUUID();
         if (targetUuid == 0) continue;
+        bool validTarget = false;
         if (::nicxlive::core::resolvePuppetNodeById(puppet, targetUuid)) {
+            validTarget = true;
+        } else if (b->getName() == "X" || b->getName() == "Y") {
+            validTarget = static_cast<bool>(::nicxlive::core::resolvePuppetParameterById(puppet, targetUuid));
+        }
+        if (validTarget) {
             b->finalize(puppet);
             valid.emplace(kv.first, b);
         }
@@ -811,9 +819,59 @@ inline void Parameter::update() {
 
     Vec2u left{};
     Vec2 sub{};
-    findOffset(mapInternalValue(latestInternal), left, sub);
+    auto mapped = mapInternalValue(latestInternal);
+    findOffset(mapped, left, sub);
+    if (name == "Skirt:: Physics") {
+        std::fprintf(stderr,
+                     "[nicxlive] param-update %s value=(%g,%g) latest=(%g,%g) mapped=(%g,%g) left=(%zu,%zu) sub=(%g,%g)\n",
+                     name.c_str(),
+                     value.x, value.y,
+                     latestInternal.x, latestInternal.y,
+                     mapped.x, mapped.y,
+                     left.x, left.y,
+                     sub.x, sub.y);
+    }
     for (auto& [_, b] : bindingMap) {
         if (!b) continue;
+        if (name == "Skirt:: Physics") {
+            if (auto db = std::dynamic_pointer_cast<DeformationParameterBinding>(b)) {
+                auto slot = db->sample(left, sub);
+                const bool setCenter = db->isSetAt(left);
+                const auto v00 = db->valueAt(Vec2u{0, 0});
+                const auto v11 = db->valueAt(Vec2u{1, 1});
+                float d0x = 0.0f;
+                float d0y = 0.0f;
+                float maxAbs = 0.0f;
+                std::size_t firstNz = static_cast<std::size_t>(-1);
+                if (slot.vertexOffsets.size() > 0) {
+                    d0x = slot.vertexOffsets.x[0];
+                    d0y = slot.vertexOffsets.y[0];
+                    for (std::size_t i = 0; i < slot.vertexOffsets.size(); ++i) {
+                        const float ax = std::fabs(slot.vertexOffsets.x[i]);
+                        const float ay = std::fabs(slot.vertexOffsets.y[i]);
+                        if (firstNz == static_cast<std::size_t>(-1) && (ax > 1e-6f || ay > 1e-6f)) {
+                            firstNz = i;
+                        }
+                        maxAbs = std::max(maxAbs, ax);
+                        maxAbs = std::max(maxAbs, ay);
+                    }
+                }
+                float v00d0x = 0.0f, v00d0y = 0.0f;
+                float v11d0x = 0.0f, v11d0y = 0.0f;
+                if (v00.vertexOffsets.size() > 0) { v00d0x = v00.vertexOffsets.x[0]; v00d0y = v00.vertexOffsets.y[0]; }
+                if (v11.vertexOffsets.size() > 0) { v11d0x = v11.vertexOffsets.x[0]; v11d0y = v11.vertexOffsets.y[0]; }
+                std::fprintf(stderr,
+                             "[nicxlive] skirt-phys sample target=%u left=(%zu,%zu) sub=(%g,%g) setCenter=%d size=%zu d0=(%g,%g) maxAbs=%g firstNz=%zu v00=(%g,%g) v11=(%g,%g)\n",
+                             db->getNodeUUID(),
+                             left.x, left.y,
+                             sub.x, sub.y,
+                             setCenter ? 1 : 0,
+                             slot.vertexOffsets.size(),
+                             d0x, d0y, maxAbs, firstNz,
+                             v00d0x, v00d0y,
+                             v11d0x, v11d0y);
+            }
+        }
         b->apply(left, sub);
         if (auto node = b->getTarget().target.lock()) {
             if (valueChanged()) {
@@ -833,6 +891,8 @@ public:
     std::shared_ptr<Parameter> targetParameter() const;
     int paramAxis() const;
 
+    ::nicxlive::core::serde::SerdeException deserializeFromFghj(const ::nicxlive::core::serde::Fghj& data) override;
+    void finalize(const std::shared_ptr<::nicxlive::core::Puppet>& puppet) override;
     void applyToTarget(const float& value) override;
     void clearValue(float& v) override;
     bool isCompatibleWithNode(const std::shared_ptr<Node>& /*other*/) const override;
@@ -850,6 +910,21 @@ inline ParameterParameterBinding::ParameterParameterBinding(Parameter* parameter
 
 inline std::shared_ptr<Parameter> ParameterParameterBinding::targetParameter() const { return targetParam.lock(); }
 inline int ParameterParameterBinding::paramAxis() const { return axisId; }
+
+inline ::nicxlive::core::serde::SerdeException ParameterParameterBinding::deserializeFromFghj(const ::nicxlive::core::serde::Fghj& data) {
+    if (auto axis = data.get_optional<int>("param_name")) {
+        axisId = (*axis == 0) ? 0 : 1;
+        target.name = (axisId == 0) ? "X" : "Y";
+    } else {
+        target.name = data.get<std::string>("param_name", "X");
+        axisId = (target.name == "Y") ? 1 : 0;
+    }
+    return ParameterBindingImpl<float>::deserializeFromFghj(data);
+}
+
+inline void ParameterParameterBinding::finalize(const std::shared_ptr<::nicxlive::core::Puppet>& puppet) {
+    targetParam = ::nicxlive::core::resolvePuppetParameterById(puppet, nodeUuid_);
+}
 
 inline void ParameterParameterBinding::applyToTarget(const float& value) {
     if (auto tp = targetParam.lock()) {
@@ -879,6 +954,10 @@ inline void ParameterParameterBinding::clearValue(float& v) {
 
 inline bool ParameterParameterBinding::isCompatibleWithNode(const std::shared_ptr<Node>& /*other*/) const {
     return false;
+}
+
+inline std::shared_ptr<ParameterBinding> makeParameterParameterBinding(Parameter* parameter) {
+    return std::make_shared<ParameterParameterBinding>(parameter);
 }
 
 // --- Serialization helpers (template) ---

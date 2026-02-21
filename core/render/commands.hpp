@@ -28,16 +28,12 @@ using ::nicxlive::core::nodes::MaskDrawPacket;
 
 enum class RenderCommandKind {
     DrawPart,
-    DrawMask,
     BeginDynamicComposite,
     EndDynamicComposite,
     BeginMask,
     ApplyMask,
     BeginMaskContent,
     EndMask,
-    BeginComposite,
-    DrawCompositeQuad,
-    EndComposite,
 };
 
 enum class MaskDrawableKind {

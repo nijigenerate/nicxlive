@@ -4,15 +4,42 @@
 #include "../render.hpp"
 #include "../render/commands.hpp"
 #include "../render/backend_queue.hpp"
+#include "../runtime_state.hpp"
 #include "../texture.hpp"
 #include "../../fmt/fmt.hpp"
 
 #include <algorithm>
 #include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <limits>
 #include <set>
 
 namespace nicxlive::core::nodes {
+namespace {
+bool traceSharedEnabled() {
+    static int enabled = -1;
+    if (enabled >= 0) return enabled != 0;
+    const char* v = std::getenv("NJCX_TRACE_SHARED");
+    if (!v) {
+        enabled = 0;
+        return false;
+    }
+    enabled = (std::strcmp(v, "1") == 0 || std::strcmp(v, "true") == 0 || std::strcmp(v, "TRUE") == 0) ? 1 : 0;
+    return enabled != 0;
+}
+
+uint32_t tracePartUuid() {
+    static bool init = false;
+    static uint32_t value = 0;
+    if (init) return value;
+    init = true;
+    const char* v = std::getenv("NJCX_TRACE_PART_UUID");
+    if (!v || *v == '\0') return 0;
+    value = static_cast<uint32_t>(std::strtoul(v, nullptr, 10));
+    return value;
+}
+}
 
 static std::vector<MaskBinding> dedupMasks(const std::vector<MaskBinding>& masks);
 static void emitMasks(const std::vector<MaskBinding>& bindings, core::RenderCommandEmitter& emitter);
@@ -524,7 +551,14 @@ void Part::drawOneDirect(bool forMasking) {
 
 void Part::fillDrawPacket(const Node& header, PartDrawPacket& packet, bool isMask) const {
     packet.renderable = enabled && opacity > 0.0f && mesh->isReady();
-    packet.modelMatrix = header.transform().toMat4();
+    packet.modelMatrix = immediateModelMatrix();
+    auto renderSpace = currentRenderSpace();
+    packet.renderMatrix = renderSpace.matrix;
+    packet.renderRotation = renderSpace.rotation;
+    if (hasOffscreenModelMatrix && hasOffscreenRenderMatrix) {
+        packet.renderMatrix = offscreenRenderMatrix;
+        packet.renderRotation = 0.0f;
+    }
     if (auto pup = puppetRef()) {
         packet.puppetMatrix = pup->transform.toMat4();
     }
@@ -556,6 +590,35 @@ void Part::fillDrawPacket(const Node& header, PartDrawPacket& packet, bool isMas
     packet.vertexCount = static_cast<uint32_t>(mesh->vertices.size());
     packet.indexCount = static_cast<uint32_t>(mesh->indices.size());
     packet.indexBuffer = ibo;
+    if (traceSharedEnabled()) {
+        const std::size_t deformEnd = static_cast<std::size_t>(packet.deformOffset) +
+                                      static_cast<std::size_t>(packet.vertexCount);
+        if (deformEnd > packet.deformAtlasStride) {
+            std::fprintf(stderr,
+                         "[nicxlive][shared-check][OOB] part uuid=%u name=%s deformOffset=%u vertexCount=%u deformStride=%u\n",
+                         uuid,
+                         name.c_str(),
+                         packet.deformOffset,
+                         packet.vertexCount,
+                         static_cast<unsigned>(packet.deformAtlasStride));
+        }
+        const uint32_t watchUuid = tracePartUuid();
+        if (watchUuid != 0 && watchUuid == uuid && !deformation.empty()) {
+            static uint64_t sTraceCounter = 0;
+            ++sTraceCounter;
+            if ((sTraceCounter % 30) == 0) {
+                std::fprintf(stderr,
+                             "[nicxlive][shared-check][part] uuid=%u name=%s deform0=(%.6f,%.6f) deformOffset=%u vertexCount=%u deformStride=%u\n",
+                             uuid,
+                             name.c_str(),
+                             deformation.x[0],
+                             deformation.y[0],
+                             packet.deformOffset,
+                             packet.vertexCount,
+                             packet.deformAtlasStride);
+            }
+        }
+    }
     for (std::size_t i = 0; i < textures.size() && i < 3; ++i) {
         std::shared_ptr<::nicxlive::core::Texture> tex = textures[i];
         bool usedSlot = false;
@@ -597,9 +660,33 @@ void Part::fillDrawPacket(const Node& header, PartDrawPacket& packet, bool isMas
     packet.uvs = mesh->uvs;
     packet.indices = mesh->indices;
     packet.deformation = deformation;
-    if (packet.vertexOffset == 1947 && packet.deformation.size() > 0) {
-        std::fprintf(stderr, "[nicxlive] dbg vo=1947 uuid=%u name=%s deform0=(%g,%g)\n",
-                     uuid, name.c_str(), packet.deformation.x[0], packet.deformation.y[0]);
+    if ((packet.vertexOffset == 1947 ||
+         packet.vertexOffset == 3267 ||
+         packet.vertexOffset == 3427 ||
+         packet.vertexOffset == 239 ||
+         packet.vertexOffset == 0 ||
+         packet.vertexOffset == 916 ||
+         packet.vertexOffset == 1563 ||
+         packet.vertexOffset == 1504) &&
+        packet.deformation.size() > 0) {
+        auto t = transform();
+        auto p = parentPtr();
+        const char* pType = p ? p->typeId().c_str() : "null";
+        const char* pName = p ? p->name.c_str() : "null";
+        std::fprintf(stderr,
+                     "[nicxlive] dbg vo=%u do=%u uuid=%u parent=%u parentType=%s parentName=%s name=%s deform0=(%g,%g) localT=(%g,%g) offT=(%g,%g) worldT=(%g,%g) pre=%zu post=%zu\n",
+                     static_cast<unsigned>(packet.vertexOffset),
+                     static_cast<unsigned>(packet.deformOffset),
+                     uuid,
+                     p ? p->uuid : 0u,
+                     pType,
+                     pName,
+                     name.c_str(),
+                     packet.deformation.x[0], packet.deformation.y[0],
+                     localTransform.translation.x, localTransform.translation.y,
+                     offsetTransform.translation.x, offsetTransform.translation.y,
+                     t.translation.x, t.translation.y,
+                     preProcessFilters.size(), postProcessFilters.size());
     }
     packet.node = std::dynamic_pointer_cast<Part>(const_cast<Part*>(this)->shared_from_this());
 }
@@ -612,8 +699,34 @@ Mat4 Part::immediateModelMatrix() const {
     return model;
 }
 
+RenderSpace Part::currentRenderSpace(bool forceIgnorePuppet) const {
+    const auto& cam = ::nicxlive::core::inGetCamera();
+    const auto pup = puppetRef();
+    const bool usePuppet = !forceIgnorePuppet && !ignorePuppet && static_cast<bool>(pup);
+    const Mat4 puppetMatrix = usePuppet ? pup->transform.toMat4() : Mat4::identity();
+    const Vec2 puppetScale = usePuppet ? pup->transform.scale : Vec2{1.0f, 1.0f};
+    const float puppetRot = usePuppet ? pup->transform.rotation.z : 0.0f;
+
+    float sx = cam.scale.x * puppetScale.x;
+    float sy = cam.scale.y * puppetScale.y;
+    if (!std::isfinite(sx) || sx == 0.0f) sx = 1.0f;
+    if (!std::isfinite(sy) || sy == 0.0f) sy = 1.0f;
+
+    float rot = cam.rotation + puppetRot;
+    if (!std::isfinite(rot)) rot = 0.0f;
+    if ((sx * sy) < 0.0f) rot = -rot;
+
+    RenderSpace space;
+    space.matrix = cam.matrix() * puppetMatrix;
+    space.scale = Vec2{sx, sy};
+    space.rotation = rot;
+    return space;
+}
+
 void Part::setOffscreenModelMatrix(const Mat4& m) { offscreenModelMatrix = m; hasOffscreenModelMatrix = true; }
+void Part::setOffscreenRenderMatrix(const Mat4& m) { offscreenRenderMatrix = m; hasOffscreenRenderMatrix = true; }
 void Part::clearOffscreenModelMatrix() { hasOffscreenModelMatrix = false; }
+void Part::clearOffscreenRenderMatrix() { hasOffscreenRenderMatrix = false; }
 
 bool Part::backendRenderable() const { return enabled && mesh->isReady(); }
 

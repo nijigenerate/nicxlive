@@ -160,7 +160,10 @@ struct Vec2Array {
         }
     }
     Vec2Array& operator+=(const Vec2Array& rhs) {
-        auto n = std::min(size(), rhs.size());
+        auto n = size();
+        if (n != rhs.size()) {
+            return *this;
+        }
         if (n == 0) return *this;
         float* dstX = xPtr_ + laneBase_;
         float* dstY = yPtr_ + laneBase_;
@@ -178,7 +181,10 @@ struct Vec2Array {
         return *this;
     }
     Vec2Array& operator-=(const Vec2Array& rhs) {
-        auto n = std::min(size(), rhs.size());
+        auto n = size();
+        if (n != rhs.size()) {
+            return *this;
+        }
         if (n == 0) return *this;
         float* dstX = xPtr_ + laneBase_;
         float* dstY = yPtr_ + laneBase_;

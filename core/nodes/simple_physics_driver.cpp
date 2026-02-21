@@ -3,6 +3,7 @@
 #include "../param/parameter.hpp"
 #include "../puppet.hpp"
 #include "../nodes/common.hpp"
+#include "../timing.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -16,11 +17,43 @@ namespace nicxlive::core::nodes {
 
 namespace {
 float deltaTime() {
-    return 0.016f; // stub to mirror D版 deltaTime
+    return static_cast<float>(::nicxlive::core::deltaTime());
 }
 
 bool isFiniteVec(const Vec2& v) {
     return std::isfinite(v.x) && std::isfinite(v.y);
+}
+
+bool parsePhysicsModel(const std::string& value, PhysicsModel& out) {
+    if (value == "pendulum") {
+        out = PhysicsModel::Pendulum;
+        return true;
+    }
+    if (value == "spring_pendulum") {
+        out = PhysicsModel::SpringPendulum;
+        return true;
+    }
+    return false;
+}
+
+bool parseParamMapMode(const std::string& value, ParamMapMode& out) {
+    if (value == "angle_length") {
+        out = ParamMapMode::AngleLength;
+        return true;
+    }
+    if (value == "xy") {
+        out = ParamMapMode::XY;
+        return true;
+    }
+    if (value == "length_angle") {
+        out = ParamMapMode::LengthAngle;
+        return true;
+    }
+    if (value == "yx") {
+        out = ParamMapMode::YX;
+        return true;
+    }
+    return false;
 }
 
 } // namespace
@@ -48,7 +81,7 @@ public:
         derivative[idx + 1] = v.y;
     }
 
-    void tick(float h) {
+    virtual void tick(float h) {
         if (refs.empty()) return;
         derivative.assign(refs.size(), 0.0f);
 
@@ -95,7 +128,11 @@ public:
     explicit PendulumSystem(SimplePhysicsDriver* d) : driver(d) {
         addVariable(&angle);
         addVariable(&dAngle);
-        bob = {0, 0};
+        if (driver) {
+            bob = Vec2{driver->anchor.x, driver->anchor.y + driver->getLength()};
+        } else {
+            bob = Vec2{0, 0};
+        }
     }
 
     void eval(float /*t*/) override {
@@ -205,7 +242,11 @@ public:
     explicit SpringPendulumSystem(SimplePhysicsDriver* d) : driver(d) {
         addVariable(&bob);
         addVariable(&dBob);
-        bob = {0, 0};
+        if (driver) {
+            bob = Vec2{driver->anchor.x, driver->anchor.y + driver->getLength()};
+        } else {
+            bob = Vec2{0, 0};
+        }
         dBob = {0, 0};
     }
 
@@ -374,7 +415,10 @@ private:
 
 SimplePhysicsDriver::~SimplePhysicsDriver() = default;
 
-SimplePhysicsDriver::SimplePhysicsDriver() = default;
+SimplePhysicsDriver::SimplePhysicsDriver() {
+    requirePreProcessTask();
+    requirePostTask(0);
+}
 
 SimplePhysicsDriver::SimplePhysicsDriver(uint32_t uuidVal, const std::shared_ptr<Node>& parent)
     : Driver(uuidVal, parent) {
@@ -399,11 +443,20 @@ void SimplePhysicsDriver::runBeginTask(core::RenderContext& ctx) {
 }
 
 void SimplePhysicsDriver::runPreProcessTask(core::RenderContext& ctx) {
-    Vec3 prevPos = (localOnly ? Vec3{transformLocal().translation.x, transformLocal().translation.y, 1.0f}
-                              : transform().toMat4().transformPoint(Vec3{0, 0, 1}));
+    Vec3 prevPos = (localOnly ? Vec3{transformLocal().translation.x, transformLocal().translation.y, 0.0f}
+                              : transform().toMat4().transformPoint(Vec3{0, 0, 0}));
     Driver::runPreProcessTask(ctx);
-    Vec3 anchorPos = (localOnly ? Vec3{transformLocal().translation.x, transformLocal().translation.y, 1.0f}
-                                : transform().toMat4().transformPoint(Vec3{0, 0, 1}));
+    Vec3 anchorPos = (localOnly ? Vec3{transformLocal().translation.x, transformLocal().translation.y, 0.0f}
+                                : transform().toMat4().transformPoint(Vec3{0, 0, 0}));
+    if (uuid == 810680760) {
+        static int sPreLog = 0;
+        if (sPreLog < 40) {
+            std::fprintf(stderr,
+                         "[nicxlive] phys-pre uuid=%u prev=(%g,%g) now=(%g,%g)\n",
+                         uuid, prevPos.x, prevPos.y, anchorPos.x, anchorPos.y);
+            ++sPreLog;
+        }
+    }
     if (!std::isfinite(anchorPos.x) || !std::isfinite(anchorPos.y)) {
         logPhysicsState("preProcess:anchorNonFinite");
         return;
@@ -416,11 +469,20 @@ void SimplePhysicsDriver::runPreProcessTask(core::RenderContext& ctx) {
 }
 
 void SimplePhysicsDriver::runPostTaskImpl(std::size_t id, core::RenderContext& ctx) {
-    Vec3 prevPos = (localOnly ? Vec3{transformLocal().translation.x, transformLocal().translation.y, 1.0f}
-                              : transform().toMat4().transformPoint(Vec3{0, 0, 1}));
+    Vec3 prevPos = (localOnly ? Vec3{transformLocal().translation.x, transformLocal().translation.y, 0.0f}
+                              : transform().toMat4().transformPoint(Vec3{0, 0, 0}));
     Driver::runPostTaskImpl(id, ctx);
-    Vec3 anchorPos = (localOnly ? Vec3{transformLocal().translation.x, transformLocal().translation.y, 1.0f}
-                                : transform().toMat4().transformPoint(Vec3{0, 0, 1}));
+    Vec3 anchorPos = (localOnly ? Vec3{transformLocal().translation.x, transformLocal().translation.y, 0.0f}
+                                : transform().toMat4().transformPoint(Vec3{0, 0, 0}));
+    if (uuid == 810680760) {
+        static int sPostLog = 0;
+        if (sPostLog < 40) {
+            std::fprintf(stderr,
+                         "[nicxlive] phys-post uuid=%u prev=(%g,%g) now=(%g,%g) id=%zu\n",
+                         uuid, prevPos.x, prevPos.y, anchorPos.x, anchorPos.y, id);
+            ++sPostLog;
+        }
+    }
     if (!std::isfinite(anchorPos.x) || !std::isfinite(anchorPos.y)) {
         logPhysicsState("postProcess:anchorNonFinite");
         return;
@@ -430,7 +492,6 @@ void SimplePhysicsDriver::runPostTaskImpl(std::size_t id, core::RenderContext& c
         prevTransMat = transform().toMat4().inverse();
         prevAnchorSet = true;
     }
-    updateOutputs();
 }
 
 void SimplePhysicsDriver::serializeSelfImpl(::nicxlive::core::serde::InochiSerializer& serializer, bool recursive, SerializeNodeFlags flags) const {
@@ -463,19 +524,122 @@ void SimplePhysicsDriver::serializeSelfImpl(::nicxlive::core::serde::InochiSeria
 
 ::nicxlive::core::serde::SerdeException SimplePhysicsDriver::deserializeFromFghj(const ::nicxlive::core::serde::Fghj& data) {
     auto err = Node::deserializeFromFghj(data);
+    const bool hasModelType = data.get_child_optional("model_type").has_value();
+    const bool hasMapMode = data.get_child_optional("map_mode").has_value();
+    const bool hasOutputScale = data.get_child_optional("output_scale").has_value();
     if (auto p = data.get_optional<std::size_t>("param")) paramRef = static_cast<uint32_t>(*p);
     if (auto mt = data.get_optional<int>("model_type")) modelType = static_cast<PhysicsModel>(*mt);
+    if (auto mts = data.get_optional<std::string>("model_type")) parsePhysicsModel(*mts, modelType);
     if (auto mm = data.get_optional<int>("map_mode")) mapMode = static_cast<ParamMapMode>(*mm);
+    if (auto mms = data.get_optional<std::string>("map_mode")) parseParamMapMode(*mms, mapMode);
     if (auto g = data.get_optional<float>("gravity")) gravity = *g;
     if (auto l = data.get_optional<float>("length")) length = *l;
     if (auto f = data.get_optional<float>("frequency")) frequency = *f;
     if (auto ad = data.get_optional<float>("angle_damping")) angleDamping = *ad;
     if (auto ld = data.get_optional<float>("length_damping")) lengthDamping = *ld;
+    if (auto os = data.get_child_optional("output_scale")) {
+        std::size_t idx = 0;
+        for (const auto& kv : *os) {
+            if (idx >= 2) break;
+            try {
+                outputScale[idx] = kv.second.get_value<float>();
+                ++idx;
+            } catch (...) {
+            }
+        }
+        if (auto x = os->get_optional<float>("x")) outputScale[0] = *x;
+        if (auto y = os->get_optional<float>("y")) outputScale[1] = *y;
+        if (auto x0 = os->get_optional<float>("0")) outputScale[0] = *x0;
+        if (auto y1 = os->get_optional<float>("1")) outputScale[1] = *y1;
+    }
     if (auto osx = data.get_optional<float>("output_scale_x")) outputScale[0] = *osx;
     if (auto osy = data.get_optional<float>("output_scale_y")) outputScale[1] = *osy;
     if (auto lo = data.get_optional<bool>("local_only")) localOnly = *lo;
+    if (uuid == 810680760) {
+        std::fprintf(stderr,
+                     "[nicxlive] phys-deser uuid=%u hasModel=%d hasMap=%d hasScale=%d model=%d map=%d localOnly=%d len=%g outScale=(%g,%g)\n",
+                     uuid,
+                     hasModelType ? 1 : 0,
+                     hasMapMode ? 1 : 0,
+                     hasOutputScale ? 1 : 0,
+                     static_cast<int>(modelType),
+                     static_cast<int>(mapMode),
+                     localOnly ? 1 : 0,
+                     length,
+                     outputScale[0], outputScale[1]);
+    }
     reset();
     return err;
+}
+
+bool SimplePhysicsDriver::hasParam(const std::string& key) const {
+    if (Driver::hasParam(key)) return true;
+    return key == "gravity" ||
+           key == "length" ||
+           key == "frequency" ||
+           key == "angleDamping" ||
+           key == "lengthDamping" ||
+           key == "outputScale.x" ||
+           key == "outputScale.y";
+}
+
+float SimplePhysicsDriver::getDefaultValue(const std::string& key) const {
+    if (Driver::hasParam(key)) return Driver::getDefaultValue(key);
+    if (key == "gravity" ||
+        key == "frequency" ||
+        key == "angleDamping" ||
+        key == "lengthDamping" ||
+        key == "outputScale.x" ||
+        key == "outputScale.y") {
+        return 1.0f;
+    }
+    if (key == "length") return 0.0f;
+    return 0.0f;
+}
+
+bool SimplePhysicsDriver::setValue(const std::string& key, float value) {
+    if (Driver::setValue(key, value)) return true;
+    if (!std::isfinite(value)) return false;
+    if (key == "gravity") {
+        offsetGravity *= value;
+        return true;
+    }
+    if (key == "length") {
+        offsetLength += value;
+        return true;
+    }
+    if (key == "frequency") {
+        offsetFrequency *= value;
+        return true;
+    }
+    if (key == "angleDamping") {
+        offsetAngleDamping *= value;
+        return true;
+    }
+    if (key == "lengthDamping") {
+        offsetLengthDamping *= value;
+        return true;
+    }
+    if (key == "outputScale.x") {
+        offsetOutputScale[0] *= value;
+        return true;
+    }
+    if (key == "outputScale.y") {
+        offsetOutputScale[1] *= value;
+        return true;
+    }
+    return false;
+}
+
+float SimplePhysicsDriver::getValue(const std::string& key) const {
+    if (key == "gravity") return offsetGravity;
+    if (key == "length") return offsetLength;
+    if (key == "frequency") return offsetFrequency;
+    if (key == "angleDamping") return offsetAngleDamping;
+    if (key == "lengthDamping") return offsetLengthDamping;
+    if (key == "outputScale.x") return offsetOutputScale[0];
+    if (key == "outputScale.y") return offsetOutputScale[1];
+    return Driver::getValue(key);
 }
 
 std::shared_ptr<core::param::Parameter> SimplePhysicsDriver::resolveParam() {
@@ -483,11 +647,8 @@ std::shared_ptr<core::param::Parameter> SimplePhysicsDriver::resolveParam() {
     if (paramPtr) return paramPtr;
     if (param_) paramPtr = param_;
     if (!paramPtr && paramRef != 0) {
-        for (auto n = parentPtr(); n; n = n->parentPtr()) {
-            if (auto pup = std::dynamic_pointer_cast<core::Puppet>(n)) {
-                paramPtr = pup->findParameter(paramRef);
-                break;
-            }
+        if (auto pup = puppetRef()) {
+            paramPtr = pup->findParameter(paramRef);
         }
     }
     if (paramPtr) {
@@ -498,6 +659,24 @@ std::shared_ptr<core::param::Parameter> SimplePhysicsDriver::resolveParam() {
 }
 
 void SimplePhysicsDriver::updateDriver() {
+    if (uuid == 810680760) {
+        static int sSkirtCfgLog = 0;
+        if (sSkirtCfgLog < 20) {
+            std::fprintf(stderr,
+                         "[nicxlive] phys-cfg uuid=%u model=%d map=%d localOnly=%d g=%g len=%g freq=%g ad=%g ld=%g dt=%g\n",
+                         uuid,
+                         static_cast<int>(modelType),
+                         static_cast<int>(mapMode),
+                         localOnly ? 1 : 0,
+                         gravity,
+                         length,
+                         frequency,
+                         angleDamping,
+                         lengthDamping,
+                         deltaTime());
+            ++sSkirtCfgLog;
+        }
+    }
     if (!system || systemModel != modelType) {
         if (modelType == PhysicsModel::SpringPendulum) {
             system = std::make_unique<SpringPendulumSystem>(this);
@@ -517,11 +696,28 @@ void SimplePhysicsDriver::updateDriver() {
         h -= 0.01f;
     }
     system->tick(h);
+    if (uuid == 810680760) {
+        static int sStateLog = 0;
+        if (sStateLog < 40) {
+            std::fprintf(stderr,
+                         "[nicxlive] phys-state uuid=%u anchor=(%g,%g) output=(%g,%g) h=%g\n",
+                         uuid, anchor.x, anchor.y, output.x, output.y, h);
+            ++sStateLog;
+        }
+    }
     updateOutputs();
     prevAnchorSet = false;
 }
 
 void SimplePhysicsDriver::reset() {
+    updateInputs();
+    if (uuid == 810680760) {
+        static int sResetLog = 0;
+        if (sResetLog < 40) {
+            std::fprintf(stderr, "[nicxlive] phys-reset uuid=%u anchor=(%g,%g)\n", uuid, anchor.x, anchor.y);
+            ++sResetLog;
+        }
+    }
     offsetGravity = 1.0f;
     offsetLength = 0.0f;
     offsetFrequency = 1.0f;
@@ -549,8 +745,8 @@ void SimplePhysicsDriver::reset() {
 
 void SimplePhysicsDriver::updateInputs() {
     if (prevAnchorSet) return;
-    Vec3 anchorPos = localOnly ? Vec3{transformLocal().translation.x, transformLocal().translation.y, 1.0f}
-                               : transform().toMat4().transformPoint(Vec3{0, 0, 1});
+    Vec3 anchorPos = localOnly ? Vec3{transformLocal().translation.x, transformLocal().translation.y, 0.0f}
+                               : transform().toMat4().transformPoint(Vec3{0, 0, 0});
     if (!std::isfinite(anchorPos.x) || !std::isfinite(anchorPos.y)) {
         logPhysicsState("updateInputs:anchorNonFinite");
         return;
@@ -560,6 +756,22 @@ void SimplePhysicsDriver::updateInputs() {
 
 void SimplePhysicsDriver::updateOutputs() {
     auto paramPtr = resolveParam();
+    if (uuid == 810680760) {
+        static int sSkirtParamLog = 0;
+        if (sSkirtParamLog < 40) {
+            std::fprintf(stderr,
+                         "[nicxlive] phys-out uuid=%u name=%s paramRef=%u resolved=%s value=(%g,%g) latest=(%g,%g)\n",
+                         uuid,
+                         name.c_str(),
+                         paramRef,
+                         paramPtr ? paramPtr->name.c_str() : "<null>",
+                         paramPtr ? paramPtr->value.x : 0.0f,
+                         paramPtr ? paramPtr->value.y : 0.0f,
+                         paramPtr ? paramPtr->latestInternal.x : 0.0f,
+                         paramPtr ? paramPtr->latestInternal.y : 0.0f);
+            ++sSkirtParamLog;
+        }
+    }
     if (!paramPtr) return;
 
     if (!std::isfinite(output.x) || !std::isfinite(output.y)) {
@@ -577,8 +789,9 @@ void SimplePhysicsDriver::updateOutputs() {
         return;
     }
 
-    Mat4 inv = prevAnchorSet ? prevTransMat : transform().toMat4().inverse();
-    Vec3 localPos = inv.transformPoint(Vec3{output.x, output.y, 1.0f});
+    Vec3 localPos = localOnly
+        ? Vec3{output.x, output.y, 0.0f}
+        : (prevAnchorSet ? prevTransMat : transform().toMat4().inverse()).transformPoint(Vec3{output.x, output.y, 0.0f});
     Vec2 localAngle{localPos.x, localPos.y};
     if (!std::isfinite(localAngle.x) || !std::isfinite(localAngle.y)) {
         logPhysicsState("updateOutputs:localPosNonFinite");
@@ -644,9 +857,42 @@ void SimplePhysicsDriver::updateOutputs() {
         return;
     }
 
-    paramPtr->value = paramOffset;
-    paramPtr->latestInternal = paramOffset;
-    paramPtr->previousInternal = paramOffset;
+    paramPtr->pushIOffset(paramOffset, core::param::ParamMergeMode::Forced);
+    paramPtr->update();
+    if (uuid == 810680760) {
+        static int sSkirtAfterLog = 0;
+        if (sSkirtAfterLog < 40) {
+            std::fprintf(stderr,
+                         "[nicxlive] phys-out-applied uuid=%u offset=(%g,%g) value=(%g,%g) latest=(%g,%g)\n",
+                         uuid,
+                         paramOffset.x, paramOffset.y,
+                         paramPtr->value.x, paramPtr->value.y,
+                         paramPtr->latestInternal.x, paramPtr->latestInternal.y);
+            ++sSkirtAfterLog;
+        }
+    }
+}
+
+void SimplePhysicsDriver::finalize() {
+    static int sFinalizeLog = 0;
+    if (auto pup = puppetRef()) {
+        param_ = pup->findParameter(paramRef);
+        paramCached = param_;
+    } else {
+        param_.reset();
+        paramCached.reset();
+    }
+    if (sFinalizeLog < 64) {
+        std::fprintf(stderr,
+                     "[nicxlive] phys-finalize uuid=%u name=%s paramRef=%u param=%s\n",
+                     uuid,
+                     name.c_str(),
+                     paramRef,
+                     param_ ? param_->name.c_str() : "<null>");
+        ++sFinalizeLog;
+    }
+    Driver::finalize();
+    reset();
 }
 
 void SimplePhysicsDriver::logPhysicsState(const std::string& context, const std::string& extra) {
@@ -659,7 +905,15 @@ void SimplePhysicsDriver::drawDebug() {
     if (system) system->drawDebug();
 }
 
-float SimplePhysicsDriver::getGravity() const { return gravity * offsetGravity; }
+float SimplePhysicsDriver::getGravity() const {
+    float puppetGravity = 9.8f;
+    float pixelsPerMeter = 1000.0f;
+    if (auto pup = puppetRef()) {
+        puppetGravity = pup->physics.gravity;
+        pixelsPerMeter = pup->physics.pixelsPerMeter;
+    }
+    return (gravity * offsetGravity) * puppetGravity * pixelsPerMeter;
+}
 float SimplePhysicsDriver::getLength() const { return length + offsetLength; }
 float SimplePhysicsDriver::getFrequency() const { return frequency * offsetFrequency; }
 float SimplePhysicsDriver::getAngleDamping() const { return angleDamping * offsetAngleDamping; }
@@ -668,8 +922,17 @@ Vec2 SimplePhysicsDriver::getOutputScale() const { return Vec2{outputScale[0] * 
 
 std::vector<std::shared_ptr<core::param::Parameter>> SimplePhysicsDriver::getAffectedParameters() const {
     std::vector<std::shared_ptr<core::param::Parameter>> out;
-    if (auto p = paramCached.lock()) out.push_back(p);
-    else if (param_) out.push_back(param_);
+    std::shared_ptr<core::param::Parameter> p;
+    if (auto cached = paramCached.lock()) {
+        p = cached;
+    } else if (param_) {
+        p = param_;
+    } else if (paramRef != 0) {
+        if (auto pup = puppetRef()) {
+            p = pup->findParameter(paramRef);
+        }
+    }
+    if (p) out.push_back(p);
     return out;
 }
 

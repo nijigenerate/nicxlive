@@ -42,10 +42,11 @@ inline Vec2Array operator*(const Vec2Array& a, float s) {
 }
 
 enum class InterpolateMode {
-    Nearest,
-    Linear,
-    Cubic,
-    Step,
+    Nearest = 0,
+    Linear = 1,
+    Step = 2,
+    Cubic = 3,
+    Bezier = 4,
 };
 
 inline Vec2Array gatherVec2(const Vec2Array& data, const std::vector<std::size_t>& indices) {

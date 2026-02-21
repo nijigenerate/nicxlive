@@ -1,6 +1,7 @@
 #include "phys.hpp"
 #include "../../path_deformer.hpp"
 #include "../../../common/utils.hpp"
+#include "../../../timing.hpp"
 
 #include <cmath>
 #include <sstream>
@@ -60,7 +61,7 @@ float clampAngle(float a) {
 }
 
 float deltaTime() {
-    return 0.016f; // stub; replace with real frame delta if available
+    return static_cast<float>(::nicxlive::core::deltaTime());
 }
 
 float screenToPhysicsY(float y) { return -y; }

@@ -888,9 +888,15 @@ void Drawable::fillDrawPacket(const Node& header, PartDrawPacket& packet, bool /
 
 void Drawable::registerWeldFilter(const std::shared_ptr<Drawable>& target) {
     if (!target) return;
+    const auto tag = kWeldFilterTagBase | static_cast<std::uintptr_t>(target->uuid);
+    // D parity: welding filter registration is upsert, not append.
+    auto exists = std::any_of(postProcessFilters.begin(), postProcessFilters.end(), [&](const FilterHook& h) {
+        return h.stage == 2 && h.tag == tag;
+    });
+    if (exists) return;
     FilterHook hook;
     hook.stage = 2;
-    hook.tag = kWeldFilterTagBase | static_cast<std::uintptr_t>(target->uuid);
+    hook.tag = tag;
     std::weak_ptr<Drawable> weakTarget = target;
     hook.func = [weakTarget, this](std::shared_ptr<Node> self, const std::vector<Vec2>& verts, const std::vector<Vec2>& deform, const Mat4* mat) {
         auto tgt = weakTarget.lock();

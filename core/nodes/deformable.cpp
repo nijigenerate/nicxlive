@@ -68,9 +68,18 @@ DeformationStack::DeformationStack(Deformable* owner) : owner_(owner) {}
 
 void DeformationStack::preUpdate() {
     if (owner_) {
+        bool changed = owner_->deformation.size() != owner_->vertices.size();
         owner_->deformation.resize(owner_->vertices.size());
-        std::fill(owner_->deformation.x.begin(), owner_->deformation.x.end(), 0.0f);
-        std::fill(owner_->deformation.y.begin(), owner_->deformation.y.end(), 0.0f);
+        for (std::size_t i = 0; i < owner_->deformation.size(); ++i) {
+            if (owner_->deformation.x[i] != 0.0f || owner_->deformation.y[i] != 0.0f) {
+                changed = true;
+            }
+            owner_->deformation.x[i] = 0.0f;
+            owner_->deformation.y[i] = 0.0f;
+        }
+        if (changed) {
+            ::nicxlive::core::render::sharedDeformMarkDirty();
+        }
     }
 }
 
@@ -132,6 +141,7 @@ void Deformable::updateDeform() {
         deformation.resize(vertices.size());
         std::fill(deformation.x.begin(), deformation.x.end(), 0.0f);
         std::fill(deformation.y.begin(), deformation.y.end(), 0.0f);
+        ::nicxlive::core::render::sharedDeformMarkDirty();
     }
 }
 

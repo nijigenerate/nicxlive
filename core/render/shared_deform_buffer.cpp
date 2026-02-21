@@ -1,6 +1,9 @@
 #include "shared_deform_buffer.hpp"
 
 #include <algorithm>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <unordered_map>
 #include <vector>
 
@@ -8,6 +11,18 @@ namespace nicxlive::core::render {
 using ::nicxlive::core::nodes::Vec2Array;
 
 namespace {
+bool traceSharedEnabled() {
+    static int enabled = -1;
+    if (enabled >= 0) return enabled != 0;
+    const char* v = std::getenv("NJCX_TRACE_SHARED");
+    if (!v) {
+        enabled = 0;
+        return false;
+    }
+    enabled = (std::strcmp(v, "1") == 0 || std::strcmp(v, "true") == 0 || std::strcmp(v, "TRUE") == 0) ? 1 : 0;
+    return enabled != 0;
+}
+
 struct SharedVecAtlas {
     struct Binding {
         Vec2Array* target{nullptr};
@@ -32,6 +47,10 @@ struct SharedVecAtlas {
         lookup[ptr] = idx;
         bindings.push_back(Binding{ptr, offsetSink, target.size(), 0});
         rebuild();
+        if (traceSharedEnabled()) {
+            std::fprintf(stderr, "[nicxlive][shared-atlas] register target=%p len=%zu bindings=%zu stride=%zu\n",
+                         static_cast<void*>(ptr), target.size(), bindings.size(), storage.size());
+        }
     }
 
     void unregisterArray(Vec2Array& target) {
@@ -47,6 +66,10 @@ struct SharedVecAtlas {
         }
         bindings.pop_back();
         rebuild();
+        if (traceSharedEnabled()) {
+            std::fprintf(stderr, "[nicxlive][shared-atlas] unregister target=%p bindings=%zu stride=%zu\n",
+                         static_cast<void*>(ptr), bindings.size(), storage.size());
+        }
     }
 
     void resizeArray(Vec2Array& target, std::size_t newLength) {
@@ -57,6 +80,10 @@ struct SharedVecAtlas {
         if (bindings[idx].length == newLength) return;
         bindings[idx].length = newLength;
         rebuild();
+        if (traceSharedEnabled()) {
+            std::fprintf(stderr, "[nicxlive][shared-atlas] resize target=%p newLen=%zu bindings=%zu stride=%zu\n",
+                         static_cast<void*>(ptr), newLength, bindings.size(), storage.size());
+        }
     }
 
     std::size_t stride() const { return storage.size(); }
@@ -117,6 +144,15 @@ private:
             if (binding.offsetSink) *binding.offsetSink = binding.offset;
         }
         dirty = true;
+        if (traceSharedEnabled()) {
+            std::size_t maxEnd = 0;
+            for (const auto& binding : bindings) {
+                const auto end = binding.offset + binding.length;
+                if (end > maxEnd) maxEnd = end;
+            }
+            std::fprintf(stderr, "[nicxlive][shared-atlas] rebuild bindings=%zu stride=%zu maxEnd=%zu dirty=%d\n",
+                         bindings.size(), storage.size(), maxEnd, dirty ? 1 : 0);
+        }
     }
 };
 

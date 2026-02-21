@@ -9,6 +9,10 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
+#include <cstring>
+#include <cstdio>
+#include <unordered_map>
 
 namespace nicxlive::core::nodes {
 
@@ -20,6 +24,41 @@ namespace {
 constexpr float kAxisTolerance = 1e-4f;
 constexpr float kBoundaryTolerance = 1e-4f;
 constexpr int kGridFilterStage = 1;
+
+uint32_t traceNodeUuid() {
+    static bool init = false;
+    static uint32_t value = 0;
+    if (init) return value;
+    init = true;
+    const char* v = std::getenv("NJCX_TRACE_NODE_UUID");
+    if (!v || *v == '\0') return 0;
+    value = static_cast<uint32_t>(std::strtoul(v, nullptr, 10));
+    return value;
+}
+
+int traceFrameInterval() {
+    static bool init = false;
+    static int value = 30;
+    if (init) return value;
+    init = true;
+    const char* v = std::getenv("NJCX_TRACE_NODE_INTERVAL");
+    if (!v || *v == '\0') return value;
+    int parsed = std::atoi(v);
+    if (parsed > 0) value = parsed;
+    return value;
+}
+
+bool traceDeformerSummaryEnabled() {
+    static int enabled = -1;
+    if (enabled >= 0) return enabled != 0;
+    const char* v = std::getenv("NJCX_TRACE_DEFORMER_SUMMARY");
+    if (!v) {
+        enabled = 0;
+        return false;
+    }
+    enabled = (std::strcmp(v, "1") == 0 || std::strcmp(v, "true") == 0 || std::strcmp(v, "TRUE") == 0) ? 1 : 0;
+    return enabled != 0;
+}
 
 std::vector<Vec2> toVec2List(const Vec2Array& arr) {
     std::vector<Vec2> out;
@@ -218,6 +257,8 @@ DeformResult GridDeformer::deformChildren(const std::shared_ptr<Node>& target,
                                           const std::vector<Vec2>& origVertices,
                                           const std::vector<Vec2>& origDeformation,
                                           const Mat4* origTransform) {
+    static std::unordered_map<uint32_t, uint64_t> sChangedCount;
+    static uint64_t sSummaryTick = 0;
     DeformResult res;
     res.vertices = origDeformation.empty() ? origVertices : origDeformation;
     res.transform = std::nullopt;
@@ -281,6 +322,34 @@ DeformResult GridDeformer::deformChildren(const std::shared_ptr<Node>& target,
 
     res.vertices = toVec2List(deformOut);
     res.changed = true;
+    if (traceDeformerSummaryEnabled() && target && res.changed) {
+        sChangedCount[target->uuid] += 1;
+        ++sSummaryTick;
+        if ((sSummaryTick % 240) == 0) {
+            std::fprintf(stderr, "[nicxlive][GridDeformer][Summary] changedTargets=%zu\n", sChangedCount.size());
+            int printed = 0;
+            for (const auto& kv : sChangedCount) {
+                std::fprintf(stderr, "[nicxlive][GridDeformer][Summary] targetUuid=%u hits=%llu\n",
+                             kv.first,
+                             static_cast<unsigned long long>(kv.second));
+                if (++printed >= 8) break;
+            }
+        }
+    }
+    const uint32_t watch = traceNodeUuid();
+    if (watch != 0 && target && target->uuid == watch) {
+        const int interval = traceFrameInterval();
+        static uint64_t sFrame = 0;
+        ++sFrame;
+        if (interval > 0 && (sFrame % static_cast<uint64_t>(interval)) == 0) {
+            std::fprintf(stderr,
+                         "[nicxlive][GridDeformer][TraceNode] target=%s uuid=%u changed=%d outSize=%zu\n",
+                         target->name.c_str(),
+                         target->uuid,
+                         res.changed ? 1 : 0,
+                         res.vertices.size());
+        }
+    }
     return res;
 }
 
@@ -406,16 +475,20 @@ void GridDeformer::applyDeformToChildren(const std::vector<std::shared_ptr<core:
             }
         } else if (translateChildren) {
             // non-deformable: still propagate positional offset if allowed
-            auto m = c->transform().toMat4();
+            auto parentNode = c->parentPtr();
+            Mat4 m = parentNode ? parentNode->transform().toMat4() : Mat4::identity();
             Vec2Array verts;
             verts.resize(1);
-            verts.x[0] = 0.0f; verts.y[0] = 0.0f;
+            verts.x[0] = c->localTransform.translation.x;
+            verts.y[0] = c->localTransform.translation.y;
             Vec2Array deform;
             deform.resize(1);
+            deform.x[0] = c->offsetTransform.translation.x;
+            deform.y[0] = c->offsetTransform.translation.y;
             auto res = deformChildren(c, toVec2List(verts), toVec2List(deform), &m);
             if (res.changed && !res.vertices.empty()) {
-                c->offsetTransform.translation.x += res.vertices[0].x;
-                c->offsetTransform.translation.y += res.vertices[0].y;
+                c->offsetTransform.translation.x = res.vertices[0].x;
+                c->offsetTransform.translation.y = res.vertices[0].y;
                 c->transformChanged();
             }
         }

@@ -25,16 +25,12 @@ enum class NjgResult : int {
 
 enum class NjgRenderCommandKind : uint32_t {
     DrawPart,
-    DrawMask,
     BeginDynamicComposite,
     EndDynamicComposite,
     BeginMask,
     ApplyMask,
     BeginMaskContent,
     EndMask,
-    BeginComposite,
-    DrawCompositeQuad,
-    EndComposite,
 };
 
 struct UnityRendererConfig {
@@ -129,6 +125,7 @@ struct NjgPartDrawPacket {
     size_t uvAtlasStride;
     size_t deformOffset;
     size_t deformAtlasStride;
+    size_t indexHandle;
     const uint16_t* indices;
     size_t indexCount;
     size_t vertexCount;
@@ -142,6 +139,7 @@ struct NjgMaskDrawPacket {
     size_t vertexAtlasStride;
     size_t deformOffset;
     size_t deformAtlasStride;
+    size_t indexHandle;
     const uint16_t* indices;
     size_t indexCount;
     size_t vertexCount;

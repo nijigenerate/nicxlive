@@ -72,6 +72,7 @@ std::unordered_map<void*, std::unique_ptr<PuppetCtx>> gPuppets;
 NjgLogFn gLogCallback{nullptr};
 void* gLogUserData{nullptr};
 bool gRuntimeInitialized{false};
+double gUnityTimeTicker{0.0};
 
 void unityLog(const std::string& message) {
     if (gLogCallback) {
@@ -227,16 +228,12 @@ static void packQueuedCommands(RendererCtx& ctx) {
         NjgQueuedCommand out{};
         switch (qc.kind) {
         case RenderCommandKind::DrawPart: out.kind = NjgRenderCommandKind::DrawPart; break;
-        case RenderCommandKind::DrawMask: out.kind = NjgRenderCommandKind::DrawMask; break;
         case RenderCommandKind::BeginDynamicComposite: out.kind = NjgRenderCommandKind::BeginDynamicComposite; break;
         case RenderCommandKind::EndDynamicComposite: out.kind = NjgRenderCommandKind::EndDynamicComposite; break;
         case RenderCommandKind::BeginMask: out.kind = NjgRenderCommandKind::BeginMask; break;
         case RenderCommandKind::ApplyMask: out.kind = NjgRenderCommandKind::ApplyMask; break;
         case RenderCommandKind::BeginMaskContent: out.kind = NjgRenderCommandKind::BeginMaskContent; break;
         case RenderCommandKind::EndMask: out.kind = NjgRenderCommandKind::EndMask; break;
-        case RenderCommandKind::BeginComposite: out.kind = NjgRenderCommandKind::BeginComposite; break;
-        case RenderCommandKind::DrawCompositeQuad: out.kind = NjgRenderCommandKind::DrawCompositeQuad; break;
-        case RenderCommandKind::EndComposite: out.kind = NjgRenderCommandKind::EndComposite; break;
         default: out.kind = NjgRenderCommandKind::DrawPart; break;
         }
         // Part packet
@@ -244,8 +241,8 @@ static void packQueuedCommands(RendererCtx& ctx) {
         out.partPacket.isMask = pp.isMask;
         out.partPacket.renderable = pp.renderable;
         out.partPacket.modelMatrix = pp.modelMatrix;
-        out.partPacket.renderMatrix = ::nicxlive::core::inGetCamera().matrix() * pp.puppetMatrix;
-        out.partPacket.renderRotation = 0.0f;
+        out.partPacket.renderMatrix = pp.renderMatrix;
+        out.partPacket.renderRotation = pp.renderRotation;
         out.partPacket.clampedTint = pp.clampedTint;
         out.partPacket.clampedScreen = pp.clampedScreen;
         out.partPacket.opacity = pp.opacity;
@@ -261,6 +258,7 @@ static void packQueuedCommands(RendererCtx& ctx) {
         out.partPacket.uvAtlasStride = pp.uvAtlasStride;
         out.partPacket.deformOffset = pp.deformOffset;
         out.partPacket.deformAtlasStride = pp.deformAtlasStride;
+        out.partPacket.indexHandle = pp.indexBuffer;
         const auto* idxBuf = ctx.backend->getDrawableIndices(pp.indexBuffer);
         if (idxBuf && !idxBuf->empty()) {
             out.partPacket.indexCount = std::min<std::size_t>(pp.indexCount, idxBuf->size());
@@ -271,7 +269,7 @@ static void packQueuedCommands(RendererCtx& ctx) {
             out.partPacket.vertexCount = pp.vertexCount;
             out.partPacket.indices = pp.indices.empty() ? nullptr : pp.indices.data();
         }
-        const size_t texCount = (qc.kind == RenderCommandKind::DrawPart || qc.kind == RenderCommandKind::DrawMask) ? 3 : 0;
+        const size_t texCount = (qc.kind == RenderCommandKind::DrawPart) ? 3 : 0;
         for (size_t ti = 0; ti < texCount; ++ti) {
             const auto t = pp.textureUUIDs[ti];
             if (t == 0) {
@@ -297,20 +295,49 @@ static void packQueuedCommands(RendererCtx& ctx) {
             break;
         }
         out.maskApplyPacket.isDodge = qc.maskApplyPacket.isDodge;
-        // part packet for ApplyMask uses the packet embedded in maskApplyPacket
+        // D parity: ApplyMask serializes its own part packet, not the current DrawPart packet.
         const auto& applyPart = qc.maskApplyPacket.partPacket;
+        auto& maskPart = out.maskApplyPacket.partPacket;
+        maskPart.isMask = applyPart.isMask;
+        maskPart.renderable = applyPart.renderable;
+        maskPart.modelMatrix = applyPart.modelMatrix;
+        maskPart.renderMatrix = applyPart.renderMatrix;
+        maskPart.renderRotation = applyPart.renderRotation;
+        maskPart.clampedTint = applyPart.clampedTint;
+        maskPart.clampedScreen = applyPart.clampedScreen;
+        maskPart.opacity = applyPart.opacity;
+        maskPart.emissionStrength = applyPart.emissionStrength;
+        maskPart.maskThreshold = applyPart.maskThreshold;
+        maskPart.blendingMode = static_cast<int>(applyPart.blendMode);
+        maskPart.useMultistageBlend = applyPart.useMultistageBlend;
+        maskPart.hasEmissionOrBumpmap = applyPart.hasEmissionOrBumpmap;
+        maskPart.origin = applyPart.origin;
+        maskPart.vertexOffset = applyPart.vertexOffset;
+        maskPart.vertexAtlasStride = applyPart.vertexAtlasStride;
+        maskPart.uvOffset = applyPart.uvOffset;
+        maskPart.uvAtlasStride = applyPart.uvAtlasStride;
+        maskPart.deformOffset = applyPart.deformOffset;
+        maskPart.deformAtlasStride = applyPart.deformAtlasStride;
+        maskPart.indexHandle = applyPart.indexBuffer;
+        for (size_t ti = 0; ti < 3; ++ti) {
+            const auto t = applyPart.textureUUIDs[ti];
+            if (t == 0) {
+                maskPart.textureHandles[ti] = 0;
+                continue;
+            }
+            auto hit = ctx.runtimeTextureHandles.find(t);
+            maskPart.textureHandles[ti] = (hit != ctx.runtimeTextureHandles.end()) ? hit->second : t;
+        }
+        maskPart.textureCount = 3;
         const auto* applyIdx = ctx.backend->getDrawableIndices(applyPart.indexBuffer);
-        out.maskApplyPacket.partPacket = out.partPacket; // default
         if (applyIdx && !applyIdx->empty()) {
-            auto& dst = out.maskApplyPacket.partPacket;
-            dst = out.partPacket;
-            dst.indexCount = std::min<std::size_t>(applyPart.indexCount, applyIdx->size());
-            dst.indices = applyIdx->data();
-            dst.vertexCount = applyPart.vertexCount;
-        } else if (qc.maskApplyPacket.kind == nicxlive::core::RenderBackend::MaskDrawableKind::Part) {
-            out.maskApplyPacket.partPacket.indexCount = applyPart.indexCount;
-            out.maskApplyPacket.partPacket.vertexCount = applyPart.vertexCount;
-            out.maskApplyPacket.partPacket.indices = applyPart.indices.empty() ? nullptr : applyPart.indices.data();
+            maskPart.indexCount = std::min<std::size_t>(applyPart.indexCount, applyIdx->size());
+            maskPart.indices = applyIdx->data();
+            maskPart.vertexCount = applyPart.vertexCount;
+        } else {
+            maskPart.indexCount = applyPart.indexCount;
+            maskPart.vertexCount = applyPart.vertexCount;
+            maskPart.indices = applyPart.indices.empty() ? nullptr : applyPart.indices.data();
         }
         // mask packet from qc.maskApplyPacket.maskPacket
         const auto& mp = qc.maskApplyPacket.maskPacket;
@@ -321,6 +348,7 @@ static void packQueuedCommands(RendererCtx& ctx) {
         out.maskApplyPacket.maskPacket.vertexAtlasStride = mp.vertexAtlasStride;
         out.maskApplyPacket.maskPacket.deformOffset = mp.deformOffset;
         out.maskApplyPacket.maskPacket.deformAtlasStride = mp.deformAtlasStride;
+        out.maskApplyPacket.maskPacket.indexHandle = mp.indexBuffer;
         const auto* midx = ctx.backend->getDrawableIndices(mp.indexBuffer);
         if (midx && !midx->empty()) {
             out.maskApplyPacket.maskPacket.indexCount = std::min<std::size_t>(mp.indexCount, midx->size());
@@ -371,11 +399,10 @@ extern "C" {
 void njgRuntimeInit() {
     std::lock_guard<std::mutex> lock(gMutex);
     if (gRuntimeInitialized) return;
+    gUnityTimeTicker = 0.0;
     gRuntimeInitialized = true;
     inSetTimingFunc([]() {
-        using namespace std::chrono;
-        auto now = steady_clock::now().time_since_epoch();
-        return duration_cast<duration<double>>(now).count();
+        return gUnityTimeTicker;
     });
 }
 
@@ -449,7 +476,8 @@ NjgResult njgLoadPuppet(void* renderer, const char* pathUtf8, void** outPuppet) 
             pup->root->reconstruct();
             pup->root->finalize();
         }
-        if (pup->root) {            std::size_t nodeCount = 0;
+        if (pup->root) {
+            std::size_t nodeCount = 0;
             std::size_t partCount = 0;
             std::size_t maskCount = 0;
             std::size_t projectableCount = 0;
@@ -496,7 +524,7 @@ NjgResult njgLoadPuppet(void* renderer, const char* pathUtf8, void** outPuppet) 
             };
             finalizeParts(pup->root);
             countNodes(pup->root);
-            std::fprintf(stderr, "[nicxlive] load tree: rootChildren=%zu nodes=%zu parts=%zu masks=%zu projectables=%zu parts(masked=%zu texIds=%zu texPtrs=%zu)\n",
+            std::fprintf(stderr, "[nicxlive] load tree: rootChildren=%zu nodes=%zu parts=%zu masks=%zu projectables=%zu parts(masked=%zu texIds=%zu texPtrs=%zu\n",
                          pup->root->childrenList().size(),
                          nodeCount,
                          partCount,
@@ -507,7 +535,8 @@ NjgResult njgLoadPuppet(void* renderer, const char* pathUtf8, void** outPuppet) 
                          partWithTexturePtrCount);
             pup->scanParts(true, pup->root);
             auto root = pup->actualRoot();
-            if (root) {                pup->rescanNodes();
+            if (root) {
+                pup->rescanNodes();
                 root->build(true);
             }
         }
@@ -534,8 +563,7 @@ NjgResult njgLoadPuppet(void* renderer, const char* pathUtf8, void** outPuppet) 
         unityLog("[nicxlive] njgLoadPuppet exception: unknown");
         return NjgResult::Failure;
     }
-}
-NjgResult njgGetParameters(void* puppetHandle, NjgParameterInfo* buffer, size_t bufferLength, size_t* outCount) {
+}NjgResult njgGetParameters(void* puppetHandle, NjgParameterInfo* buffer, size_t bufferLength, size_t* outCount) {
     if (!outCount) return NjgResult::InvalidArgument;
     *outCount = 0;
     std::shared_ptr<Puppet> pup;
@@ -833,6 +861,9 @@ NjgResult njgTickPuppet(void* puppet, double deltaSeconds) {
         }
     }
     if (it->second && it->second->puppet) {
+        if (std::isfinite(deltaSeconds) && deltaSeconds > 0.0) {
+            gUnityTimeTicker += deltaSeconds;
+        }
         inUpdate();
         std::fprintf(stderr, "[nicxlive] tick update start\n");
         it->second->puppet->update();
@@ -930,6 +961,7 @@ TextureStats njgGetTextureStats(void* renderer) {
 }
 
 } // extern "C"
+
 
 
 

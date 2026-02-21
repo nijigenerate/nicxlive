@@ -65,6 +65,16 @@ void Puppet::scanPartsRecurse(const std::shared_ptr<Node>& node, bool driversOnl
 
     if (auto drv = std::dynamic_pointer_cast<Driver>(node)) {
         drivers.push_back(drv);
+        static int sDriverTypeLog = 0;
+        if (sDriverTypeLog < 64) {
+            std::fprintf(stderr, "[nicxlive] scan-driver uuid=%u type=%s name=%s\n",
+                         drv->uuid, drv->typeId().c_str(), drv->name.c_str());
+            ++sDriverTypeLog;
+        }
+        for (auto& param : drv->getAffectedParameters()) {
+            if (!param) continue;
+            drivenParameters[param] = drv;
+        }
     } else if (!driversOnly) {
         if (auto dcomp = std::dynamic_pointer_cast<DynamicComposite>(node)) {
             rootParts.push_back(dcomp);
@@ -129,6 +139,7 @@ void Puppet::rebuildRenderTasks(const std::shared_ptr<Node>& rootNode) {
 
 void Puppet::updateParametersAndDrivers(const std::shared_ptr<Node>& rootNode) {
     if (!rootNode) return;
+    static int sUpdLog = 0;
     if (renderParameters) {
         for (auto& param : parameters) {
             if (!enableDrivers) {
@@ -144,10 +155,17 @@ void Puppet::updateParametersAndDrivers(const std::shared_ptr<Node>& rootNode) {
     rootNode->transformChanged();
 
     if (renderParameters && enableDrivers) {
+        std::size_t ranDrivers = 0;
         for (auto& drv : drivers) {
             if (drv && drv->renderEnabled()) {
                 drv->updateDriver();
+                ++ranDrivers;
             }
+        }
+        if (sUpdLog < 20) {
+            std::fprintf(stderr, "[nicxlive] upd-drivers total=%zu ran=%zu rootParts=%zu\n",
+                         drivers.size(), ranDrivers, rootParts.size());
+            ++sUpdLog;
         }
     }
 }
@@ -451,18 +469,18 @@ void Puppet::recordNodeChange(nodes::NotifyReason reason) {
             if (auto preserve = metaNode->get_optional<bool>("preservePixels")) meta.preservePixels = *preserve;
             if (auto thumb = metaNode->get_optional<uint32_t>("thumbnailId")) meta.thumbnailId = *thumb;
         }
+        if (auto physicsNode = data.get_child_optional("physics")) {
+            if (auto ppm = physicsNode->get_optional<float>("pixelsPerMeter")) physics.pixelsPerMeter = *ppm;
+            if (auto gravity = physicsNode->get_optional<float>("gravity")) physics.gravity = *gravity;
+        }
+        std::shared_ptr<nodes::Node> loadedRoot;
         if (auto rootNode = data.get_child_optional("nodes")) {
             std::fprintf(stderr, "[nicxlive] puppet.deserialize nodes childCount=%zu\n", rootNode->size());
             std::string type = rootNode->get<std::string>("type", "Node");
-            auto loadedRoot = nodes::Node::inInstantiateNode(type);
+            loadedRoot = nodes::Node::inInstantiateNode(type);
             if (!loadedRoot) loadedRoot = std::make_shared<nodes::Node>();
             loadedRoot->deserializeFromFghj(*rootNode);
             std::fprintf(stderr, "[nicxlive] puppet.deserialize loadedRoot children=%zu\n", loadedRoot->childrenList().size());
-            loadedRoot->setParent(puppetRootNode);
-            loadedRoot->setPuppet(shared_from_this());
-            loadedRoot->reconstruct();
-            loadedRoot->finalize();
-            root = loadedRoot;
         }
         parameters.clear();
         if (auto paramNode = data.get_child_optional("param")) {
@@ -477,15 +495,53 @@ void Puppet::recordNodeChange(nodes::NotifyReason reason) {
             }
             std::fprintf(stderr, "[nicxlive] puppet.deserialize params=%zu\n", parameters.size());
         }
+
+        if (loadedRoot) {
+            loadedRoot->setParent(puppetRootNode);
+            loadedRoot->setPuppet(shared_from_this());
+            loadedRoot->reconstruct();
+            root = loadedRoot;
+            loadedRoot->finalize();
+        }
+
         auto self = shared_from_this();
         for (auto& p : parameters) {
             if (!p) continue;
             p->reconstruct(self);
             p->finalize(self);
+            if (p->name == "Skirt:: Physics") {
+                std::fprintf(stderr,
+                             "[nicxlive] skirt-phys param defaults=(%g,%g) min=(%g,%g) max=(%g,%g) axis0=%zu axis1=%zu\n",
+                             p->defaults.x, p->defaults.y,
+                             p->min.x, p->min.y,
+                             p->max.x, p->max.y,
+                             p->axisPoints[0].size(), p->axisPoints[1].size());
+                std::size_t cntDeform = 0;
+                std::size_t cntValue = 0;
+                std::size_t cntParam = 0;
+                for (auto& kv : p->bindingMap) {
+                    auto& b = kv.second;
+                    if (!b) continue;
+                    if (std::dynamic_pointer_cast<param::DeformationParameterBinding>(b)) cntDeform++;
+                    else if (std::dynamic_pointer_cast<param::ParameterParameterBinding>(b)) cntParam++;
+                    else if (std::dynamic_pointer_cast<param::ValueParameterBinding>(b)) cntValue++;
+                    std::fprintf(stderr, "[nicxlive] skirt-phys binding key=%s name=%s target=%u\n",
+                                 kv.first.c_str(), b->getName().c_str(), b->getNodeUUID());
+                }
+                std::fprintf(stderr, "[nicxlive] skirt-phys binding counts deform=%zu value=%zu param=%zu\n",
+                             cntDeform, cntValue, cntParam);
+            }
             for (auto& kv : p->bindingMap) {
                 auto deform = std::dynamic_pointer_cast<param::DeformationParameterBinding>(kv.second);
                 if (!deform) continue;
-                if (deform->getNodeUUID() != 3755828177u) continue;
+                const uint32_t targetUuid = deform->getNodeUUID();
+                if (targetUuid != 3755828177u &&
+                    targetUuid != 1022832785u &&
+                    targetUuid != 1173732246u &&
+                    targetUuid != 305080986u &&
+                    targetUuid != 4079733156u) {
+                    continue;
+                }
                 float maxAbs = 0.0f;
                 const auto xc = p->axisPointCount(0);
                 const auto yc = p->axisPointCount(1);
@@ -498,7 +554,17 @@ void Puppet::recordNodeChange(nodes::NotifyReason reason) {
                         }
                     }
                 }
-                std::fprintf(stderr, "[nicxlive] bind-check param=%s target=3755828177 maxAbs=%g\n", p->name.c_str(), maxAbs);
+                float center0x = 0.0f;
+                float center0y = 0.0f;
+                if (xc > 1 && yc > 1) {
+                    auto center = deform->valueAt(param::Vec2u{1, 1});
+                    if (!center.vertexOffsets.empty()) {
+                        center0x = center.vertexOffsets.x[0];
+                        center0y = center.vertexOffsets.y[0];
+                    }
+                }
+                std::fprintf(stderr, "[nicxlive] bind-check param=%s target=%u maxAbs=%g center11=(%g,%g)\n",
+                             p->name.c_str(), targetUuid, maxAbs, center0x, center0y);
             }
         }
         std::map<std::string, std::size_t> deformTypeCounts;
@@ -527,6 +593,11 @@ void Puppet::recordNodeChange(nodes::NotifyReason reason) {
 std::shared_ptr<nodes::Node> resolvePuppetNodeById(const std::shared_ptr<Puppet>& puppet, uint32_t uuid) {
     if (!puppet || uuid == 0) return nullptr;
     return puppet->findNodeById(uuid);
+}
+
+std::shared_ptr<param::Parameter> resolvePuppetParameterById(const std::shared_ptr<Puppet>& puppet, uint32_t uuid) {
+    if (!puppet || uuid == 0) return nullptr;
+    return puppet->findParameter(uuid);
 }
 
 } // namespace nicxlive::core

@@ -1,10 +1,46 @@
 ﻿#include "command_emitter.hpp"
 #include "backend_queue.hpp"
 #include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <cstdint>
 
 namespace nicxlive::core::render {
 
 namespace nodes = ::nicxlive::core::nodes;
+
+namespace {
+bool traceSharedEnabled() {
+    static int enabled = -1;
+    if (enabled >= 0) return enabled != 0;
+    const char* v = std::getenv("NJCX_TRACE_SHARED");
+    if (!v) {
+        enabled = 0;
+        return false;
+    }
+    enabled = (std::strcmp(v, "1") == 0 || std::strcmp(v, "true") == 0 || std::strcmp(v, "TRUE") == 0) ? 1 : 0;
+    return enabled != 0;
+}
+
+uint64_t hashVec2Array(const ::nicxlive::core::nodes::Vec2Array& arr) {
+    constexpr uint64_t kOffset = 1469598103934665603ull;
+    constexpr uint64_t kPrime = 1099511628211ull;
+    uint64_t h = kOffset;
+    const float* xs = arr.dataX();
+    const float* ys = arr.dataY();
+    if (!xs || !ys) return h;
+    for (std::size_t i = 0; i < arr.size(); ++i) {
+        uint32_t bx = 0, by = 0;
+        std::memcpy(&bx, &xs[i], sizeof(float));
+        std::memcpy(&by, &ys[i], sizeof(float));
+        h ^= static_cast<uint64_t>(bx);
+        h *= kPrime;
+        h ^= static_cast<uint64_t>(by);
+        h *= kPrime;
+    }
+    return h;
+}
+} // namespace
 
 // --- QueueCommandEmitter (繧ｭ繝･繝ｼ蜿朱寔逕ｨ) ---
 
@@ -22,6 +58,16 @@ void QueueCommandEmitter::beginFrame(RenderBackend* backend, RenderGpuState& sta
 }
 
 void QueueCommandEmitter::endFrame(RenderBackend*, RenderGpuState&) {
+    if (traceSharedEnabled()) {
+        using ::nicxlive::core::render::sharedDeformBufferData;
+        auto& deform = sharedDeformBufferData();
+        const uint64_t h = hashVec2Array(deform);
+        std::fprintf(stderr,
+                     "[nicxlive][shared-hash] queue=%zu deformStride=%zu hash=%llu\n",
+                     backend_ ? backend_->queue.size() : 0,
+                     deform.size(),
+                     static_cast<unsigned long long>(h));
+    }
     activeBackend_ = nullptr;
     pendingMask = false;
     pendingMaskUsesStencil = false;
