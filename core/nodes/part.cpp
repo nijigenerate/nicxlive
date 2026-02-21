@@ -633,6 +633,15 @@ void Part::fillDrawPacket(const Node& header, PartDrawPacket& packet, bool isMas
     packet.uvs = mesh->uvs;
     packet.indices = mesh->indices;
     packet.deformation = deformation;
+    // Keep queue backend IBO map in sync with packet handles.
+    // Some load paths can leave ibo assigned while index data is not registered yet.
+    if (packet.indexBuffer != 0 && !packet.indices.empty()) {
+        if (auto qb = std::dynamic_pointer_cast<core::render::QueueRenderBackend>(core::getCurrentRenderBackend())) {
+            if (!qb->hasDrawableIndices(packet.indexBuffer)) {
+                qb->uploadDrawableIndices(packet.indexBuffer, packet.indices);
+            }
+        }
+    }
     if ((packet.vertexOffset == 1947 ||
          packet.vertexOffset == 3267 ||
          packet.vertexOffset == 3427 ||
@@ -727,11 +736,11 @@ void Part::finalize() {
             valid.push_back(m);
         }
         masks = std::move(valid);
-        // resolve textures from slots if ids exist
+        // Resolve texture pointers from slot IDs at finalize time.
+        // During node deserialize, puppet texture slots may not be ready yet.
         for (std::size_t i = 0; i < textureIds.size() && i < textures.size(); ++i) {
-            if (!textures[i]) {
-                textures[i] = pup->resolveTextureSlot(static_cast<uint32_t>(textureIds[i]));
-            }
+            if (textureIds[i] < 0) continue;
+            textures[i] = pup->resolveTextureSlot(static_cast<uint32_t>(textureIds[i]));
         }
         // apply maskedBy legacy bindings
         for (auto id : maskedBy) {
@@ -744,12 +753,6 @@ void Part::finalize() {
                 mb.mode = maskedByMode;
                 masks.push_back(mb);
             }
-        }
-        if (uuid == 4079733156u) {
-            const int32_t id0 = textureIds.empty() ? -9999 : textureIds[0];
-            const uint32_t tex0 = textures[0] ? textures[0]->getRuntimeUUID() : 0;
-            std::fprintf(stderr, "[nicxlive] part %u finalize texId0=%d texUuid0=%u hasTex0=%d\n",
-                         uuid, id0, tex0, textures[0] ? 1 : 0);
         }
     }
 }

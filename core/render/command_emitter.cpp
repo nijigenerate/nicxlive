@@ -1,5 +1,6 @@
 ﻿#include "command_emitter.hpp"
 #include "backend_queue.hpp"
+#include "../runtime_state.hpp"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -14,6 +15,18 @@ bool traceSharedEnabled() {
     static int enabled = -1;
     if (enabled >= 0) return enabled != 0;
     const char* v = std::getenv("NJCX_TRACE_SHARED");
+    if (!v) {
+        enabled = 0;
+        return false;
+    }
+    enabled = (std::strcmp(v, "1") == 0 || std::strcmp(v, "true") == 0 || std::strcmp(v, "TRUE") == 0) ? 1 : 0;
+    return enabled != 0;
+}
+
+bool traceCompositeTexEnabled() {
+    static int enabled = -1;
+    if (enabled >= 0) return enabled != 0;
+    const char* v = std::getenv("NJCX_TRACE_COMPOSITE_TEX");
     if (!v) {
         enabled = 0;
         return false;
@@ -48,7 +61,12 @@ QueueCommandEmitter::QueueCommandEmitter(const std::shared_ptr<QueueRenderBacken
 
 void QueueCommandEmitter::beginFrame(RenderBackend* backend, RenderGpuState& state) {
     activeBackend_ = backend;
+    statePtr_ = &state;
     state = RenderGpuState::init();
+    dynDepth_ = 0;
+    dynStack_.clear();
+    cameraStack_.clear();
+    currentCamera_ = ::nicxlive::core::inGetCamera();
     pendingMask = false;
     pendingMaskUsesStencil = false;
     if (backend_) {
@@ -69,6 +87,7 @@ void QueueCommandEmitter::endFrame(RenderBackend*, RenderGpuState&) {
                      static_cast<unsigned long long>(h));
     }
     activeBackend_ = nullptr;
+    statePtr_ = nullptr;
     pendingMask = false;
     pendingMaskUsesStencil = false;
 }
@@ -136,6 +155,30 @@ void QueueCommandEmitter::drawPartPacket(const nodes::PartDrawPacket& packet) {
     cmd.kind = RenderCommandKind::DrawPart;
     cmd.partPacket = packet;
     if (backend_) {
+        if (traceCompositeTexEnabled()) {
+            const uint32_t vo = packet.vertexOffset;
+            const bool compositeChildCandidate =
+                vo == 1169 || vo == 1135 || vo == 1087 || vo == 1063 || vo == 1032 || vo == 977 || vo == 920 ||
+                vo == 1567 || vo == 1583 || vo == 1587 || vo == 1508 || vo == 1527 || vo == 1531;
+            if (compositeChildCandidate) {
+                uint32_t nodeId = 0;
+                const char* nodeName = "<expired>";
+                if (auto node = packet.node.lock()) {
+                    nodeId = node->uuid;
+                    nodeName = node->name.c_str();
+                }
+                std::fprintf(stderr,
+                             "[nicxlive] composite-draw vo=%u node=%u name=%s texUUID=(%u,%u,%u) idx=%u vtx=%u mask=%d bm=%d op=%.3f tint=(%.3f,%.3f,%.3f) scr=(%.3f,%.3f,%.3f)\n",
+                             vo,
+                             nodeId,
+                             nodeName,
+                             packet.textureUUIDs[0], packet.textureUUIDs[1], packet.textureUUIDs[2],
+                             packet.indexCount, packet.vertexCount, packet.isMask ? 1 : 0,
+                             static_cast<int>(packet.blendMode), packet.opacity,
+                             packet.clampedTint.x, packet.clampedTint.y, packet.clampedTint.z,
+                             packet.clampedScreen.x, packet.clampedScreen.y, packet.clampedScreen.z);
+            }
+        }
         if (packet.vertexOffset == 916 || packet.vertexOffset == 1563 || packet.vertexOffset == 1504) {
             if (auto node = packet.node.lock()) {
                 std::fprintf(stderr, "[nicxlive] emit push idx=%zu kind=DrawPart vo=%u node=%u type=%s name=%s\n",
@@ -155,18 +198,62 @@ void QueueCommandEmitter::drawPartPacket(const nodes::PartDrawPacket& packet) {
 }
 
 void QueueCommandEmitter::beginDynamicComposite(const std::shared_ptr<nodes::Projectable>&, const DynamicCompositePass& pass) {
+    dynDepth_++;
+    auto passData = pass;
+    int vw = 0;
+    int vh = 0;
+    ::nicxlive::core::inGetViewport(vw, vh);
+    passData.origViewport[0] = 0;
+    passData.origViewport[1] = 0;
+    passData.origViewport[2] = vw;
+    passData.origViewport[3] = vh;
+    passData.origBuffer = statePtr_ ? statePtr_->framebuffer : 0;
+    dynStack_.push_back(passData);
+
+    cameraStack_.push_back(::nicxlive::core::inGetCamera());
+    if (passData.surface && passData.surface->textureCount > 0) {
+        auto tex = passData.surface->textures[0];
+        if (tex) {
+            ::nicxlive::core::inPushViewport(tex->width(), tex->height());
+            auto camera = ::nicxlive::core::inGetCamera();
+            camera.scale = nodes::Vec2{1.0f, -1.0f};
+            const float invScaleX = passData.scale.x == 0.0f ? 0.0f : 1.0f / passData.scale.x;
+            const float invScaleY = passData.scale.y == 0.0f ? 0.0f : 1.0f / passData.scale.y;
+            const auto scaling = nodes::Mat4::scale(nodes::Vec3{invScaleX, invScaleY, 1.0f});
+            const auto rotation = nodes::Mat4::zRotation(-passData.rotationZ);
+            const auto offsetMatrix = nodes::Mat4::multiply(scaling, rotation);
+            const auto offsetOrigin = offsetMatrix.transformPoint(nodes::Vec3{0.0f, 0.0f, 0.0f});
+            camera.position = nodes::Vec2{-offsetOrigin.x, -offsetOrigin.y};
+            ::nicxlive::core::inSetCamera(camera);
+        }
+    }
+
     QueuedCommand cmd{};
     cmd.kind = RenderCommandKind::BeginDynamicComposite;
-    cmd.dynamicPass = pass;
+    cmd.dynamicPass = passData;
     if (backend_) {
         std::fprintf(stderr, "[nicxlive] emit push idx=%zu kind=BeginDynamicComposite stencil=%u\n",
                      backend_->queue.size(),
-                     pass.stencil ? pass.stencil->backendId() : 0u);
+                     passData.stencil ? passData.stencil->backendId() : 0u);
         backend_->queue.push_back(std::move(cmd));
     }
 }
 
 void QueueCommandEmitter::endDynamicComposite(const std::shared_ptr<nodes::Projectable>&, const DynamicCompositePass& pass) {
+    if (dynDepth_ > 0) {
+        dynDepth_--;
+    }
+    if (!dynStack_.empty()) {
+        dynStack_.pop_back();
+    }
+    if (pass.surface && pass.surface->textureCount > 0 && pass.surface->textures[0]) {
+        ::nicxlive::core::inPopViewport();
+    }
+    if (!cameraStack_.empty()) {
+        ::nicxlive::core::inSetCamera(cameraStack_.back());
+        cameraStack_.pop_back();
+    }
+
     QueuedCommand cmd{};
     cmd.kind = RenderCommandKind::EndDynamicComposite;
     cmd.dynamicPass = pass;
@@ -209,5 +296,9 @@ void QueueCommandEmitter::uploadSharedBuffers() {
 }
 
 } // namespace nicxlive::core::render
+
+
+
+
 
 

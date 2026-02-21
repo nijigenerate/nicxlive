@@ -122,6 +122,12 @@ public:
         if (it == indexBuffers.end()) return nullptr;
         return &it->second;
     }
+    bool hasDrawableIndices(uint32_t id) const {
+        return indexBuffers.find(id) != indexBuffers.end();
+    }
+    std::size_t drawableIndexBufferCount() const {
+        return indexBuffers.size();
+    }
 
 private:
     uint32_t nextId{1};

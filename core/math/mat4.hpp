@@ -42,7 +42,15 @@ struct Mat4 {
 
     static Mat4 multiply(const Mat4& lhs, const Mat4& rhs) {
         Mat4 out{};
-        out.a = boost::qvm::operator*(lhs.a, rhs.a);
+        for (int r = 0; r < 4; ++r) {
+            for (int c = 0; c < 4; ++c) {
+                float v = 0.0f;
+                for (int k = 0; k < 4; ++k) {
+                    v += lhs.a.a[r][k] * rhs.a.a[k][c];
+                }
+                out.a.a[r][c] = v;
+            }
+        }
         return out;
     }
 

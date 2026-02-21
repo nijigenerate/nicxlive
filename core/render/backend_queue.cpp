@@ -1,4 +1,5 @@
 #include "backend_queue.hpp"
+#include "../runtime_state.hpp"
 
 #include <algorithm>
 
@@ -45,18 +46,32 @@ void QueueRenderBackend::endMask() {
     queue.push_back(cmd);
 }
 void QueueRenderBackend::beginDynamicComposite(const ::nicxlive::core::DynamicCompositePass& pass) {
-    dynamicStack.push_back(pass);
+    auto passCopy = pass;
+    passCopy.origBuffer = framebufferHandle();
+    int vw = 0;
+    int vh = 0;
+    inGetViewport(vw, vh);
+    passCopy.origViewport[0] = 0;
+    passCopy.origViewport[1] = 0;
+    passCopy.origViewport[2] = vw;
+    passCopy.origViewport[3] = vh;
+
+    dynamicStack.push_back(passCopy);
     QueuedCommand cmd;
     cmd.kind = RenderCommandKind::BeginDynamicComposite;
-    cmd.dynamicPass = pass;
+    cmd.dynamicPass = passCopy;
     queue.push_back(cmd);
 }
 void QueueRenderBackend::endDynamicComposite(const ::nicxlive::core::DynamicCompositePass& pass) {
-    lastDynamic = pass;
-    if (!dynamicStack.empty()) dynamicStack.pop_back();
+    auto passCopy = pass;
+    if (!dynamicStack.empty()) {
+        passCopy = dynamicStack.back();
+        dynamicStack.pop_back();
+    }
+    lastDynamic = passCopy;
     QueuedCommand cmd;
     cmd.kind = RenderCommandKind::EndDynamicComposite;
-    cmd.dynamicPass = pass;
+    cmd.dynamicPass = passCopy;
     queue.push_back(cmd);
 }
 void QueueRenderBackend::destroyDynamicComposite(const std::shared_ptr<::nicxlive::core::DynamicCompositeSurface>&) {}

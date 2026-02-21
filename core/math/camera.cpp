@@ -3,6 +3,7 @@
 #include "../runtime_state.hpp"
 
 #include <cmath>
+#include <limits>
 
 namespace nicxlive::core::math {
 
@@ -27,7 +28,7 @@ Mat4 Camera::matrix() const {
     }
     Vec2 origin{realSize.x / 2.0f, realSize.y / 2.0f};
     constexpr float kMaxDepth = 65535.0f;
-    const float z = -(kMaxDepth / 2.0f);
+    const float z = -static_cast<float>(std::numeric_limits<uint16_t>::max() / 2);
 
     Mat4 ortho = Mat4::orthographic(0.0f, realSize.x, realSize.y, 0.0f, 0.0f, kMaxDepth);
     Mat4 tOrigin = Mat4::translation(origin.x, origin.y, 0.0f);

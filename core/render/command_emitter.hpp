@@ -3,6 +3,7 @@
 #include "commands.hpp"
 #include "common.hpp"
 #include "shared_deform_buffer.hpp"
+#include "../math/camera.hpp"
 
 #include <memory>
 #include <vector>
@@ -33,8 +34,13 @@ private:
 
     std::shared_ptr<QueueRenderBackend> backend_{};
     RenderBackend* activeBackend_{nullptr};
+    RenderGpuState* statePtr_{nullptr};
+    ::nicxlive::core::math::Camera currentCamera_{};
     bool pendingMask{false};
     bool pendingMaskUsesStencil{false};
+    int dynDepth_{0};
+    std::vector<DynamicCompositePass> dynStack_{};
+    std::vector<::nicxlive::core::math::Camera> cameraStack_{};
 };
 
 } // namespace nicxlive::core::render

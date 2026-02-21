@@ -26,6 +26,40 @@ using namespace nicxlive::core;
 using namespace nicxlive::core::render;
 
 namespace {
+bool traceCompositeTexEnabled() {
+    static int enabled = -1;
+    if (enabled >= 0) return enabled != 0;
+    const char* v = std::getenv("NJCX_TRACE_COMPOSITE_TEX");
+    if (!v) {
+        enabled = 0;
+        return false;
+    }
+    enabled = (std::strcmp(v, "1") == 0 || std::strcmp(v, "true") == 0 || std::strcmp(v, "TRUE") == 0) ? 1 : 0;
+    return enabled != 0;
+}
+
+bool traceCompositePacketEnabled() {
+    static int enabled = -1;
+    if (enabled >= 0) return enabled != 0;
+    const char* v = std::getenv("NJCX_TRACE_COMPOSITE_PACKET");
+    if (!v) {
+        enabled = 0;
+        return false;
+    }
+    enabled = (std::strcmp(v, "1") == 0 || std::strcmp(v, "true") == 0 || std::strcmp(v, "TRUE") == 0) ? 1 : 0;
+    return enabled != 0;
+}
+
+bool isCompositeEyeCandidate(uint32_t vo) {
+    switch (vo) {
+    case 1169: case 1135: case 1087: case 1063: case 1032: case 977: case 920:
+    case 1567: case 1583: case 1587: case 1508: case 1527: case 1531:
+        return true;
+    default:
+        return false;
+    }
+}
+
 struct RendererCtx {
     UnityRendererConfig cfg{};
     UnityResourceCallbacks callbacks{};
@@ -279,12 +313,14 @@ static void packQueuedCommands(RendererCtx& ctx) {
         out.partPacket.deformOffset = pp.deformOffset;
         out.partPacket.deformAtlasStride = pp.deformAtlasStride;
         out.partPacket.indexHandle = pp.indexBuffer;
-        const auto* idxBuf = ctx.backend->getDrawableIndices(pp.indexBuffer);
+        auto idxBuf = ctx.backend->getDrawableIndices(pp.indexBuffer);
         if (idxBuf && !idxBuf->empty()) {
             out.partPacket.indexCount = std::min<std::size_t>(pp.indexCount, idxBuf->size());
             out.partPacket.indices = idxBuf->data();
             out.partPacket.vertexCount = pp.vertexCount;
         } else {
+            // Queue backend map may miss some late-built quads (e.g. composite self draw).
+            // Fall back to packet-local indices in that case.
             out.partPacket.indexCount = pp.indexCount;
             out.partPacket.vertexCount = pp.vertexCount;
             out.partPacket.indices = pp.indices.empty() ? nullptr : pp.indices.data();
@@ -308,7 +344,79 @@ static void packQueuedCommands(RendererCtx& ctx) {
             out.partPacket.textureHandles[ti] = h;
         }
         out.partPacket.textureCount = texCount;
-
+        if (traceCompositeTexEnabled() && qc.kind == RenderCommandKind::DrawPart) {
+            const uint32_t vo = pp.vertexOffset;
+            const bool compositeChildCandidate = isCompositeEyeCandidate(vo);
+            if (compositeChildCandidate) {
+                std::fprintf(stderr,
+                             "[nicxlive] pack-draw vo=%u texUUID=(%u,%u,%u) texHandle=(%zu,%zu,%zu)\n",
+                             vo,
+                             pp.textureUUIDs[0], pp.textureUUIDs[1], pp.textureUUIDs[2],
+                             out.partPacket.textureHandles[0], out.partPacket.textureHandles[1], out.partPacket.textureHandles[2]);
+            }
+        }
+        if (traceCompositePacketEnabled() && qc.kind == RenderCommandKind::DrawPart && isCompositeEyeCandidate(pp.vertexOffset)) {
+            static int traceCount = 0;
+            if (traceCount < 80) {
+                const uint16_t* idxPtr = nullptr;
+                std::size_t idxAvail = 0;
+                const char* idxSource = "none";
+                if (idxBuf && !idxBuf->empty()) {
+                    idxPtr = idxBuf->data();
+                    idxAvail = idxBuf->size();
+                    idxSource = "backendMap";
+                } else if (!pp.indices.empty()) {
+                    idxPtr = pp.indices.data();
+                    idxAvail = pp.indices.size();
+                    idxSource = "packetCopy";
+                }
+                const auto& vbuf = ::nicxlive::core::render::sharedVertexBufferData();
+                const auto& ubuf = ::nicxlive::core::render::sharedUvBufferData();
+                const auto& dbuf = ::nicxlive::core::render::sharedDeformBufferData();
+                const std::size_t vo = pp.vertexOffset;
+                const std::size_t uo = pp.uvOffset;
+                const std::size_t dfo = pp.deformOffset;
+                const std::size_t vc = pp.vertexCount;
+                const bool vInRange = (vo + vc) <= vbuf.size();
+                const bool uInRange = (uo + vc) <= ubuf.size();
+                const bool dInRange = (dfo + vc) <= dbuf.size();
+                const bool idxInRange = (idxPtr != nullptr) && (pp.indexCount <= idxAvail);
+                const float vx0 = vInRange && vc > 0 ? vbuf.x[vo] : 0.0f;
+                const float vy0 = vInRange && vc > 0 ? vbuf.y[vo] : 0.0f;
+                const float ux0 = uInRange && vc > 0 ? ubuf.x[uo] : 0.0f;
+                const float uy0 = uInRange && vc > 0 ? ubuf.y[uo] : 0.0f;
+                const float dx0 = dInRange && vc > 0 ? dbuf.x[dfo] : 0.0f;
+                const float dy0 = dInRange && vc > 0 ? dbuf.y[dfo] : 0.0f;
+                const unsigned i0 = idxInRange && pp.indexCount > 0 ? idxPtr[0] : 0;
+                const unsigned i1 = idxInRange && pp.indexCount > 1 ? idxPtr[1] : 0;
+                const unsigned i2 = idxInRange && pp.indexCount > 2 ? idxPtr[2] : 0;
+                std::size_t tex0DataLen = 0;
+                unsigned tex0First = 0;
+                if (pp.textures[0]) {
+                    const auto& texData = pp.textures[0]->data();
+                    tex0DataLen = texData.size();
+                    if (!texData.empty()) tex0First = texData[0];
+                }
+                std::fprintf(stderr,
+                    "[nicxlive][cmp-pack] vo=%u uo=%u do=%u vc=%u idxH=%u idxC=%u idxSrc=%s idxAvail=%zu idxOK=%d i0..2=(%u,%u,%u) "
+                    "vStridePkt=%u uStridePkt=%u dStridePkt=%u vStrideBuf=%zu uStrideBuf=%zu dStrideBuf=%zu inRange(v/u/d)=(%d,%d,%d) "
+                    "sample v0=(%.6f,%.6f) uv0=(%.6f,%.6f) d0=(%.6f,%.6f) tex0Data=%zu tex0First=%u flags(r=%d m=%d um=%d eb=%d rr=%.6f bm=%d op=%.6f)\n",
+                    pp.vertexOffset, pp.uvOffset, pp.deformOffset, pp.vertexCount,
+                    pp.indexBuffer, pp.indexCount, idxSource, idxAvail, idxInRange ? 1 : 0, i0, i1, i2,
+                    pp.vertexAtlasStride, pp.uvAtlasStride, pp.deformAtlasStride,
+                    vbuf.size(), ubuf.size(), dbuf.size(),
+                    vInRange ? 1 : 0, uInRange ? 1 : 0, dInRange ? 1 : 0,
+                    vx0, vy0, ux0, uy0, dx0, dy0, tex0DataLen, tex0First,
+                    pp.renderable ? 1 : 0,
+                    pp.isMask ? 1 : 0,
+                    pp.useMultistageBlend ? 1 : 0,
+                    pp.hasEmissionOrBumpmap ? 1 : 0,
+                    pp.renderRotation,
+                    static_cast<int>(pp.blendMode),
+                    pp.opacity);
+                ++traceCount;
+            }
+        }
         // Mask apply
         switch (qc.maskApplyPacket.kind) {
         case nicxlive::core::RenderBackend::MaskDrawableKind::Part:
@@ -365,7 +473,7 @@ static void packQueuedCommands(RendererCtx& ctx) {
             maskPart.textureHandles[ti] = h;
         }
         maskPart.textureCount = 3;
-        const auto* applyIdx = ctx.backend->getDrawableIndices(applyPart.indexBuffer);
+        auto applyIdx = ctx.backend->getDrawableIndices(applyPart.indexBuffer);
         if (applyIdx && !applyIdx->empty()) {
             maskPart.indexCount = std::min<std::size_t>(applyPart.indexCount, applyIdx->size());
             maskPart.indices = applyIdx->data();
@@ -385,7 +493,7 @@ static void packQueuedCommands(RendererCtx& ctx) {
         out.maskApplyPacket.maskPacket.deformOffset = mp.deformOffset;
         out.maskApplyPacket.maskPacket.deformAtlasStride = mp.deformAtlasStride;
         out.maskApplyPacket.maskPacket.indexHandle = mp.indexBuffer;
-        const auto* midx = ctx.backend->getDrawableIndices(mp.indexBuffer);
+        auto midx = ctx.backend->getDrawableIndices(mp.indexBuffer);
         if (midx && !midx->empty()) {
             out.maskApplyPacket.maskPacket.indexCount = std::min<std::size_t>(mp.indexCount, midx->size());
             out.maskApplyPacket.maskPacket.indices = midx->data();

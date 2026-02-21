@@ -651,7 +651,6 @@ void Projectable::dynamicRenderBegin(core::RenderContext& ctx) {
         if (std::dynamic_pointer_cast<Mask>(p)) continue;
         Mat4 childMatrix = Mat4::multiply(correction, p->transform().toMat4());
         Mat4 finalMatrix = Mat4::multiply(childBasis, childMatrix);
-        p->clearOffscreenRenderMatrix();
         p->setOffscreenModelMatrix(finalMatrix);
         if (auto dynChild = std::dynamic_pointer_cast<Projectable>(p)) {
             dynChild->renderNestedOffscreen(ctx);
@@ -664,7 +663,6 @@ void Projectable::dynamicRenderBegin(core::RenderContext& ctx) {
         if (!m) continue;
         Mat4 maskMatrix = Mat4::multiply(correction, m->transform().toMat4());
         Mat4 finalMatrix = Mat4::multiply(translate, maskMatrix);
-        m->clearOffscreenRenderMatrix();
         m->setOffscreenModelMatrix(finalMatrix);
         m->enqueueRenderCommands(ctx);
         queuedOffscreenParts.push_back(m);
@@ -824,7 +822,6 @@ void Projectable::enqueueRenderCommands(core::RenderContext& ctx) {
         if (!p) continue;
         Mat4 childMatrix = Mat4::multiply(correction, p->transform().toMat4());
         Mat4 finalMatrix = Mat4::multiply(childBasis, childMatrix);
-        p->clearOffscreenRenderMatrix();
         p->setOffscreenModelMatrix(finalMatrix);
         if (auto dynChild = std::dynamic_pointer_cast<Projectable>(p)) {
             dynChild->renderNestedOffscreen(ctx);
@@ -837,7 +834,6 @@ void Projectable::enqueueRenderCommands(core::RenderContext& ctx) {
         if (!m) continue;
         Mat4 maskMatrix = Mat4::multiply(correction, m->transform().toMat4());
         Mat4 finalMatrix = Mat4::multiply(translate, maskMatrix);
-        m->clearOffscreenRenderMatrix();
         m->setOffscreenModelMatrix(finalMatrix);
         m->enqueueRenderCommands(ctx);
         queuedOffscreenParts.push_back(m);
