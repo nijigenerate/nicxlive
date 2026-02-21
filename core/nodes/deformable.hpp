@@ -39,7 +39,6 @@ public:
 
 private:
     Deformable* owner_{};
-    Vec2Array pending_{};
 };
 
 class Deformable : public Node {
@@ -68,6 +67,9 @@ public:
     virtual void updateDeform();
 
     virtual void remapDeformationBindings(const std::vector<std::size_t>& remap, const Vec2Array& replacement, std::size_t newLength);
+
+    void preProcess() override;
+    void postProcess(int id = 0) override;
 
     void runBeginTask(core::RenderContext& ctx) override;
 

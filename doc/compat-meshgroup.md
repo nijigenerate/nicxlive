@@ -30,6 +30,7 @@
 | `setupChild` | super＋子孫へ filter 登録 | 同等 | ◯ |
 | `releaseChildNoRecurse` | pre/post から filter を除去 | 自身のフィルタのみ除去 | ◯ |
 | `releaseChild` | 子孫から filter を解除 | 子孫処理あり | ◯ |
+| filter hook 同一性管理 | `(stage, func)` 単位で登録/解除 | `stage + tag` 単位で登録/解除を一致化 | ◯ |
 | `captureTarget` | children_ref に追加し setupChildNoRecurse | add+フィルタ設定 | ◯ |
 | `releaseTarget` | フィルタ解除し children_ref から除去 | フィルタ解除＋削除 | ◯ |
 | `applyDeformToChildren` | translateChildren/dynamic に応じ deform 伝達→メッシュ破棄 | パラメータの deform binding 反映後 filterChildren→meshクリア | ◯ |

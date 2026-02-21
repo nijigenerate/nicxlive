@@ -518,8 +518,6 @@ void Puppet::recordNodeChange(nodes::NotifyReason reason) {
             std::fprintf(stderr, " %s=%zu", kv.first.c_str(), kv.second);
         }
         std::fprintf(stderr, "\n");
-        applyDeformToChildren();
-        rescanNodes();
     } catch (const std::exception& ex) {
         return std::string(ex.what());
     }

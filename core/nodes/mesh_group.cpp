@@ -601,7 +601,10 @@ void MeshGroup::setupChildNoRecurse(const std::shared_ptr<Node>& node, bool prep
     if (!node) return;
     auto deformable = std::dynamic_pointer_cast<Deformable>(node);
     bool isDeformable = static_cast<bool>(deformable);
-    auto hook = Node::FilterHook{kMeshGroupFilterStage, [this](auto t, auto v, auto d, auto mat) {
+    Node::FilterHook hook{};
+    hook.stage = kMeshGroupFilterStage;
+    hook.tag = reinterpret_cast<std::uintptr_t>(this);
+    hook.func = [this](auto t, auto v, auto d, auto mat) {
                                                      Vec2Array verts; verts.resize(v.size());
                                                      for (std::size_t i = 0; i < v.size(); ++i) { verts.x[i] = v[i].x; verts.y[i] = v[i].y; }
                                                      Vec2Array def; def.resize(d.size());
@@ -612,11 +615,12 @@ void MeshGroup::setupChildNoRecurse(const std::shared_ptr<Node>& node, bool prep
                                                      out.reserve(defOut.size());
                                                      for (std::size_t i = 0; i < defOut.size(); ++i) out.push_back(Vec2{defOut.x[i], defOut.y[i]});
                                                      return std::make_tuple(out, std::get<1>(res), std::get<2>(res));
-                                                  }};
+                                                  };
     auto& pre = node->preProcessFilters;
     auto& post = node->postProcessFilters;
-    pre.erase(std::remove_if(pre.begin(), pre.end(), [&](const auto& h) { return h.stage == kMeshGroupFilterStage; }), pre.end());
-    post.erase(std::remove_if(post.begin(), post.end(), [&](const auto& h) { return h.stage == kMeshGroupFilterStage; }), post.end());
+    const auto tag = reinterpret_cast<std::uintptr_t>(this);
+    pre.erase(std::remove_if(pre.begin(), pre.end(), [&](const auto& h) { return h.stage == kMeshGroupFilterStage && h.tag == tag; }), pre.end());
+    post.erase(std::remove_if(post.begin(), post.end(), [&](const auto& h) { return h.stage == kMeshGroupFilterStage && h.tag == tag; }), post.end());
 
     if (isDeformable && dynamic) {
         if (prepend) post.insert(post.begin(), hook); else post.push_back(hook);
@@ -629,8 +633,9 @@ void MeshGroup::releaseChildNoRecurse(const std::shared_ptr<Node>& node) {
     if (!node) return;
     auto& pre = node->preProcessFilters;
     auto& post = node->postProcessFilters;
-    pre.erase(std::remove_if(pre.begin(), pre.end(), [&](const auto& h) { return h.stage == kMeshGroupFilterStage; }), pre.end());
-    post.erase(std::remove_if(post.begin(), post.end(), [&](const auto& h) { return h.stage == kMeshGroupFilterStage; }), post.end());
+    const auto tag = reinterpret_cast<std::uintptr_t>(this);
+    pre.erase(std::remove_if(pre.begin(), pre.end(), [&](const auto& h) { return h.stage == kMeshGroupFilterStage && h.tag == tag; }), pre.end());
+    post.erase(std::remove_if(post.begin(), post.end(), [&](const auto& h) { return h.stage == kMeshGroupFilterStage && h.tag == tag; }), post.end());
 }
 
 bool MeshGroup::pointInTriangle(const Vec2& p, const Vec2& a, const Vec2& b, const Vec2& c) {

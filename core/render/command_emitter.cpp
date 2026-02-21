@@ -1,4 +1,4 @@
-#include "command_emitter.hpp"
+﻿#include "command_emitter.hpp"
 #include "backend_queue.hpp"
 #include <cstdio>
 
@@ -6,7 +6,7 @@ namespace nicxlive::core::render {
 
 namespace nodes = ::nicxlive::core::nodes;
 
-// --- QueueCommandEmitter (キュー収集用) ---
+// --- QueueCommandEmitter (繧ｭ繝･繝ｼ蜿朱寔逕ｨ) ---
 
 QueueCommandEmitter::QueueCommandEmitter(const std::shared_ptr<QueueRenderBackend>& backend) : backend_(backend) {}
 
@@ -28,7 +28,7 @@ void QueueCommandEmitter::endFrame(RenderBackend*, RenderGpuState&) {
 }
 
 void QueueCommandEmitter::beginMask(bool useStencil) {
-    // D 版では BeginMask は ApplyMask が成立したときに初めてキューへ積む
+    // D 迚医〒縺ｯ BeginMask 縺ｯ ApplyMask 縺梧・遶九＠縺溘→縺阪↓蛻昴ａ縺ｦ繧ｭ繝･繝ｼ縺ｸ遨阪・
     pendingMask = true;
     pendingMaskUsesStencil = useStencil;
 }
@@ -37,7 +37,6 @@ void QueueCommandEmitter::applyMask(const std::shared_ptr<nodes::Drawable>& mask
     if (!mask) return;
     RenderBackend::MaskApplyPacket packet{};
     if (!tryMakeMaskApplyPacket(mask, dodge, packet)) {
-        // ApplyMask に失敗した場合は pendingMask を破棄
         pendingMask = false;
         return;
     }
@@ -56,8 +55,8 @@ void QueueCommandEmitter::applyMask(const std::shared_ptr<nodes::Drawable>& mask
 
 void QueueCommandEmitter::beginMaskContent() {
     if (pendingMask) {
-        // D版: BeginMask は ApplyMask が成立したときのみキューへ積む。
-        // ApplyMask が来ずに BeginMaskContent だけ来た場合は何もせず破棄。
+        // D迚・ BeginMask 縺ｯ ApplyMask 縺梧・遶九＠縺溘→縺阪・縺ｿ繧ｭ繝･繝ｼ縺ｸ遨阪・縲・
+        // ApplyMask 縺梧擂縺壹↓ BeginMaskContent 縺縺第擂縺溷ｴ蜷医・菴輔ｂ縺帙★遐ｴ譽・・
         return;
     }
     QueuedCommand cmd{};
@@ -155,3 +154,5 @@ void QueueCommandEmitter::uploadSharedBuffers() {
 }
 
 } // namespace nicxlive::core::render
+
+

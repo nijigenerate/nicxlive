@@ -232,4 +232,12 @@ Status: `[ ]` todo, `[>]` in progress, `[x]` done, `[?]` blocked.
 | [x] | CP110 | behavior_diff | `compat-binfmt.md` | `MAGIC_BYTES`/`TEX_SECTION`/`EXT_SECTION` 定数不一致（`INOCHI02` 系） | D準拠 `TRNSRTS\\0` / `TEX_SECT` / `EXT_SECT` へ修正し `.inx` 読み込みを復旧 |
 | [x] | CP111 | behavior_diff | `compat-vec2array.md` | `Vec2Array/Vec3Array/Vec4Array` の copy semantics（浅いポインタコピー） | D準拠の値型動作に修正（copy ctor/copy assign で実データ複製、内部ポインタ再同期） |
 | [x] | CP112 | behavior_diff | `compat-vec2array.md` | `copyFrom` 初期化漏れ（`logicalLength_` 未リセットで `ensureLength` 早期 return） | `logicalLength_=0` を含む完全初期化へ修正し、`nijiv --test` の AV (`0xC0000005`) を解消 |
+| [x] | CP113 | missing_impl | `compat-path_deformer.md` | `deform(Vec2Array)` | D準拠で `deformedCurve = createCurve(...)` を実装し、`applyPathDeform` から呼び出すよう修正 |
+| [x] | CP114 | behavior_diff | `compat-path_deformer.md` | `applyPathDeform` の driver 初期化 (`setup` vs `updateDefaultShape`) | D準拠で初回初期化を `driver.setup()` に統一 |
+| [x] | CP115 | behavior_diff | `compat-path_deformer.md` | `applyDeformToChildren` 終端処理 | D準拠で `physicsOnly = true` 後に `rebuffer(empty)` を実施 |
+| [x] | CP116 | behavior_diff | `compat-deformable.md` | `preProcess/postProcess` と `DeformationStack` の更新順 | D準拠で stack/filter の更新順と shared deform dirty 反映を一致化 |
+| [x] | CP117 | behavior_diff | `compat-node.md` | `FilterHook` 同一性管理 | Dの `(stage,func)` 管理に対応するため C++側は `stage+tag` 管理へ統一し、登録/解除対称性を担保 |
+| [x] | CP118 | behavior_diff | `compat-drawable.md` | node attach/weld hook 解除条件 | D準拠の重複回避/解除に合わせ、`stage+tag` で一意管理 |
+| [x] | CP119 | behavior_diff | `compat-grid_deformer.md` | child filter 解除条件 | D準拠の登録/解除対称性に合わせ、`stage+tag` で一意管理 |
+| [x] | CP120 | behavior_diff | `compat-meshgroup.md` | child filter 解除条件 | D準拠の登録/解除対称性に合わせ、`stage+tag` で一意管理 |
 

@@ -20,6 +20,7 @@ public:
     class PhysicsDriver {
     public:
         virtual ~PhysicsDriver() = default;
+        virtual void setup() {}
         virtual void update(Vec2Array& offsets, float strength, uint64_t frame) = 0;
         virtual void updateDefaultShape() {}
         virtual void reset() {}
@@ -31,6 +32,7 @@ public:
     public:
         explicit ConnectedDriverAdapter(std::unique_ptr<ConnectedPhysicsDriver> impl, PathDeformer* owner)
             : impl_(std::move(impl)), owner_(owner) {}
+        void setup() override;
         void update(Vec2Array& offsets, float strength, uint64_t frame) override;
         void updateDefaultShape() override;
         void reset() override;
@@ -186,6 +188,7 @@ private:
     void disablePhysicsDriver(const std::string& reason);
     Vec2 sanitizeVec2(const Vec2& v) const;
     void applyPathDeform(const Vec2Array& origDeform);
+    void deform(const Vec2Array& deformedControlPoints);
     void logCurveState(const std::string& ctx);
     void logCurveHealth(const std::string& ctx, const std::unique_ptr<Curve>& a, const std::unique_ptr<Curve>& b, const Vec2Array& def);
     bool shouldEmitInvalidIndexLog(std::size_t index, const std::string& context, const Vec2& value, std::size_t consecutive);

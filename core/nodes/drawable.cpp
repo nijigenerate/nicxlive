@@ -19,6 +19,8 @@ namespace nicxlive::core::nodes {
 
 namespace {
 bool gDoGenerateBounds = false;
+constexpr std::uintptr_t kNodeAttachFilterTag = 0x6e617474u; // 'natt'
+constexpr std::uintptr_t kWeldFilterTagBase = 0x776c6400u;   // 'wld\0'
 
 using nicxlive::core::math::applyAffine;
 using nicxlive::core::math::barycentric;
@@ -539,7 +541,7 @@ std::tuple<Vec2Array, std::optional<Mat4>, bool> Drawable::weldingProcessor(cons
 
     const auto& link = *it;
     bool changed = false;
-    auto pairCount = std::min<std::size_t>(link.indices.size(), origVertices.size());
+    auto pairCount = std::min<std::size_t>(link.indices.size(), vertices.size());
     if (pairCount == 0) return {origDeformation, std::nullopt, false};
 
     std::vector<std::size_t> selfIndices;
@@ -550,7 +552,7 @@ std::tuple<Vec2Array, std::optional<Mat4>, bool> Drawable::weldingProcessor(cons
         auto mapped = link.indices[i];
         if (mapped == NOINDEX || mapped < 0) continue;
         auto tIdx = static_cast<std::size_t>(mapped);
-        if (tIdx >= targetDrawable->vertices.size()) continue;
+        if (tIdx >= origVertices.size()) continue;
         selfIndices.push_back(i);
         targetIndices.push_back(tIdx);
     }
@@ -607,7 +609,7 @@ std::tuple<Vec2Array, std::optional<Mat4>, bool> Drawable::weldingProcessor(cons
         sharedDeformMarkDirty();
         updateBounds();
     }
-    return {selfDeformOut, std::nullopt, changed};
+    return {origDeformation, std::nullopt, changed};
 }
 
 void Drawable::addWeldedTarget(const std::shared_ptr<Drawable>& target,
@@ -716,9 +718,6 @@ void Drawable::runPostTaskImpl(std::size_t priority, core::RenderContext& ctx) {
             if (!tgtDrawable) continue;
             Mat4 tmat = tgtDrawable->transform().toMat4();
             auto res = weldingProcessor(tgtDrawable, tgtDrawable->vertices, tgtDrawable->deformation, &tmat);
-            if (std::get<0>(res).size() == deformation.size()) {
-                deformation = std::get<0>(res);
-            }
             if (std::get<2>(res)) {
                 changed = true;
             }
@@ -787,11 +786,14 @@ void Drawable::setupChildDrawable() {
     for (auto& child : children) {
         if (!child) continue;
         if (!child->pinToMesh) continue;
-        bool exists = std::any_of(child->preProcessFilters.begin(), child->preProcessFilters.end(), [](const FilterHook& h) { return h.stage == 0; });
+        bool exists = std::any_of(child->preProcessFilters.begin(), child->preProcessFilters.end(), [](const FilterHook& h) {
+            return h.stage == 0 && h.tag == kNodeAttachFilterTag;
+        });
         if (exists) continue;
         std::weak_ptr<Drawable> weakSelf = std::dynamic_pointer_cast<Drawable>(shared_from_this());
         FilterHook hook;
         hook.stage = 0;
+        hook.tag = kNodeAttachFilterTag;
         hook.func = [weakSelf](std::shared_ptr<Node> self, const std::vector<Vec2>&, const std::vector<Vec2>&, const Mat4* mat) {
             auto owner = weakSelf.lock();
             if (!owner) return std::make_tuple(std::vector<Vec2>{}, std::optional<Mat4>{}, false);
@@ -813,7 +815,7 @@ void Drawable::releaseChildDrawable() {
     for (auto& child : children) {
         if (!child) continue;
         child->preProcessFilters.erase(std::remove_if(child->preProcessFilters.begin(), child->preProcessFilters.end(), [](const FilterHook& h) {
-            return h.stage == 0;
+            return h.stage == 0 && h.tag == kNodeAttachFilterTag;
         }), child->preProcessFilters.end());
         attachedIndex.erase(child->uuid);
     }
@@ -888,6 +890,7 @@ void Drawable::registerWeldFilter(const std::shared_ptr<Drawable>& target) {
     if (!target) return;
     FilterHook hook;
     hook.stage = 2;
+    hook.tag = kWeldFilterTagBase | static_cast<std::uintptr_t>(target->uuid);
     std::weak_ptr<Drawable> weakTarget = target;
     hook.func = [weakTarget, this](std::shared_ptr<Node> self, const std::vector<Vec2>& verts, const std::vector<Vec2>& deform, const Mat4* mat) {
         auto tgt = weakTarget.lock();
@@ -908,9 +911,9 @@ void Drawable::registerWeldFilter(const std::shared_ptr<Drawable>& target) {
 
 void Drawable::unregisterWeldFilter(const std::shared_ptr<Drawable>& target) {
     if (!target) return;
+    const auto tag = kWeldFilterTagBase | static_cast<std::uintptr_t>(target->uuid);
     postProcessFilters.erase(std::remove_if(postProcessFilters.begin(), postProcessFilters.end(), [&](const FilterHook& h) {
-        // no reliable identification; drop all stage 2 weld hooks for this target
-        return h.stage == 2;
+        return h.stage == 2 && h.tag == tag;
     }), postProcessFilters.end());
 }
 

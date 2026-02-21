@@ -349,14 +349,16 @@ void GridDeformer::setupChildNoRecurse(const std::shared_ptr<Node>& node, bool p
     bool isDeformable = static_cast<bool>(deformable);
     Node::FilterHook hook;
     hook.stage = kGridFilterStage;
+    hook.tag = reinterpret_cast<std::uintptr_t>(this);
     hook.func = [this](auto t, auto v, auto d, auto mat) {
         auto res = deformChildren(t, v, d, mat);
         return std::make_tuple(res.vertices, std::optional<Mat4>{}, res.changed);
     };
     auto& pre = node->preProcessFilters;
     auto& post = node->postProcessFilters;
-    pre.erase(std::remove_if(pre.begin(), pre.end(), [](const auto& h) { return h.stage == kGridFilterStage; }), pre.end());
-    post.erase(std::remove_if(post.begin(), post.end(), [](const auto& h) { return h.stage == kGridFilterStage; }), post.end());
+    const auto tag = reinterpret_cast<std::uintptr_t>(this);
+    pre.erase(std::remove_if(pre.begin(), pre.end(), [&](const auto& h) { return h.stage == kGridFilterStage && h.tag == tag; }), pre.end());
+    post.erase(std::remove_if(post.begin(), post.end(), [&](const auto& h) { return h.stage == kGridFilterStage && h.tag == tag; }), post.end());
     if (isDeformable) {
         if (dynamic) {
             if (prepend) post.insert(post.begin(), hook); else post.push_back(hook);
@@ -374,8 +376,9 @@ void GridDeformer::releaseChildNoRecurse(const std::shared_ptr<Node>& node) {
     if (!node) return;
     auto& pre = node->preProcessFilters;
     auto& post = node->postProcessFilters;
-    pre.erase(std::remove_if(pre.begin(), pre.end(), [](const auto& h) { return h.stage == kGridFilterStage; }), pre.end());
-    post.erase(std::remove_if(post.begin(), post.end(), [](const auto& h) { return h.stage == kGridFilterStage; }), post.end());
+    const auto tag = reinterpret_cast<std::uintptr_t>(this);
+    pre.erase(std::remove_if(pre.begin(), pre.end(), [&](const auto& h) { return h.stage == kGridFilterStage && h.tag == tag; }), pre.end());
+    post.erase(std::remove_if(post.begin(), post.end(), [&](const auto& h) { return h.stage == kGridFilterStage && h.tag == tag; }), post.end());
 }
 
 void GridDeformer::applyDeformToChildren(const std::vector<std::shared_ptr<core::param::Parameter>>& params, bool recursive) {

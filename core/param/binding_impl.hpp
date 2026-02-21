@@ -792,9 +792,12 @@ inline void Parameter::finalize(const std::shared_ptr<::nicxlive::core::Puppet>&
 inline void Parameter::update() {
     if (!active) return;
     previousInternal = latestInternal;
-    // Match D behavior: when no external combinators are pushed this frame,
-    // effective internal value is the parameter value itself.
-    latestInternal = value;
+    auto sum = iadd.csum();
+    auto mul = imul.avg();
+    latestInternal = Vec2{
+        (value.x + sum.x) * mul.x,
+        (value.y + sum.y) * mul.y,
+    };
 
     auto mapInternalValue = [&](const Vec2& in) {
         const float rx = (max.x - min.x);
@@ -813,11 +816,13 @@ inline void Parameter::update() {
         if (!b) continue;
         b->apply(left, sub);
         if (auto node = b->getTarget().target.lock()) {
-            if (latestInternal.x != previousInternal.x || latestInternal.y != previousInternal.y) {
+            if (valueChanged()) {
                 node->notifyChange(node);
             }
         }
     }
+    iadd.clear();
+    imul.clear();
 }
 
 class ParameterParameterBinding : public ParameterBindingImpl<float> {
@@ -848,8 +853,19 @@ inline int ParameterParameterBinding::paramAxis() const { return axisId; }
 
 inline void ParameterParameterBinding::applyToTarget(const float& value) {
     if (auto tp = targetParam.lock()) {
-        if (axisId == 0) tp->value.x = value;
-        else tp->value.y = value;
+        bool prevChanged = tp->valueChanged();
+        Vec2 paramVal = tp->latestInternal;
+        if (axisId == 0) {
+            paramVal.x = value;
+            tp->pushIOffsetAxis(axisId, paramVal.x, ParamMergeMode::Forced);
+        } else {
+            paramVal.y = value;
+            tp->pushIOffsetAxis(axisId, paramVal.y, ParamMergeMode::Forced);
+        }
+        bool changed = tp->valueChanged();
+        if (!prevChanged && changed) {
+            tp->update();
+        }
     }
 }
 

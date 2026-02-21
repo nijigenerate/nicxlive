@@ -4,6 +4,7 @@
 
 | メソッド | D 実装 | C++ 現状 | 互換性評価 |
 | --- | --- | --- | --- |
+| `FilterHook` 同一性 | `(stage, func)` 単位で管理 | `stage + tag` で一意管理（関数同値判定不能なC++事情に対応） | ◯ |
 | `serializeSelfImpl` | あり（flags対応） | transform/offset/子/型マップ対応 | ◯ |
 | `serializeSelf` | あり | 同等 | ◯ |
 | `serializePartial` | あり | 同等 | ◯ |

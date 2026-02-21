@@ -112,6 +112,60 @@ inline DeformSlot operator*(const DeformSlot& a, float s) {
 
 class Parameter : public Resource, public std::enable_shared_from_this<Parameter> {
 public:
+    struct Combinator {
+        Vec2Array ivalues{};
+        std::vector<float> iweights{};
+        int isum{0};
+
+        void clear() { isum = 0; }
+
+        void resize(int reqLength) {
+            ivalues.resize(static_cast<std::size_t>(reqLength));
+            iweights.resize(static_cast<std::size_t>(reqLength));
+        }
+
+        void add(const Vec2& value, float weight) {
+            if (isum >= static_cast<int>(ivalues.size())) resize(isum + 8);
+            ivalues.x[isum] = value.x;
+            ivalues.y[isum] = value.y;
+            iweights[isum] = weight;
+            ++isum;
+        }
+
+        void add(int axis, float value, float weight) {
+            if (isum >= static_cast<int>(ivalues.size())) resize(isum + 8);
+            ivalues.x[isum] = (axis == 0) ? value : 1.0f;
+            ivalues.y[isum] = (axis == 1) ? value : 1.0f;
+            iweights[isum] = weight;
+            ++isum;
+        }
+
+        Vec2 csum() const {
+            Vec2 val{0.0f, 0.0f};
+            for (int i = 0; i < isum; ++i) {
+                val.x += ivalues.x[i];
+                val.y += ivalues.y[i];
+            }
+            return val;
+        }
+
+        Vec2 avg() const {
+            if (isum == 0) return Vec2{1.0f, 1.0f};
+            Vec2 val{0.0f, 0.0f};
+            for (int i = 0; i < isum; ++i) {
+                val.x += ivalues.x[i] * iweights[i];
+                val.y += ivalues.y[i] * iweights[i];
+            }
+            float denom = static_cast<float>(isum);
+            return Vec2{val.x / denom, val.y / denom};
+        }
+    };
+
+private:
+    Combinator iadd{};
+    Combinator imul{};
+
+public:
     uint32_t uuid{0};
     std::string name{};
     std::string indexableName{};
@@ -197,6 +251,46 @@ public:
     void removeBinding(const std::shared_ptr<ParameterBinding>& binding);
     void makeIndexable();
     void update();
+    bool valueChanged() const { return latestInternal.x != previousInternal.x || latestInternal.y != previousInternal.y; }
+    void pushIOffset(const Vec2& offset, ParamMergeMode mode = ParamMergeMode::Passthrough, float weight = 1.0f) {
+        if (mode == ParamMergeMode::Passthrough) mode = mergeMode;
+        switch (mode) {
+        case ParamMergeMode::Forced:
+            value = offset;
+            break;
+        case ParamMergeMode::Additive:
+            iadd.add(offset, 1.0f);
+            break;
+        case ParamMergeMode::Multiplicative:
+            imul.add(offset, 1.0f);
+            break;
+        case ParamMergeMode::Weighted:
+            imul.add(offset, weight);
+            break;
+        default:
+            break;
+        }
+    }
+    void pushIOffsetAxis(int axis, float offset, ParamMergeMode mode = ParamMergeMode::Passthrough, float weight = 1.0f) {
+        if (mode == ParamMergeMode::Passthrough) mode = mergeMode;
+        switch (mode) {
+        case ParamMergeMode::Forced:
+            if (axis == 0) value.x = offset;
+            else value.y = offset;
+            break;
+        case ParamMergeMode::Additive:
+            iadd.add(axis, offset, 1.0f);
+            break;
+        case ParamMergeMode::Multiplicative:
+            imul.add(axis, offset, 1.0f);
+            break;
+        case ParamMergeMode::Weighted:
+            imul.add(axis, offset, weight);
+            break;
+        default:
+            break;
+        }
+    }
     ::nicxlive::core::serde::SerdeException deserializeFromFghj(const ::nicxlive::core::serde::Fghj& data);
     void reconstruct(const std::shared_ptr<::nicxlive::core::Puppet>& puppet);
     void finalize(const std::shared_ptr<::nicxlive::core::Puppet>& puppet);

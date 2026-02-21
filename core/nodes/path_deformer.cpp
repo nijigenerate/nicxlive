@@ -23,7 +23,7 @@ using nicxlive::core::common::gatherVec2;
 using nicxlive::core::common::scatterAddVec2;
 
 namespace {
-constexpr int kPathFilterStage = 2;
+constexpr int kPathFilterStage = 1;
 constexpr std::size_t kInvalidDisableThreshold = 10;
 constexpr std::size_t kInvalidLogInterval = 10;
 constexpr std::size_t kInvalidLogFrameInterval = 30;
@@ -171,6 +171,11 @@ PathDeformer::PathDeformer() {
     originalCurve = createCurve(Vec2Array{}, curveType == CurveType::Bezier);
     deformedCurve = createCurve(Vec2Array{}, curveType == CurveType::Bezier);
     prevCurve = createCurve(Vec2Array{}, curveType == CurveType::Bezier);
+}
+
+void PathDeformer::ConnectedDriverAdapter::setup() {
+    if (!impl_ || !owner_) return;
+    impl_->setup(owner_);
 }
 
 void PathDeformer::ConnectedDriverAdapter::update(Vec2Array& offsets, float strength, uint64_t frame) {
@@ -933,7 +938,7 @@ void PathDeformer::applyPathDeform(const Vec2Array& origDeform) {
         Vec2Array baseline = (origDeform.size() == deformation.size()) ? origDeform : deformation;
         sanitizeOffsets(baseline);
         if (!driverInitialized) {
-            driver->updateDefaultShape();
+            driver->setup();
             driverInitialized = true;
         }
         Vec2Array diffDeform = deformation;
@@ -985,6 +990,7 @@ void PathDeformer::applyPathDeform(const Vec2Array& origDeform) {
             auto candidate = vertices;
             candidate += deformation;
             sanitizeOffsets(candidate);
+            deform(candidate);
             logCurveState("applyPathDeform");
         }
         refreshInverseMatrix("applyPathDeform:postDriver");
@@ -993,14 +999,20 @@ void PathDeformer::applyPathDeform(const Vec2Array& origDeform) {
             auto candidate = vertices;
             candidate += deformation;
             sanitizeOffsets(candidate);
+            deform(candidate);
             logCurveState("applyPathDeform");
         }
+        refreshInverseMatrix("applyPathDeform:postNoDriver");
     }
     if (diagnosticsEnabled) {
         logCurveDiag("applyPathDeform", origDeform, deformation);
         logCurveHealth("applyPathDeform", originalCurve, deformedCurve, deformation);
     }
     updateDeform();
+}
+
+void PathDeformer::deform(const Vec2Array& deformedControlPoints) {
+    deformedCurve = createCurve(deformedControlPoints, curveType == CurveType::Bezier);
 }
 
 void PathDeformer::runRenderTask(core::RenderContext&) {
@@ -1035,14 +1047,16 @@ bool PathDeformer::setupChild(const std::shared_ptr<Node>& child) {
     if (!child || !physicsEnabled) return false;
     Node::FilterHook hook;
     hook.stage = kPathFilterStage;
+    hook.tag = reinterpret_cast<std::uintptr_t>(this);
     hook.func = [this](auto t, auto v, auto d, auto mat) {
         auto res = deformChildren(t, v, d, mat);
         return std::make_tuple(res.vertices, std::optional<Mat4>{}, res.changed);
     };
     auto& pre = child->preProcessFilters;
     auto& post = child->postProcessFilters;
-    pre.erase(std::remove_if(pre.begin(), pre.end(), [](const auto& h) { return h.stage == kPathFilterStage; }), pre.end());
-    post.erase(std::remove_if(post.begin(), post.end(), [](const auto& h) { return h.stage == kPathFilterStage; }), post.end());
+    const auto tag = reinterpret_cast<std::uintptr_t>(this);
+    pre.erase(std::remove_if(pre.begin(), pre.end(), [&](const auto& h) { return h.stage == kPathFilterStage && h.tag == tag; }), pre.end());
+    post.erase(std::remove_if(post.begin(), post.end(), [&](const auto& h) { return h.stage == kPathFilterStage && h.tag == tag; }), post.end());
     auto deformable = std::dynamic_pointer_cast<Deformable>(child);
     if (deformable) {
         if (dynamicDeformation) {
@@ -1077,8 +1091,9 @@ bool PathDeformer::releaseChild(const std::shared_ptr<Node>& child) {
     if (child) {
         auto& pre = child->preProcessFilters;
         auto& post = child->postProcessFilters;
-        pre.erase(std::remove_if(pre.begin(), pre.end(), [](const auto& h) { return h.stage == kPathFilterStage; }), pre.end());
-        post.erase(std::remove_if(post.begin(), post.end(), [](const auto& h) { return h.stage == kPathFilterStage; }), post.end());
+        const auto tag = reinterpret_cast<std::uintptr_t>(this);
+        pre.erase(std::remove_if(pre.begin(), pre.end(), [&](const auto& h) { return h.stage == kPathFilterStage && h.tag == tag; }), pre.end());
+        post.erase(std::remove_if(post.begin(), post.end(), [&](const auto& h) { return h.stage == kPathFilterStage && h.tag == tag; }), post.end());
         meshCaches.erase(child->uuid);
         if (child->mustPropagate()) {
             for (auto& c : child->childrenRef()) releaseChild(c);
@@ -1170,6 +1185,7 @@ void PathDeformer::applyDeformToChildren(const std::vector<std::shared_ptr<core:
                 " totalInvalid=", totalInvalidCount, " lastCtx=", lastInvalidContext);
     }
     physicsOnly = true;
+    rebuffer(std::vector<Vec2>{});
     if (diagStarted) endDiagnosticFrame();
 }
 

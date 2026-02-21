@@ -43,6 +43,8 @@
 | `copyFromDrawable` | 全データコピー | 頂点/UV/idx/gridAxes等＋フラグをコピー | ◯ |
 | `setupChildDrawable` | 子セットアップ（フィルタ登録等） | pinToMesh子にpreProcess hook追加 | ◯ |
 | `releaseChildDrawable` | 子解放（フィルタ解除等） | stage0 hook削除＋attachedIndex削除 | ◯ |
+| `setupChildDrawable/releaseChildDrawable` のhook同一性 | `(stage, func)` で重複回避/解除 | `stage + tag` で重複回避/解除を一致化 | ◯ |
+| `registerWeldFilter/unregisterWeldFilter` のhook解除 | `(stage, func)` で解除 | `stage + targetUUID由来tag` で解除を一致化 | ◯ |
 | `buildDrawable` | force判定＋再計算＋shared/buffer | force時のみIBO/共有を更新しdraw呼び出し | ◯ |
 | `mustPropagateDrawable` | true | true | ◯ |
 | `fillDrawPacket` | modelMatrix 等設定 | 行列/オフセット＋色/ブレンド/テクスチャ等を設定 | ◯ |
