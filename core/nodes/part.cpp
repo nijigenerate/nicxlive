@@ -497,7 +497,6 @@ void Part::syncTextureIds() {
 
     for (std::size_t i = 0; i < textures.size(); ++i) {
         if (textures[i]) {
-            textureIds[i] = static_cast<int32_t>(textures[i]->getRuntimeUUID());
             textureDirty[i] = false;
         }
     }
@@ -568,7 +567,7 @@ void Part::fillDrawPacket(const Node& header, PartDrawPacket& packet, bool isMas
     packet.emissionStrength = emissionStrength * offsetEmissionStrength;
     packet.blendMode = blendMode;
     packet.useMultistageBlend = useMultistageBlend(blendMode);
-    packet.hasEmissionOrBumpmap = (textures.size() > 1 && textures[1]) || (textures.size() > 2 && textures[2]);
+    packet.hasEmissionOrBumpmap = (textures.size() > 2) && (textures[1] || textures[2]);
     packet.maskThreshold = std::clamp(offsetMaskThreshold + maskAlphaThreshold, 0.0f, 1.0f);
     Vec3 tintAccum = tint;
     tintAccum.x = std::clamp(tint.x * offsetTint.x, 0.0f, 1.0f);
@@ -621,36 +620,10 @@ void Part::fillDrawPacket(const Node& header, PartDrawPacket& packet, bool isMas
     }
     for (std::size_t i = 0; i < textures.size() && i < 3; ++i) {
         std::shared_ptr<::nicxlive::core::Texture> tex = textures[i];
-        bool usedSlot = false;
-        if (auto pup = puppetRef()) {
-            if (i < textureIds.size() && textureIds[i] >= 0) {
-                const uint32_t id = static_cast<uint32_t>(textureIds[i]);
-                if (id < pup->textureSlots.size() && pup->textureSlots[id]) {
-                    tex = pup->textureSlots[id];
-                    usedSlot = true;
-                } else if (!tex || tex->getRuntimeUUID() == 0) {
-                    tex = pup->resolveTextureSlot(id);
-                }
-            }
-        }
         if (tex) {
             uint32_t texId = tex->getRuntimeUUID();
             if (texId == 0) texId = tex->backendId();
             packet.textureUUIDs[i] = texId;
-            if (uuid == 4079733156u && i == 0) {
-                static int sDbg = 0;
-                if (sDbg < 4) {
-                    std::fprintf(stderr, "[nicxlive] fill packet uuid=%u usedSlot=%d texId=%u texRuntime=%u texBackend=%u hasPup=%d texIds=%zu\n",
-                                 uuid,
-                                 usedSlot ? 1 : 0,
-                                 texId,
-                                 tex->getRuntimeUUID(),
-                                 tex->backendId(),
-                                 puppetRef() ? 1 : 0,
-                                 textureIds.size());
-                    ++sDbg;
-                }
-            }
         } else {
             packet.textureUUIDs[i] = 0;
         }

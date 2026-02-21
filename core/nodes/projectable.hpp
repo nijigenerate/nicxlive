@@ -65,6 +65,8 @@ public:
 
     // Core behaviour approximations
     virtual Transform fullTransform() const;
+    Transform transform();
+    Transform transform() const;
     virtual Mat4 fullTransformMatrix() const;
     virtual Vec4 boundsFromMatrix(const std::shared_ptr<Part>& child, const Mat4& matrix) const;
     virtual Vec4 getChildrenBounds(bool forceUpdate = true);

@@ -79,6 +79,9 @@ void Projectable::scanPartsRecurse(const std::shared_ptr<Node>& node) {
     auto mask = std::dynamic_pointer_cast<Mask>(node);
     if (part && node.get() != this) {
         subParts.push_back(part);
+        if (mask) {
+            maskParts.push_back(mask);
+        }
         if (!proj) {
             for (auto& c : part->childrenRef()) scanPartsRecurse(c);
         } else {
@@ -123,15 +126,35 @@ Transform Projectable::fullTransform() const {
     return base;
 }
 
+Transform Projectable::transform() {
+    auto trans = Part::transform();
+    if (autoResizedMesh) {
+        trans.rotation = Vec3{0, 0, 0};
+        trans.scale = Vec2{1, 1};
+        trans.update();
+    }
+    return trans;
+}
+
+Transform Projectable::transform() const {
+    auto trans = Part::transform();
+    if (autoResizedMesh) {
+        trans.rotation = Vec3{0, 0, 0};
+        trans.scale = Vec2{1, 1};
+        trans.update();
+    }
+    return trans;
+}
+
 Mat4 Projectable::fullTransformMatrix() const { return fullTransform().toMat4(); }
 
 Vec4 Projectable::boundsFromMatrix(const std::shared_ptr<Part>& child, const Mat4& matrix) const {
     float tx = matrix[0][3];
     float ty = matrix[1][3];
     Vec4 bounds{tx, ty, tx, ty};
-    if (!child || child->mesh->vertices.empty()) return bounds;
-    for (std::size_t i = 0; i < child->mesh->vertices.size(); ++i) {
-        Vec2 local = child->mesh->vertices[i];
+    if (!child || child->vertices.size() == 0) return bounds;
+    for (std::size_t i = 0; i < child->vertices.size(); ++i) {
+        Vec2 local{child->vertices.x[i], child->vertices.y[i]};
         if (i < child->deformation.size()) {
             local.x += child->deformation.x[i];
             local.y += child->deformation.y[i];
@@ -150,6 +173,13 @@ Vec4 Projectable::getChildrenBounds(bool forceUpdate) {
     auto frameId = currentProjectableFrame();
     if (useMaxChildrenBounds) {
         if (frameId - maxBoundsStartFrame < MaxBoundsResetInterval) {
+            if (uuid == 3011143577u || uuid == 200444691u || uuid == 977552066u) {
+                std::fprintf(stderr,
+                             "[nicxlive] childBounds cached uuid=%u name=%s frame=%zu start=%zu out=(%.3f,%.3f,%.3f,%.3f)\n",
+                             uuid, name.c_str(),
+                             frameId, maxBoundsStartFrame,
+                             maxChildrenBounds.x, maxChildrenBounds.y, maxChildrenBounds.z, maxChildrenBounds.w);
+            }
             return maxChildrenBounds;
         }
         useMaxChildrenBounds = false;
@@ -162,10 +192,20 @@ Vec4 Projectable::getChildrenBounds(bool forceUpdate) {
     Vec4 bounds{0,0,0,0};
     bool hasBounds = false;
     Mat4 correction = Mat4::multiply(fullTransformMatrix(), Mat4::inverse(transform().toMat4()));
+    auto boundsFinite = [](const Vec4& b) {
+        return std::isfinite(b.x) && std::isfinite(b.y) && std::isfinite(b.z) && std::isfinite(b.w);
+    };
     for (auto& p : subParts) {
         if (!p) continue;
-        if (auto b = p->bounds) {
+        bool traced = (uuid == 3011143577u || uuid == 200444691u || uuid == 977552066u);
+        if (auto b = p->bounds; b && boundsFinite(Vec4{(*b)[0], (*b)[1], (*b)[2], (*b)[3]})) {
             Vec4 pb{(*b)[0], (*b)[1], (*b)[2], (*b)[3]};
+            if (traced) {
+                std::fprintf(stderr,
+                             "[nicxlive] childBounds uuid=%u name=%s child=%u childName=%s src=stored b=(%.3f,%.3f,%.3f,%.3f)\n",
+                             uuid, name.c_str(), p->uuid, p->name.c_str(),
+                             pb.x, pb.y, pb.z, pb.w);
+            }
             if (!hasBounds) { bounds = pb; hasBounds = true; }
             else {
                 bounds.x = std::min(bounds.x, pb.x);
@@ -176,6 +216,12 @@ Vec4 Projectable::getChildrenBounds(bool forceUpdate) {
         } else {
             auto childMatrix = Mat4::multiply(correction, p->transform().toMat4());
             auto childBounds = boundsFromMatrix(p, childMatrix);
+            if (traced) {
+                std::fprintf(stderr,
+                             "[nicxlive] childBounds uuid=%u name=%s child=%u childName=%s src=matrix b=(%.3f,%.3f,%.3f,%.3f)\n",
+                             uuid, name.c_str(), p->uuid, p->name.c_str(),
+                             childBounds.x, childBounds.y, childBounds.z, childBounds.w);
+            }
             if (!hasBounds) { bounds = childBounds; hasBounds = true; }
             else {
                 bounds.x = std::min(bounds.x, childBounds.x);
@@ -220,16 +266,44 @@ Vec2 Projectable::deformationTranslationOffset() const {
 }
 
 void Projectable::enableMaxChildrenBounds(const std::shared_ptr<Node>& target) {
+    auto targetDrawable = std::dynamic_pointer_cast<Drawable>(target);
+    if (targetDrawable) {
+        targetDrawable->updateBounds();
+    }
+
+    auto frameId = currentProjectableFrame();
+    maxChildrenBounds = getChildrenBounds(false);
     useMaxChildrenBounds = true;
-    maxChildrenBounds = getChildrenBounds(true);
-    maxBoundsStartFrame = currentProjectableFrame();
-    if (auto d = std::dynamic_pointer_cast<Drawable>(target)) {
-        if (d->bounds) {
-            maxChildrenBounds.x = std::min(maxChildrenBounds.x, (*d->bounds)[0]);
-            maxChildrenBounds.y = std::min(maxChildrenBounds.y, (*d->bounds)[1]);
-            maxChildrenBounds.z = std::max(maxChildrenBounds.z, (*d->bounds)[2]);
-            maxChildrenBounds.w = std::max(maxChildrenBounds.w, (*d->bounds)[3]);
+    maxBoundsStartFrame = frameId;
+
+    if (targetDrawable) {
+        bool hasFiniteBounds = false;
+        Vec4 b{};
+        if (targetDrawable->bounds) {
+            b = Vec4{
+                (*targetDrawable->bounds)[0],
+                (*targetDrawable->bounds)[1],
+                (*targetDrawable->bounds)[2],
+                (*targetDrawable->bounds)[3]
+            };
+            hasFiniteBounds = std::isfinite(b.x) && std::isfinite(b.y) &&
+                std::isfinite(b.z) && std::isfinite(b.w);
         }
+
+        if (!hasFiniteBounds) {
+            if (auto targetPart = std::dynamic_pointer_cast<Part>(targetDrawable)) {
+                auto correction = Mat4::multiply(fullTransformMatrix(), Mat4::inverse(transform().toMat4()));
+                b = boundsFromMatrix(targetPart, Mat4::multiply(correction, targetPart->transform().toMat4()));
+                hasFiniteBounds = true;
+            } else {
+                return;
+            }
+        }
+
+        maxChildrenBounds.x = std::min(maxChildrenBounds.x, b.x);
+        maxChildrenBounds.y = std::min(maxChildrenBounds.y, b.y);
+        maxChildrenBounds.z = std::max(maxChildrenBounds.z, b.z);
+        maxChildrenBounds.w = std::max(maxChildrenBounds.w, b.w);
     }
 }
 
@@ -288,6 +362,15 @@ bool Projectable::createSimpleMesh() {
         autoResizedSize = Vec2{bounds.z - bounds.x, bounds.w - bounds.y};
         textureOffset = Vec2{(bounds.x + bounds.z) / 2.0f + deformOffset.x - originOffset.x,
                              (bounds.y + bounds.w) / 2.0f + deformOffset.y - originOffset.y};
+        if (uuid == 3011143577u || uuid == 200444691u || uuid == 977552066u) {
+            std::fprintf(stderr,
+                         "[nicxlive] createSimpleMesh resize uuid=%u name=%s bounds=(%.3f,%.3f,%.3f,%.3f) deform=(%.3f,%.3f) origin=(%.3f,%.3f) texOff=(%.3f,%.3f)\n",
+                         uuid, name.c_str(),
+                         bounds.x, bounds.y, bounds.z, bounds.w,
+                         deformOffset.x, deformOffset.y,
+                         originOffset.x, originOffset.y,
+                         textureOffset.x, textureOffset.y);
+        }
     } else {
         Vec2 newTextureOffset{(bounds.x + bounds.z) / 2.0f + deformOffset.x - originOffset.x,
                               (bounds.y + bounds.w) / 2.0f + deformOffset.y - originOffset.y};
@@ -302,7 +385,21 @@ bool Projectable::createSimpleMesh() {
             autoResizedSize = Vec2{bounds.z - bounds.x, bounds.w - bounds.y};
             updateVertices();
             textureOffset = newTextureOffset;
+            if (uuid == 3011143577u || uuid == 200444691u || uuid == 977552066u) {
+                std::fprintf(stderr,
+                             "[nicxlive] createSimpleMesh update uuid=%u name=%s bounds=(%.3f,%.3f,%.3f,%.3f) deform=(%.3f,%.3f) origin=(%.3f,%.3f) texOff=(%.3f,%.3f)\n",
+                             uuid, name.c_str(),
+                             bounds.x, bounds.y, bounds.z, bounds.w,
+                             deformOffset.x, deformOffset.y,
+                             originOffset.x, originOffset.y,
+                             textureOffset.x, textureOffset.y);
+            }
         }
+    }
+    if (uuid == 3011143577u || uuid == 200444691u || uuid == 977552066u) {
+        std::fprintf(stderr,
+                     "[nicxlive] childBounds merged uuid=%u name=%s out=(%.3f,%.3f,%.3f,%.3f)\n",
+                     uuid, name.c_str(), bounds.x, bounds.y, bounds.z, bounds.w);
     }
     return resizing;
 }
@@ -554,6 +651,7 @@ void Projectable::dynamicRenderBegin(core::RenderContext& ctx) {
         if (std::dynamic_pointer_cast<Mask>(p)) continue;
         Mat4 childMatrix = Mat4::multiply(correction, p->transform().toMat4());
         Mat4 finalMatrix = Mat4::multiply(childBasis, childMatrix);
+        p->clearOffscreenRenderMatrix();
         p->setOffscreenModelMatrix(finalMatrix);
         if (auto dynChild = std::dynamic_pointer_cast<Projectable>(p)) {
             dynChild->renderNestedOffscreen(ctx);
@@ -566,6 +664,7 @@ void Projectable::dynamicRenderBegin(core::RenderContext& ctx) {
         if (!m) continue;
         Mat4 maskMatrix = Mat4::multiply(correction, m->transform().toMat4());
         Mat4 finalMatrix = Mat4::multiply(translate, maskMatrix);
+        m->clearOffscreenRenderMatrix();
         m->setOffscreenModelMatrix(finalMatrix);
         m->enqueueRenderCommands(ctx);
         queuedOffscreenParts.push_back(m);
@@ -615,16 +714,26 @@ void Projectable::dynamicRenderEnd(core::RenderContext& ctx) {
             }
 
             for (auto part : queuedForCleanup) {
-                if (auto p = std::dynamic_pointer_cast<Part>(part)) p->clearOffscreenModelMatrix();
-                else if (auto m = std::dynamic_pointer_cast<Mask>(part)) m->clearOffscreenModelMatrix();
+                if (auto p = std::dynamic_pointer_cast<Part>(part)) {
+                    p->clearOffscreenModelMatrix();
+                    p->clearOffscreenRenderMatrix();
+                } else if (auto m = std::dynamic_pointer_cast<Mask>(part)) {
+                    m->clearOffscreenModelMatrix();
+                    m->clearOffscreenRenderMatrix();
+                }
             }
         });
     } else {
         auto cleanupParts = queuedOffscreenParts;
         Part::enqueueRenderCommands(ctx, [cleanupParts](core::RenderCommandEmitter&) {
             for (auto& part : cleanupParts) {
-                if (auto p = std::dynamic_pointer_cast<Part>(part)) p->clearOffscreenModelMatrix();
-                else if (auto m = std::dynamic_pointer_cast<Mask>(part)) m->clearOffscreenModelMatrix();
+                if (auto p = std::dynamic_pointer_cast<Part>(part)) {
+                    p->clearOffscreenModelMatrix();
+                    p->clearOffscreenRenderMatrix();
+                } else if (auto m = std::dynamic_pointer_cast<Mask>(part)) {
+                    m->clearOffscreenModelMatrix();
+                    m->clearOffscreenRenderMatrix();
+                }
             }
         });
     }
@@ -715,6 +824,7 @@ void Projectable::enqueueRenderCommands(core::RenderContext& ctx) {
         if (!p) continue;
         Mat4 childMatrix = Mat4::multiply(correction, p->transform().toMat4());
         Mat4 finalMatrix = Mat4::multiply(childBasis, childMatrix);
+        p->clearOffscreenRenderMatrix();
         p->setOffscreenModelMatrix(finalMatrix);
         if (auto dynChild = std::dynamic_pointer_cast<Projectable>(p)) {
             dynChild->renderNestedOffscreen(ctx);
@@ -727,6 +837,7 @@ void Projectable::enqueueRenderCommands(core::RenderContext& ctx) {
         if (!m) continue;
         Mat4 maskMatrix = Mat4::multiply(correction, m->transform().toMat4());
         Mat4 finalMatrix = Mat4::multiply(translate, maskMatrix);
+        m->clearOffscreenRenderMatrix();
         m->setOffscreenModelMatrix(finalMatrix);
         m->enqueueRenderCommands(ctx);
         queuedOffscreenParts.push_back(m);

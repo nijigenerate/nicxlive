@@ -46,6 +46,7 @@ struct RendererCtx {
     std::unordered_map<uint32_t, size_t> runtimeTextureHandles{};
     // Queue backend texture IDs (including dynamic RT/stencil) -> Unity texture handles
     std::unordered_map<uint32_t, size_t> backendTextureHandles{};
+    uint32_t syntheticTextureIdCounter{0x70000000u};
     size_t renderHandle{0};
     size_t compositeHandle{0};
     int lastViewportW{0};
@@ -109,7 +110,7 @@ static void applyTextureCommands(RendererCtx& ctx) {
             break;
         }
         case TextureCommandKind::Params:
-            // Unity蛛ｴ縺ｧ縺ｮ繝代Λ繝｡繝ｼ繧ｿ險ｭ螳壹・API縺後↑縺・◆繧∫┌隕・
+            // Unity-side texture parameter callback API is not exposed here.
             break;
         case TextureCommandKind::Dispose: {
             auto it = ctx.backendTextureHandles.find(rc.id);
@@ -128,11 +129,28 @@ static void applyTextureCommands(RendererCtx& ctx) {
     ctx.backend->resourceQueue.clear();
 }
 
+static uint32_t allocateSyntheticTextureId(RendererCtx& ctx) {
+    uint32_t id = ctx.syntheticTextureIdCounter;
+    for (uint32_t guard = 0; guard < 0x100000; ++guard) {
+        ++id;
+        if (id == 0) continue;
+        if (ctx.runtimeTextureHandles.find(id) == ctx.runtimeTextureHandles.end()) {
+            ctx.syntheticTextureIdCounter = id;
+            return id;
+        }
+    }
+    return 0;
+}
+
 static void ensurePuppetTextures(RendererCtx& ctx, const std::shared_ptr<Puppet>& puppet) {
     if (!puppet || !ctx.callbacks.createTexture) return;
     for (const auto& tex : puppet->textureSlots) {
         if (!tex) continue;
         uint32_t uuid = tex->getRuntimeUUID();
+        if (uuid == 0) {
+            uuid = allocateSyntheticTextureId(ctx);
+            if (uuid != 0) tex->setRuntimeUUID(uuid);
+        }
         if (uuid == 0) continue;
         if (ctx.runtimeTextureHandles.find(uuid) != ctx.runtimeTextureHandles.end()) continue;
         size_t handle = ctx.callbacks.createTexture(tex->width(), tex->height(), tex->channels(), 1, tex->channels(),
@@ -184,6 +202,8 @@ static size_t ensureDynamicTextureHandle(RendererCtx& ctx, const std::shared_ptr
 
     return handle;
 }
+
+
 static void releaseExternalTexture(RendererCtx& ctx, size_t handle) {
     if (handle == 0) return;
     if (ctx.callbacks.releaseTexture) {
@@ -272,12 +292,20 @@ static void packQueuedCommands(RendererCtx& ctx) {
         const size_t texCount = (qc.kind == RenderCommandKind::DrawPart) ? 3 : 0;
         for (size_t ti = 0; ti < texCount; ++ti) {
             const auto t = pp.textureUUIDs[ti];
-            if (t == 0) {
-                out.partPacket.textureHandles[ti] = 0;
-                continue;
+            auto tex = pp.textures[ti];
+            size_t h = 0;
+            if (t != 0) {
+                auto hit = ctx.runtimeTextureHandles.find(t);
+                if (hit != ctx.runtimeTextureHandles.end()) h = hit->second;
             }
-            auto hit = ctx.runtimeTextureHandles.find(t);
-            out.partPacket.textureHandles[ti] = (hit != ctx.runtimeTextureHandles.end()) ? hit->second : t;
+            if (tex) {
+                const uint32_t bid = tex->backendId();
+                if (h == 0 && bid != 0) {
+                    auto bit = ctx.backendTextureHandles.find(bid);
+                    if (bit != ctx.backendTextureHandles.end()) h = bit->second;
+                }
+            }
+            out.partPacket.textureHandles[ti] = h;
         }
         out.partPacket.textureCount = texCount;
 
@@ -321,12 +349,20 @@ static void packQueuedCommands(RendererCtx& ctx) {
         maskPart.indexHandle = applyPart.indexBuffer;
         for (size_t ti = 0; ti < 3; ++ti) {
             const auto t = applyPart.textureUUIDs[ti];
-            if (t == 0) {
-                maskPart.textureHandles[ti] = 0;
-                continue;
+            auto tex = applyPart.textures[ti];
+            size_t h = 0;
+            if (t != 0) {
+                auto hit = ctx.runtimeTextureHandles.find(t);
+                if (hit != ctx.runtimeTextureHandles.end()) h = hit->second;
             }
-            auto hit = ctx.runtimeTextureHandles.find(t);
-            maskPart.textureHandles[ti] = (hit != ctx.runtimeTextureHandles.end()) ? hit->second : t;
+            if (tex) {
+                const uint32_t bid = tex->backendId();
+                if (h == 0 && bid != 0) {
+                    auto bit = ctx.backendTextureHandles.find(bid);
+                    if (bit != ctx.backendTextureHandles.end()) h = bit->second;
+                }
+            }
+            maskPart.textureHandles[ti] = h;
         }
         maskPart.textureCount = 3;
         const auto* applyIdx = ctx.backend->getDrawableIndices(applyPart.indexBuffer);
@@ -360,17 +396,19 @@ static void packQueuedCommands(RendererCtx& ctx) {
             out.maskApplyPacket.maskPacket.indices = nullptr;
         }
 
-        // Dynamic pass
-        size_t dynTexCount = 0;
-        if (qc.dynamicPass.surface) {
-            dynTexCount = qc.dynamicPass.surface->textureCount;
-        } else {
-            dynTexCount = qc.dynamicPass.textures.size();
-        }
+        // Dynamic pass (D parity)
+        size_t dynTexCount = qc.dynamicPass.surface
+            ? qc.dynamicPass.surface->textureCount
+            : qc.dynamicPass.textures.size();
         if (dynTexCount > 3) dynTexCount = 3;
         out.dynamicPass.textureCount = dynTexCount;
         for (size_t i = 0; i < dynTexCount; ++i) {
-            auto tex = qc.dynamicPass.textures[i];
+            std::shared_ptr<Texture> tex{};
+            if (qc.dynamicPass.surface) {
+                tex = qc.dynamicPass.surface->textures[i];
+            } else if (i < qc.dynamicPass.textures.size()) {
+                tex = qc.dynamicPass.textures[i];
+            }
             out.dynamicPass.textures[i] = ensureDynamicTextureHandle(ctx, tex, /*renderTarget*/ true, /*stencil*/ false);
         }
         for (size_t i = dynTexCount; i < 3; ++i) {
@@ -386,10 +424,20 @@ static void packQueuedCommands(RendererCtx& ctx) {
         out.dynamicPass.autoScaled = qc.dynamicPass.autoScaled;
         out.dynamicPass.origBuffer = qc.dynamicPass.origBuffer;
         for (int i = 0; i < 4; ++i) out.dynamicPass.origViewport[i] = qc.dynamicPass.origViewport[i];
-        out.dynamicPass.drawBufferCount = 0;
-        out.dynamicPass.hasStencil = (out.dynamicPass.stencil != 0);
+        if (out.dynamicPass.origViewport[2] == 0 || out.dynamicPass.origViewport[3] == 0) {
+            int vw = 0;
+            int vh = 0;
+            inGetViewport(vw, vh);
+            out.dynamicPass.origViewport[0] = 0;
+            out.dynamicPass.origViewport[1] = 0;
+            out.dynamicPass.origViewport[2] = vw;
+            out.dynamicPass.origViewport[3] = vh;
+        }
+        out.dynamicPass.drawBufferCount = qc.dynamicPass.surface
+            ? static_cast<int>(std::max<std::size_t>(qc.dynamicPass.surface->textureCount, 1))
+            : 0;
+        out.dynamicPass.hasStencil = (qc.dynamicPass.surface && qc.dynamicPass.surface->stencil) || (out.dynamicPass.stencil != 0);
         out.usesStencil = qc.usesStencil;
-
         ctx.queued.push_back(out);
     }
 }
@@ -577,8 +625,7 @@ NjgResult njgLoadPuppet(void* renderer, const char* pathUtf8, void** outPuppet) 
     *outCount = params.size();
     if (!buffer) return NjgResult::Ok;
     if (bufferLength < params.size()) return NjgResult::InvalidArgument;
-
-    // 蜷榊燕縺ｮ蟇ｿ蜻ｽ遒ｺ菫晉畑繧ｭ繝｣繝・す繝･
+    // Keep copied names alive for C ABI output.
     thread_local std::vector<std::string> nameCache;
     nameCache.clear();
     nameCache.reserve(params.size());
@@ -892,8 +939,7 @@ NjgResult njgEmitCommands(void* renderer, CommandQueueView* outView) {
         }
             std::fprintf(stderr, "[nicxlive] emit puppet state graphEmpty=%d rootParts=%zu\n", pit->second->puppet->isRenderGraphEmpty() ? 1 : 0, pit->second->puppet->rootPartCount());
     }
-
-    // 螟夜Κ繝・け繧ｹ繝√Ε繧ｳ繝ｼ繝ｫ繝舌ャ繧ｯ蜃ｦ逅・
+    // Apply deferred texture create/update/dispose callbacks.
     applyTextureCommands(ctx);
 
     packQueuedCommands(ctx);
@@ -961,7 +1007,3 @@ TextureStats njgGetTextureStats(void* renderer) {
 }
 
 } // extern "C"
-
-
-
-

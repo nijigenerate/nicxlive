@@ -136,10 +136,19 @@ void QueueCommandEmitter::drawPartPacket(const nodes::PartDrawPacket& packet) {
     cmd.kind = RenderCommandKind::DrawPart;
     cmd.partPacket = packet;
     if (backend_) {
-        if (packet.vertexOffset == 1621 || packet.vertexOffset == 1563 || packet.vertexOffset == 1504) {
-            std::fprintf(stderr, "[nicxlive] emit push idx=%zu kind=DrawPart vo=%u\n",
-                         backend_->queue.size(),
-                         packet.vertexOffset);
+        if (packet.vertexOffset == 916 || packet.vertexOffset == 1563 || packet.vertexOffset == 1504) {
+            if (auto node = packet.node.lock()) {
+                std::fprintf(stderr, "[nicxlive] emit push idx=%zu kind=DrawPart vo=%u node=%u type=%s name=%s\n",
+                             backend_->queue.size(),
+                             packet.vertexOffset,
+                             node->uuid,
+                             node->typeId().c_str(),
+                             node->name.c_str());
+            } else {
+                std::fprintf(stderr, "[nicxlive] emit push idx=%zu kind=DrawPart vo=%u node=<expired>\n",
+                             backend_->queue.size(),
+                             packet.vertexOffset);
+            }
         }
         backend_->queue.push_back(std::move(cmd));
     }
