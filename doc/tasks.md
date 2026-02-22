@@ -118,154 +118,136 @@ Status: `[ ]` todo, `[>]` in progress, `[x]` done, `[?]` blocked.
 
 Status: `[ ]` todo, `[>]` in progress, `[x]` done, `[?]` blocked.
 
-| Status | Task ID | 種別 | 参照 | 対象項目 | 実装方針 |
-| --- | --- | --- | --- | --- | --- |
-| [x] | CP001 | missing_impl | `compat-binding.md` | `deserializeFromFghj` | D実装をC++へ移植（未実装の解消） |
-| [x] | CP002 | missing_impl | `compat-binding.md` | `finalize` | D実装をC++へ移植（未実装の解消） |
-| [x] | CP003 | behavior_diff | `compat-binding.md` | `getNodeUUID` | D実装の挙動に合わせて差分を解消 |
-| [x] | CP004 | behavior_diff | `compat-binding.md` | `isCompatibleWithNode` | D実装の挙動に合わせて差分を解消 |
-| [x] | CP005 | missing_impl | `compat-binding.md` | `reconstruct` | D実装をC++へ移植（未実装の解消） |
-| [x] | CP006 | missing_impl | `compat-binding.md` | `serializeSelf` | D実装をC++へ移植（未実装の解消） |
-| [x] | CP007 | behavior_diff | `compat-binding.md` | フィールド `BindTarget.target` | D実装の挙動に合わせて差分を解消 |
-| [x] | CP008 | behavior_diff | `compat-command_emitter.md` | `beginMask(bool useStencil)` | D実装の挙動に合わせて差分を解消 |
-| [x] | CP009 | behavior_diff | `compat-command_emitter.md` | `drawPart(Part, bool)` | D実装の挙動に合わせて差分を解消 |
-| [x] | CP010 | behavior_diff | `compat-command_emitter.md` | `endMask()` | D実装の挙動に合わせて差分を解消 |
-| [x] | CP011 | remove_candidate | `compat-command_emitter.md` | `QueueCommandEmitter::backendQueue()` | C++独自実装を削除、またはD側に寄せて一本化 |
-| [x] | CP012 | remove_candidate | `compat-command_emitter.md` | `QueueCommandEmitter::playback(RenderBackend*)` | C++独自実装を削除、またはD側に寄せて一本化 |
-| [x] | CP013 | remove_candidate | `compat-command_emitter.md` | `QueueCommandEmitter::queue() const` | C++独自実装を削除、またはD側に寄せて一本化 |
-| [x] | CP014 | remove_candidate | `compat-command_emitter.md` | `QueueCommandEmitter::record(...)` | C++独自実装を削除、またはD側に寄せて一本化 |
-| [x] | CP015 | remove_candidate | `compat-command_emitter.md` | `QueueCommandEmitter::recorded() const` | C++独自実装を削除、またはD側に寄せて一本化 |
-| [x] | CP016 | remove_candidate | `compat-command_emitter.md` | `RenderQueue::ready()` | C++独自実装を削除、またはD側に寄せて一本化 |
-| [x] | CP017 | behavior_diff | `compat-command_emitter.md` | フィールド `QueueCommandEmitter.activeBackend_` | D実装の挙動に合わせて差分を解消 |
-| [x] | CP018 | behavior_diff | `compat-command_emitter.md` | フィールド `RenderQueue.activeBackend_` | D実装の挙動に合わせて差分を解消 |
-| [x] | CP019 | behavior_diff | `compat-command_emitter.md` | フィールド `RenderQueue.frameState_` | D実装の挙動に合わせて差分を解消 |
-| [x] | CP020 | behavior_diff | `compat-fmt.md` | `inIsINPMode` | D実装の挙動に合わせて差分を解消 |
-| [x] | CP021 | missing_impl | `compat-fmt.md` | `inLoadPuppet(string file)` | D実装をC++へ移植（未実装の解消） |
-| [x] | CP022 | behavior_diff | `compat-fmt.md` | `inWriteINPPuppet(Puppet, string file)` | D実装の挙動に合わせて差分を解消 |
-| [x] | CP023 | behavior_diff | `compat-fmt.md` | `inWriteINPPuppetMemory(Puppet)` | D実装の挙動に合わせて差分を解消 |
-| [x] | CP024 | behavior_diff | `compat-path_deformer.md` | フィールド `diagnostics` | D実装の挙動に合わせて差分を解消 |
-| [x] | CP025 | remove_candidate | `compat-render-common.md` | class `RenderCommandEmitter.playback` | C++独自実装を削除、またはD側に寄せて一本化 |
-| [x] | CP026 | missing_impl | `compat-runtime_state.md` | currentRenderBackend | D実装をC++へ移植（未実装の解消） |
-| [x] | CP027 | missing_impl | `compat-runtime_state.md` | difference aggregation API | D実装をC++へ移植（未実装の解消） |
-| [x] | CP028 | missing_impl | `compat-runtime_state.md` | inDumpViewport | D実装をC++へ移植（未実装の解消） |
-| [x] | CP029 | missing_impl | `compat-runtime_state.md` | inEnsureCameraStackForTests | D実装をC++へ移植（未実装の解消） |
-| [x] | CP030 | missing_impl | `compat-runtime_state.md` | inEnsureViewportForTests | D実装をC++へ移植（未実装の解消） |
-| [x] | CP031 | missing_impl | `compat-runtime_state.md` | inGetClearColor | D実装をC++へ移植（未実装の解消） |
-| [x] | CP032 | behavior_diff | `compat-runtime_state.md` | inGetViewport | D実装の挙動に合わせて差分を解消 |
-| [x] | CP033 | missing_impl | `compat-runtime_state.md` | initRenderer | D実装をC++へ移植（未実装の解消） |
-| [x] | CP034 | missing_impl | `compat-runtime_state.md` | initRendererCommon | D実装をC++へ移植（未実装の解消） |
-| [x] | CP035 | missing_impl | `compat-runtime_state.md` | inSetClearColor | D実装をC++へ移植（未実装の解消） |
-| [x] | CP036 | behavior_diff | `compat-runtime_state.md` | inSetViewport | D実装の挙動に合わせて差分を解消 |
-| [x] | CP037 | missing_impl | `compat-runtime_state.md` | inViewportDataLength | D実装をC++へ移植（未実装の解消） |
-| [x] | CP038 | missing_impl | `compat-runtime_state.md` | render target handles (inGetRenderImage 等) | D実装をC++へ移植（未実装の解消） |
-| [x] | CP039 | missing_impl | `compat-runtime_state.md` | requireRenderBackend | D実装をC++へ移植（未実装の解消） |
-| [x] | CP040 | missing_impl | `compat-runtime_state.md` | tryRenderBackend | D実装をC++へ移植（未実装の解消） |
-| [x] | CP041 | remove_candidate | `compat-scheduler.md` | `RenderContext.frameId` | C++独自実装を削除、またはD側に寄せて一本化 |
-| [x] | CP042 | behavior_diff | `compat-scheduler.md` | `RenderContext.renderBackend` | D実装の挙動に合わせて差分を解消 |
-| [x] | CP043 | behavior_diff | `compat-serialize.md` | IDeserializable | D実装の挙動に合わせて差分を解消 |
-| [x] | CP044 | behavior_diff | `compat-serialize.md` | Ignore | D実装の挙動に合わせて差分を解消 |
-| [x] | CP045 | behavior_diff | `compat-serialize.md` | ISerializable | D実装の挙動に合わせて差分を解消 |
-| [x] | CP046 | behavior_diff | `compat-serialize.md` | Name | D実装の挙動に合わせて差分を解消 |
-| [x] | CP047 | behavior_diff | `compat-serialize.md` | Optional | D実装の挙動に合わせて差分を解消 |
-| [x] | CP048 | missing_impl | `compat-texture.md` | lock | D実装をC++へ移植（未実装の解消） |
-| [x] | CP049 | missing_impl | `compat-texture.md` | unlock | D実装をC++へ移植（未実装の解消） |
-| [x] | CP050 | behavior_diff | `compat-timing.md` | `inInit(timeFunc)` | D実装の挙動に合わせて差分を解消 |
-| [x] | CP051 | behavior_diff | `compat-transform.md` | `calcOffset(Transform other)` | D実装の挙動に合わせて差分を解消 |
-| [x] | CP052 | missing_impl | `compat-transform.md` | `toString()` | D実装をC++へ移植（未実装の解消） |
-| [x] | CP053 | missing_impl | `compat-transform.md` | deserializeFromFghj() | D実装をC++へ移植（未実装の解消） |
-| [x] | CP054 | missing_impl | `compat-transform.md` | serialize() | D実装をC++へ移植（未実装の解消） |
-| [x] | CP055 | behavior_diff | `compat-transform.md` | フィールド `scale` | D実装の挙動に合わせて差分を解消 |
-| [x] | CP056 | missing_impl | `compat-triangle.md` | `calcOffsetInTriangleCoords(vec2, MeshData&, int[] triangle)` | D実装をC++へ移植（未実装の解消） |
-| [x] | CP057 | missing_impl | `compat-triangle.md` | `findSurroundingTriangle(vec2, MeshData&)` | D実装をC++へ移植（未実装の解消） |
-| [x] | CP058 | missing_impl | `compat-triangle.md` | `isPointInTriangle(vec2, Vec2Array)` | D実装をC++へ移植（未実装の解消） |
-| [x] | CP059 | missing_impl | `compat-triangle.md` | `nlCalculateTransformInTriangle(Vec2Array, int[] triangle, Vec2Array deform, vec2 target, out vec2 target_prime, out float rotVert, out float rotHorz)` | D実装をC++へ移植（未実装の解消） |
-| [x] | CP060 | missing_impl | `compat-triangle.md` | `private: applyAffineTransform(mat3, vec2)` | D実装をC++へ移植（未実装の解消） |
-| [x] | CP061 | missing_impl | `compat-triangle.md` | `private: calculateAffineTransform(Vec2Array, int[] triangle, Vec2Array deform)` | D実装をC++へ移植（未実装の解消） |
-| [x] | CP062 | missing_impl | `compat-triangle.md` | `private: calculateAngle(vec2, vec2)` | D実装をC++へ移植（未実装の解消） |
-| [x] | CP063 | behavior_diff | `compat-unity_native.md` | `njgFlushCommandBuffer` | D実装の挙動に合わせて差分を解消 |
-| [x] | CP064 | remove_candidate | `compat-unity_native.md` | `njgFreeBuffer` | C++独自実装を削除、またはD側に寄せて一本化 |
-| [x] | CP065 | behavior_diff | `compat-unity_native.md` | `njgGetGcHeapSize` | D実装の挙動に合わせて差分を解消 |
-| [x] | CP066 | missing_impl | `compat-unity_native.md` | `njgGetPuppetExtData` | D実装をC++へ移植（未実装の解消） |
-| [x] | CP067 | missing_impl | `compat-unity_native.md` | `njgGetRenderTargets` | D実装をC++へ移植（未実装の解消） |
-| [x] | CP068 | missing_impl | `compat-unity_native.md` | `njgGetSharedBuffers` | D実装をC++へ移植（未実装の解消） |
-| [x] | CP069 | remove_candidate | `compat-unity_native.md` | `njgLoadPuppetFromMemory` | C++独自実装を削除、またはD側に寄せて一本化 |
-| [>] | CP070 | missing_impl | `compat-unity_native.md` | `njgPauseAnimation` | D実装をC++へ移植（未実装の解消） |
-| [>] | CP071 | missing_impl | `compat-unity_native.md` | `njgPlayAnimation` | D実装をC++へ移植（未実装の解消） |
-| [x] | CP072 | missing_impl | `compat-unity_native.md` | `NjgRenderTargets` | D実装をC++へ移植（未実装の解消） |
-| [x] | CP073 | missing_impl | `compat-unity_native.md` | `njgRuntimeInit` | D実装をC++へ移植（未実装の解消） |
-| [x] | CP074 | missing_impl | `compat-unity_native.md` | `njgRuntimeTerm` | D実装をC++へ移植（未実装の解消） |
-| [>] | CP075 | missing_impl | `compat-unity_native.md` | `njgSeekAnimation` | D実装をC++へ移植（未実装の解消） |
-| [x] | CP076 | missing_impl | `compat-unity_native.md` | `njgSetLogCallback` | D実装をC++へ移植（未実装の解消） |
-| [x] | CP077 | missing_impl | `compat-unity_native.md` | `njgSetPuppetScale` | D実装をC++へ移植（未実装の解消） |
-| [x] | CP078 | missing_impl | `compat-unity_native.md` | `njgSetPuppetTranslation` | D実装をC++へ移植（未実装の解消） |
-| [>] | CP079 | missing_impl | `compat-unity_native.md` | `njgStopAnimation` | D実装をC++へ移植（未実装の解消） |
-| [x] | CP080 | remove_candidate | `compat-unity_native.md` | `njgWritePuppetToMemory` | C++独自実装を削除、またはD側に寄せて一本化 |
-| [>] | CP081 | missing_impl | `compat-vec2array.md` | SIMD対応 (`applySIMD` 等) | D実装をC++へ移植（未実装の解消） |
-| [x] | CP082 | behavior_diff | `compat-vec2array.md` | フィールド `alignment` | D実装の挙動に合わせて差分を解消 |
-| [x] | CP083 | behavior_diff | `compat-vec2array.md` | フィールド `backing` | D実装の挙動に合わせて差分を解消 |
-| [x] | CP084 | behavior_diff | `compat-vec2array.md` | フィールド `lanes` (x,y SoA) | D実装の挙動に合わせて差分を解消 |
-| [x] | CP085 | missing_impl | `compat-vec2array.md` | 単体テスト | D実装をC++へ移植（未実装の解消） |
-| [x] | CP086 | remove_candidate | `compat-queue.md` | `QueueRenderBackend::playback(RenderBackend*)` | C++独自実装を削除、またはD側に寄せて一本化 |
-| [x] | CP087 | remove_candidate | `compat-queue.md` | `QueueRenderBackend::recorded()` | C++独自実装を削除、またはD側に寄せて一本化 |
-| [x] | CP088 | remove_candidate | `compat-queue.md` | `QueueRenderBackend::backendQueue()` | C++独自実装を削除、またはD側に寄せて一本化 |
-| [x] | CP089 | remove_candidate | `compat-queue.md` | `QueueRenderBackend::backendResourceQueue()` | C++独自実装を削除、またはD側に寄せて一本化 |
-| [x] | CP090 | remove_candidate | `compat-queue.md` | `QueueRenderBackend::clearResourceQueue()` | C++独自実装を削除、またはD側に寄せて一本化 |
-| [x] | CP091 | remove_candidate | `compat-queue.md` | `QueueRenderBackend::renderTarget()` | C++独自実装を削除、またはD側に寄せて一本化 |
-| [x] | CP092 | remove_candidate | `compat-queue.md` | `QueueRenderBackend::compositeTarget()` | C++独自実装を削除、またはD側に寄せて一本化 |
-| [x] | CP093 | remove_candidate | `compat-queue.md` | `QueueRenderBackend::sharedVerticesRaw()` | C++独自実装を削除、またはD側に寄せて一本化 |
-| [x] | CP094 | remove_candidate | `compat-queue.md` | `QueueRenderBackend::sharedUvRaw()` | C++独自実装を削除、またはD側に寄せて一本化 |
-| [x] | CP095 | remove_candidate | `compat-queue.md` | `QueueRenderBackend::sharedDeformRaw()` | C++独自実装を削除、またはD側に寄せて一本化 |
-| [x] | CP096 | remove_candidate | `compat-queue.md` | `QueueRenderBackend::sharedVertexCount()` | C++独自実装を削除、またはD側に寄せて一本化 |
-| [x] | CP097 | remove_candidate | `compat-queue.md` | `QueueRenderBackend::sharedUvCount()` | C++独自実装を削除、またはD側に寄せて一本化 |
-| [x] | CP098 | remove_candidate | `compat-queue.md` | `QueueRenderBackend::sharedDeformCount()` | C++独自実装を削除、またはD側に寄せて一本化 |
-| [x] | CP099 | remove_candidate | `compat-queue.md` | `QueueRenderBackend::sharedVerticesData()` | C++独自実装を削除、またはD側に寄せて一本化 |
-| [x] | CP100 | remove_candidate | `compat-queue.md` | `QueueRenderBackend::sharedUvData()` | C++独自実装を削除、またはD側に寄せて一本化 |
-| [x] | CP101 | remove_candidate | `compat-queue.md` | `QueueRenderBackend::sharedDeformData()` | C++独自実装を削除、またはD側に寄せて一本化 |
-| [x] | CP102 | behavior_diff | `compat-unity_native.md` | `njgTickPuppet` ABI (`float` vs `double`) | D準拠で `double deltaSeconds` に修正 |
-| [x] | CP103 | behavior_diff | `compat-unity_native.md` | `njgEmitCommands` ABI (`SharedBufferSnapshot* + const CommandQueueView**` vs `CommandQueueView*`) | D準拠で `CommandQueueView* outView` に修正し、shared は `njgGetSharedBuffers` へ分離 |
-| [x] | CP104 | behavior_diff | `compat-unity_native.md` | `NjgRenderCommandKind` 列挙値順（`DrawMask` 欠落） | `DrawMask/BeginComposite/DrawCompositeQuad/EndComposite` を含む D 準拠順へ修正 |
-| [x] | CP105 | behavior_diff | `compat-unity_native.md` | `NjgPartDrawPacket` レイアウト（`renderMatrix`/`renderRotation` 欠落） | D 準拠レイアウトへ修正、queue 詰め替えを更新 |
-| [x] | CP106 | behavior_diff | `compat-unity_native.md` | `NjgDynamicCompositePass` レイアウト（`autoScaled`/`drawBufferCount`/`hasStencil` 欠落） | D 準拠レイアウトへ修正、queue 詰め替えを更新 |
-| [x] | CP107 | behavior_diff | `compat-unity_native.md` | `CommandQueueView.commands` 型不一致（`const void*`） | D 準拠で `const NjgQueuedCommand*` へ修正 |
-| [x] | CP109 | behavior_diff | `compat-unity_native.md` | `MaskDrawableKind` 列挙値（内部 `Part/Drawable/Mask` を export） | D 準拠で export は `Part/Mask` の2値へ修正 |
-| [x] | CP108 | behavior_diff | `compat-unity_native.md` | `nijiv-opengl --test` で `0xC0000409` (BEX64) | `njgLoadPuppet` 例外未捕捉を C API 境界で捕捉し `Failure` 返却へ修正、原因切り分け可能化 |
-| [x] | CP110 | behavior_diff | `compat-binfmt.md` | `MAGIC_BYTES`/`TEX_SECTION`/`EXT_SECTION` 定数不一致（`INOCHI02` 系） | D準拠 `TRNSRTS\\0` / `TEX_SECT` / `EXT_SECT` へ修正し `.inx` 読み込みを復旧 |
-| [x] | CP111 | behavior_diff | `compat-vec2array.md` | `Vec2Array/Vec3Array/Vec4Array` の copy semantics（浅いポインタコピー） | D準拠の値型動作に修正（copy ctor/copy assign で実データ複製、内部ポインタ再同期） |
-| [x] | CP112 | behavior_diff | `compat-vec2array.md` | `copyFrom` 初期化漏れ（`logicalLength_` 未リセットで `ensureLength` 早期 return） | `logicalLength_=0` を含む完全初期化へ修正し、`nijiv --test` の AV (`0xC0000005`) を解消 |
-| [x] | CP113 | missing_impl | `compat-path_deformer.md` | `deform(Vec2Array)` | D準拠で `deformedCurve = createCurve(...)` を実装し、`applyPathDeform` から呼び出すよう修正 |
-| [x] | CP114 | behavior_diff | `compat-path_deformer.md` | `applyPathDeform` の driver 初期化 (`setup` vs `updateDefaultShape`) | D準拠で初回初期化を `driver.setup()` に統一 |
-| [x] | CP115 | behavior_diff | `compat-path_deformer.md` | `applyDeformToChildren` 終端処理 | D準拠で `physicsOnly = true` 後に `rebuffer(empty)` を実施 |
-| [x] | CP116 | behavior_diff | `compat-deformable.md` | `preProcess/postProcess` と `DeformationStack` の更新順 | D準拠で stack/filter の更新順と shared deform dirty 反映を一致化 |
-| [x] | CP117 | behavior_diff | `compat-node.md` | `FilterHook` 同一性管理 | Dの `(stage,func)` 管理に対応するため C++側は `stage+tag` 管理へ統一し、登録/解除対称性を担保 |
-| [x] | CP118 | behavior_diff | `compat-drawable.md` | node attach/weld hook 解除条件 | D準拠の重複回避/解除に合わせ、`stage+tag` で一意管理 |
-| [x] | CP119 | behavior_diff | `compat-grid_deformer.md` | child filter 解除条件 | D準拠の登録/解除対称性に合わせ、`stage+tag` で一意管理 |
-| [x] | CP120 | behavior_diff | `compat-meshgroup.md` | child filter 解除条件 | D準拠の登録/解除対称性に合わせ、`stage+tag` で一意管理 |
-| [x] | CP121 | behavior_diff | `compat-vec2array.md` | `bindExternalStorage` と `x/y` 直接アクセスの整合性 | 先に `Vec2Array` の外部ビュー時アクセス規約を D 版へ写経し、`core/nodes/*`/`core/render/*` の直接 `x/y` 参照を規約準拠に統一してから `shared_deform_buffer` を D 同等（bindExternalStorage 使用）へ戻す |
-| [x] | CP122 | behavior_diff | `compat-queue.md` | shared deform buffer の frame 間一貫性回帰 | `nijiv --test ... --queue-dump` を nicxlive/nijilive で同条件比較し、`vo=1947/2044` を含む複数パーツの `d0` がフレーム間で発散しないことを完了条件として自動化/手順化 |
-| [x] | CP123 | behavior_diff | `compat-drawable.md` | shared atlas producer 側の外部ビュー整合 (`core/nodes/drawable.cpp/.hpp`) | `Drawable` の atlas producer を D 準拠へ寄せ、`vertices` を直接 atlas 登録。`writeSharedBuffers` の毎フレームコピー/即時uploadを撤去し、`updateVertices/updateDeform` で dirty/resize 契約を統一 |
-| [x] | CP124 | behavior_diff | `compat-part.md`, `compat-mask.md` | packet 生成側の atlas 参照整合 (`core/nodes/part.cpp`, `core/nodes/mask.cpp`) | `Part::updateUVs` を D 準拠へ修正し、atlas 登録済み `sharedUvs` を resize+反映。`deformOffset/vertexOffset` と stride 参照契約を維持 |
-| [>] | CP125 | behavior_diff | `compat-command_emitter.md` | shared buffer upload/hash 経路の外部ビュー整合 (`core/render/command_emitter.cpp`) | upload 条件を D 同等（dirty かつ length>0 のときのみ upload）に修正済み。`HASH d` 固定差分は継続調査 |
-| [x] | CP126 | behavior_diff | `compat-unity_native.md` | Unity export/snapshot の外部ビュー整合 (`core/unity_native.cpp`) | `njgGetSharedBuffers` は D 同等に `rawStorage` + `vertex/uv/deformCount` を返却維持。関連読み出しは `xAt/yAt` ベースで統一（`hashVec2Array` を含む） |
-| [x] | CP127 | behavior_diff | `compat-queue.md` | backend queue の shared buffer 保持整合 (`core/render/backend_queue.cpp/.hpp`) | queue backend の shared buffer 保持を `dup()` に固定し、外部ビュー alias を遮断してフレーム間 stale 参照を防止 |
-| [>] | CP128 | behavior_diff | `compat-deformable.md` | deformable 基盤の外部ビュー整合 (`core/nodes/deformable.cpp`) | `DeformationStack::preUpdate` を D 同等の zero-fill のみに戻し、`updateDeform` の不要 dirty 強制を除去。frame間 deform hash 固定の残差分は継続調査 |
-| [>] | CP129 | behavior_diff | `compat-grid_deformer.md`, `compat-path_deformer.md`, `compat-meshgroup.md` | deformer/filter 消費側の外部ビュー整合 | `core/nodes/grid_deformer.cpp`, `core/nodes/path_deformer.cpp`, `core/nodes/mesh_group.cpp` の `x/y` 直接参照を監査し、外部ビュー入力でも同値になるよう修正 |
-| [>] | CP130 | behavior_diff | `compat-binding.md`, `compat-parameter.md` | parameter/binding 側の Vec2Array 参照整合 | `core/param/parameter.hpp`, `core/param/binding_impl.hpp` の deformation slot 操作を監査し、外部ビュー前提でも破綻しないアクセス規約へ統一 |
-| [>] | CP131 | behavior_diff | `compat-triangle.md`, `compat-common.md` | 幾何補助と曲線処理の Vec2Array 参照整合 | `core/nodes/curve.cpp`, `core/nodes/deformer/drivers/phys.cpp`, `core/common/utils.hpp` 周辺の `x/y` 参照を監査し、外部ビュー化後の計算一致を確認 |
-
-補足（2026-02-22）
-- `CP129/CP130/CP131` について、対象ファイルの `x/y` 直接アクセスを `xAt/yAt/set/fill` へ置換済み。
-- `core/math/veca.hpp` の `Vec2Array` 代入で、外部ビュー時に所有ストレージへ戻ってしまう挙動を修正（外部ビューを維持したまま値コピー）。
-- `CP122` 自動化: `tools/check_shared_deform_consistency.sh` を追加。`queue-nicx-f40-bindfix.log` / `queue-nijilive-f40-cp131.log` で `vo=1947/2044` の `d0` range は双方 `0.0`（発散なし）を確認。
-- ただし `HASH d` は依然として `nicxlive` 固定・`nijilive` 可変の差分が残るため、次段は順序どおり `CP123`（shared atlas producer 側）を進める。
-- `CP123` 着手: `core/nodes/drawable.cpp` の shared atlas wrapper から事前 `resize` を除去し、D同様に atlas 側 `shared*Resize` の再構築に一本化。
-- `CP123` 完了: `Drawable` の shared atlas producer を D 準拠へ修正。`vertices` 直登録に切替え、`writeSharedBuffers` による毎フレームの mirror copy / backend 直接 upload を撤去。
-- `CP124` 完了: `Part::updateUVs` を atlas 登録済み `sharedUvs` の resize+反映に修正（`mesh->uvs` 直接 resize の経路を除去）。
-- `CP125` 継続: `QueueCommandEmitter::uploadSharedBuffers` を D 準拠（dirty + length>0 upload）へ修正。
-- `CP128` 継続: `DeformationStack::preUpdate` を D 同等（zero-fill のみ）へ戻し、`Deformable::updateDeform` の余剰 dirty 強制を削除。
-- `CP126` 完了: shared 読み出し経路の API 統一として `hashVec2Array` を `xAt/yAt` ベースへ変更（外部ビュー時の生ポインタ参照依存を除去）。
-- `CP127` 完了: `QueueRenderBackend::uploadShared*` を `dup()` 保持に変更し、外部ビュー alias を遮断。
-- 検証: `nijiv --test --frames 20/40 --fixed-delta 0.0166667 --unity-dll nicxlive` は完走するが、`HASH d` が frame 間固定の差分は残存（`queue-nicx-f20-cp128.log`）。
-- 追加検証: `nijilive` では `vo=0/239/3267/3427` の `d0` が frame 間で変化する一方、`nicxlive` は同 `vo` が `d0=(0,0)` 固定。次段は driver->parameter->deformation 適用経路の写経突合で原因を特定する。
-- `CP130` 追補（写経修正）: `Parameter::finalize` の valid 判定を D 同等へ修正。`target uuid` が `Node` または `Parameter` のどちらかで解決できれば binding を維持するように変更（`core/param/binding_impl.hpp`）。
-- `CP128` 追補（写経修正）: `Drawable::setupChildDrawable` の node attach filter を D 同等に修正。入力の `origVertices/origDeformation` をそのまま `nodeAttachProcessor` へ渡し、戻りの `Vec2Array` も全要素を返すように変更（先頭1要素のみ返す C++ 独自処理を撤去）。
-- 検証（2026-02-22 追加）: `queue-nicx-f5-continue-final.log` でも `HASH d` 固定は継続。`Part::fillDrawPacket` の追跡で `vo=0`（part `4079733156`）は `maxAbs>0` だが `d0=0`、`vo=239/3267/3427` は `maxAbs=0` を確認。次段は対象 part の初期/駆動パラメータ値と D 側の初期値適用差分を突合する。
+| Status | Task ID | 種別 | 参照 | 対象項目 | 結果 | 実装方針 |
+| --- | --- | --- | --- | --- | --- | --- |
+| [x] | CP001 | missing_impl | `compat-binding.md` | `deserializeFromFghj` | - | D実装をC++へ移植（未実装の解消） |
+| [x] | CP002 | missing_impl | `compat-binding.md` | `finalize` | - | D実装をC++へ移植（未実装の解消） |
+| [x] | CP003 | behavior_diff | `compat-binding.md` | `getNodeUUID` | - | D実装の挙動に合わせて差分を解消 |
+| [x] | CP004 | behavior_diff | `compat-binding.md` | `isCompatibleWithNode` | - | D実装の挙動に合わせて差分を解消 |
+| [x] | CP005 | missing_impl | `compat-binding.md` | `reconstruct` | - | D実装をC++へ移植（未実装の解消） |
+| [x] | CP006 | missing_impl | `compat-binding.md` | `serializeSelf` | - | D実装をC++へ移植（未実装の解消） |
+| [x] | CP007 | behavior_diff | `compat-binding.md` | フィールド `BindTarget.target` | - | D実装の挙動に合わせて差分を解消 |
+| [x] | CP008 | behavior_diff | `compat-command_emitter.md` | `beginMask(bool useStencil)` | - | D実装の挙動に合わせて差分を解消 |
+| [x] | CP009 | behavior_diff | `compat-command_emitter.md` | `drawPart(Part, bool)` | - | D実装の挙動に合わせて差分を解消 |
+| [x] | CP010 | behavior_diff | `compat-command_emitter.md` | `endMask()` | - | D実装の挙動に合わせて差分を解消 |
+| [x] | CP011 | remove_candidate | `compat-command_emitter.md` | `QueueCommandEmitter::backendQueue()` | - | C++独自実装を削除、またはD側に寄せて一本化 |
+| [x] | CP012 | remove_candidate | `compat-command_emitter.md` | `QueueCommandEmitter::playback(RenderBackend*)` | - | C++独自実装を削除、またはD側に寄せて一本化 |
+| [x] | CP013 | remove_candidate | `compat-command_emitter.md` | `QueueCommandEmitter::queue() const` | - | C++独自実装を削除、またはD側に寄せて一本化 |
+| [x] | CP014 | remove_candidate | `compat-command_emitter.md` | `QueueCommandEmitter::record(...)` | - | C++独自実装を削除、またはD側に寄せて一本化 |
+| [x] | CP015 | remove_candidate | `compat-command_emitter.md` | `QueueCommandEmitter::recorded() const` | - | C++独自実装を削除、またはD側に寄せて一本化 |
+| [x] | CP016 | remove_candidate | `compat-command_emitter.md` | `RenderQueue::ready()` | - | C++独自実装を削除、またはD側に寄せて一本化 |
+| [x] | CP017 | behavior_diff | `compat-command_emitter.md` | フィールド `QueueCommandEmitter.activeBackend_` | - | D実装の挙動に合わせて差分を解消 |
+| [x] | CP018 | behavior_diff | `compat-command_emitter.md` | フィールド `RenderQueue.activeBackend_` | - | D実装の挙動に合わせて差分を解消 |
+| [x] | CP019 | behavior_diff | `compat-command_emitter.md` | フィールド `RenderQueue.frameState_` | - | D実装の挙動に合わせて差分を解消 |
+| [x] | CP020 | behavior_diff | `compat-fmt.md` | `inIsINPMode` | - | D実装の挙動に合わせて差分を解消 |
+| [x] | CP021 | missing_impl | `compat-fmt.md` | `inLoadPuppet(string file)` | - | D実装をC++へ移植（未実装の解消） |
+| [x] | CP022 | behavior_diff | `compat-fmt.md` | `inWriteINPPuppet(Puppet, string file)` | - | D実装の挙動に合わせて差分を解消 |
+| [x] | CP023 | behavior_diff | `compat-fmt.md` | `inWriteINPPuppetMemory(Puppet)` | - | D実装の挙動に合わせて差分を解消 |
+| [x] | CP024 | behavior_diff | `compat-path_deformer.md` | フィールド `diagnostics` | - | D実装の挙動に合わせて差分を解消 |
+| [x] | CP025 | remove_candidate | `compat-render-common.md` | class `RenderCommandEmitter.playback` | - | C++独自実装を削除、またはD側に寄せて一本化 |
+| [x] | CP026 | missing_impl | `compat-runtime_state.md` | currentRenderBackend | - | D実装をC++へ移植（未実装の解消） |
+| [x] | CP027 | missing_impl | `compat-runtime_state.md` | difference aggregation API | - | D実装をC++へ移植（未実装の解消） |
+| [x] | CP028 | missing_impl | `compat-runtime_state.md` | inDumpViewport | - | D実装をC++へ移植（未実装の解消） |
+| [x] | CP029 | missing_impl | `compat-runtime_state.md` | inEnsureCameraStackForTests | - | D実装をC++へ移植（未実装の解消） |
+| [x] | CP030 | missing_impl | `compat-runtime_state.md` | inEnsureViewportForTests | - | D実装をC++へ移植（未実装の解消） |
+| [x] | CP031 | missing_impl | `compat-runtime_state.md` | inGetClearColor | - | D実装をC++へ移植（未実装の解消） |
+| [x] | CP032 | behavior_diff | `compat-runtime_state.md` | inGetViewport | - | D実装の挙動に合わせて差分を解消 |
+| [x] | CP033 | missing_impl | `compat-runtime_state.md` | initRenderer | - | D実装をC++へ移植（未実装の解消） |
+| [x] | CP034 | missing_impl | `compat-runtime_state.md` | initRendererCommon | - | D実装をC++へ移植（未実装の解消） |
+| [x] | CP035 | missing_impl | `compat-runtime_state.md` | inSetClearColor | - | D実装をC++へ移植（未実装の解消） |
+| [x] | CP036 | behavior_diff | `compat-runtime_state.md` | inSetViewport | - | D実装の挙動に合わせて差分を解消 |
+| [x] | CP037 | missing_impl | `compat-runtime_state.md` | inViewportDataLength | - | D実装をC++へ移植（未実装の解消） |
+| [x] | CP038 | missing_impl | `compat-runtime_state.md` | render target handles (inGetRenderImage 等) | - | D実装をC++へ移植（未実装の解消） |
+| [x] | CP039 | missing_impl | `compat-runtime_state.md` | requireRenderBackend | - | D実装をC++へ移植（未実装の解消） |
+| [x] | CP040 | missing_impl | `compat-runtime_state.md` | tryRenderBackend | - | D実装をC++へ移植（未実装の解消） |
+| [x] | CP041 | remove_candidate | `compat-scheduler.md` | `RenderContext.frameId` | - | C++独自実装を削除、またはD側に寄せて一本化 |
+| [x] | CP042 | behavior_diff | `compat-scheduler.md` | `RenderContext.renderBackend` | - | D実装の挙動に合わせて差分を解消 |
+| [x] | CP043 | behavior_diff | `compat-serialize.md` | IDeserializable | - | D実装の挙動に合わせて差分を解消 |
+| [x] | CP044 | behavior_diff | `compat-serialize.md` | Ignore | - | D実装の挙動に合わせて差分を解消 |
+| [x] | CP045 | behavior_diff | `compat-serialize.md` | ISerializable | - | D実装の挙動に合わせて差分を解消 |
+| [x] | CP046 | behavior_diff | `compat-serialize.md` | Name | - | D実装の挙動に合わせて差分を解消 |
+| [x] | CP047 | behavior_diff | `compat-serialize.md` | Optional | - | D実装の挙動に合わせて差分を解消 |
+| [x] | CP048 | missing_impl | `compat-texture.md` | lock | - | D実装をC++へ移植（未実装の解消） |
+| [x] | CP049 | missing_impl | `compat-texture.md` | unlock | - | D実装をC++へ移植（未実装の解消） |
+| [x] | CP050 | behavior_diff | `compat-timing.md` | `inInit(timeFunc)` | - | D実装の挙動に合わせて差分を解消 |
+| [x] | CP051 | behavior_diff | `compat-transform.md` | `calcOffset(Transform other)` | - | D実装の挙動に合わせて差分を解消 |
+| [x] | CP052 | missing_impl | `compat-transform.md` | `toString()` | - | D実装をC++へ移植（未実装の解消） |
+| [x] | CP053 | missing_impl | `compat-transform.md` | deserializeFromFghj() | - | D実装をC++へ移植（未実装の解消） |
+| [x] | CP054 | missing_impl | `compat-transform.md` | serialize() | - | D実装をC++へ移植（未実装の解消） |
+| [x] | CP055 | behavior_diff | `compat-transform.md` | フィールド `scale` | - | D実装の挙動に合わせて差分を解消 |
+| [x] | CP056 | missing_impl | `compat-triangle.md` | `calcOffsetInTriangleCoords(vec2, MeshData&, int[] triangle)` | - | D実装をC++へ移植（未実装の解消） |
+| [x] | CP057 | missing_impl | `compat-triangle.md` | `findSurroundingTriangle(vec2, MeshData&)` | - | D実装をC++へ移植（未実装の解消） |
+| [x] | CP058 | missing_impl | `compat-triangle.md` | `isPointInTriangle(vec2, Vec2Array)` | - | D実装をC++へ移植（未実装の解消） |
+| [x] | CP059 | missing_impl | `compat-triangle.md` | `nlCalculateTransformInTriangle(Vec2Array, int[] triangle, Vec2Array deform, vec2 target, out vec2 target_prime, out float rotVert, out float rotHorz)` | - | D実装をC++へ移植（未実装の解消） |
+| [x] | CP060 | missing_impl | `compat-triangle.md` | `private: applyAffineTransform(mat3, vec2)` | - | D実装をC++へ移植（未実装の解消） |
+| [x] | CP061 | missing_impl | `compat-triangle.md` | `private: calculateAffineTransform(Vec2Array, int[] triangle, Vec2Array deform)` | - | D実装をC++へ移植（未実装の解消） |
+| [x] | CP062 | missing_impl | `compat-triangle.md` | `private: calculateAngle(vec2, vec2)` | - | D実装をC++へ移植（未実装の解消） |
+| [x] | CP063 | behavior_diff | `compat-unity_native.md` | `njgFlushCommandBuffer` | - | D実装の挙動に合わせて差分を解消 |
+| [x] | CP064 | remove_candidate | `compat-unity_native.md` | `njgFreeBuffer` | - | C++独自実装を削除、またはD側に寄せて一本化 |
+| [x] | CP065 | behavior_diff | `compat-unity_native.md` | `njgGetGcHeapSize` | - | D実装の挙動に合わせて差分を解消 |
+| [x] | CP066 | missing_impl | `compat-unity_native.md` | `njgGetPuppetExtData` | - | D実装をC++へ移植（未実装の解消） |
+| [x] | CP067 | missing_impl | `compat-unity_native.md` | `njgGetRenderTargets` | - | D実装をC++へ移植（未実装の解消） |
+| [x] | CP068 | missing_impl | `compat-unity_native.md` | `njgGetSharedBuffers` | - | D実装をC++へ移植（未実装の解消） |
+| [x] | CP069 | remove_candidate | `compat-unity_native.md` | `njgLoadPuppetFromMemory` | - | C++独自実装を削除、またはD側に寄せて一本化 |
+| [>] | CP070 | missing_impl | `compat-unity_native.md` | `njgPauseAnimation` | C API 枠のみ、D本体ロジック未写経 | D実装をC++へ移植（未実装の解消） |
+| [>] | CP071 | missing_impl | `compat-unity_native.md` | `njgPlayAnimation` | C API 枠のみ、D本体ロジック未写経 | D実装をC++へ移植（未実装の解消） |
+| [x] | CP072 | missing_impl | `compat-unity_native.md` | `NjgRenderTargets` | - | D実装をC++へ移植（未実装の解消） |
+| [x] | CP073 | missing_impl | `compat-unity_native.md` | `njgRuntimeInit` | - | D実装をC++へ移植（未実装の解消） |
+| [x] | CP074 | missing_impl | `compat-unity_native.md` | `njgRuntimeTerm` | - | D実装をC++へ移植（未実装の解消） |
+| [>] | CP075 | missing_impl | `compat-unity_native.md` | `njgSeekAnimation` | C API 枠のみ、D本体ロジック未写経 | D実装をC++へ移植（未実装の解消） |
+| [x] | CP076 | missing_impl | `compat-unity_native.md` | `njgSetLogCallback` | - | D実装をC++へ移植（未実装の解消） |
+| [x] | CP077 | missing_impl | `compat-unity_native.md` | `njgSetPuppetScale` | - | D実装をC++へ移植（未実装の解消） |
+| [x] | CP078 | missing_impl | `compat-unity_native.md` | `njgSetPuppetTranslation` | - | D実装をC++へ移植（未実装の解消） |
+| [>] | CP079 | missing_impl | `compat-unity_native.md` | `njgStopAnimation` | C API 枠のみ、D本体ロジック未写経 | D実装をC++へ移植（未実装の解消） |
+| [x] | CP080 | remove_candidate | `compat-unity_native.md` | `njgWritePuppetToMemory` | - | C++独自実装を削除、またはD側に寄せて一本化 |
+| [>] | CP081 | missing_impl | `compat-vec2array.md` | SIMD対応 (`applySIMD` 等) | 未着手（スカラ経路で暫定動作） | D実装をC++へ移植（未実装の解消） |
+| [x] | CP082 | behavior_diff | `compat-vec2array.md` | フィールド `alignment` | - | D実装の挙動に合わせて差分を解消 |
+| [x] | CP083 | behavior_diff | `compat-vec2array.md` | フィールド `backing` | - | D実装の挙動に合わせて差分を解消 |
+| [x] | CP084 | behavior_diff | `compat-vec2array.md` | フィールド `lanes` (x,y SoA) | - | D実装の挙動に合わせて差分を解消 |
+| [x] | CP085 | missing_impl | `compat-vec2array.md` | 単体テスト | - | D実装をC++へ移植（未実装の解消） |
+| [x] | CP086 | remove_candidate | `compat-queue.md` | `QueueRenderBackend::playback(RenderBackend*)` | - | C++独自実装を削除、またはD側に寄せて一本化 |
+| [x] | CP087 | remove_candidate | `compat-queue.md` | `QueueRenderBackend::recorded()` | - | C++独自実装を削除、またはD側に寄せて一本化 |
+| [x] | CP088 | remove_candidate | `compat-queue.md` | `QueueRenderBackend::backendQueue()` | - | C++独自実装を削除、またはD側に寄せて一本化 |
+| [x] | CP089 | remove_candidate | `compat-queue.md` | `QueueRenderBackend::backendResourceQueue()` | - | C++独自実装を削除、またはD側に寄せて一本化 |
+| [x] | CP090 | remove_candidate | `compat-queue.md` | `QueueRenderBackend::clearResourceQueue()` | - | C++独自実装を削除、またはD側に寄せて一本化 |
+| [x] | CP091 | remove_candidate | `compat-queue.md` | `QueueRenderBackend::renderTarget()` | - | C++独自実装を削除、またはD側に寄せて一本化 |
+| [x] | CP092 | remove_candidate | `compat-queue.md` | `QueueRenderBackend::compositeTarget()` | - | C++独自実装を削除、またはD側に寄せて一本化 |
+| [x] | CP093 | remove_candidate | `compat-queue.md` | `QueueRenderBackend::sharedVerticesRaw()` | - | C++独自実装を削除、またはD側に寄せて一本化 |
+| [x] | CP094 | remove_candidate | `compat-queue.md` | `QueueRenderBackend::sharedUvRaw()` | - | C++独自実装を削除、またはD側に寄せて一本化 |
+| [x] | CP095 | remove_candidate | `compat-queue.md` | `QueueRenderBackend::sharedDeformRaw()` | - | C++独自実装を削除、またはD側に寄せて一本化 |
+| [x] | CP096 | remove_candidate | `compat-queue.md` | `QueueRenderBackend::sharedVertexCount()` | - | C++独自実装を削除、またはD側に寄せて一本化 |
+| [x] | CP097 | remove_candidate | `compat-queue.md` | `QueueRenderBackend::sharedUvCount()` | - | C++独自実装を削除、またはD側に寄せて一本化 |
+| [x] | CP098 | remove_candidate | `compat-queue.md` | `QueueRenderBackend::sharedDeformCount()` | - | C++独自実装を削除、またはD側に寄せて一本化 |
+| [x] | CP099 | remove_candidate | `compat-queue.md` | `QueueRenderBackend::sharedVerticesData()` | - | C++独自実装を削除、またはD側に寄せて一本化 |
+| [x] | CP100 | remove_candidate | `compat-queue.md` | `QueueRenderBackend::sharedUvData()` | - | C++独自実装を削除、またはD側に寄せて一本化 |
+| [x] | CP101 | remove_candidate | `compat-queue.md` | `QueueRenderBackend::sharedDeformData()` | - | C++独自実装を削除、またはD側に寄せて一本化 |
+| [x] | CP102 | behavior_diff | `compat-unity_native.md` | `njgTickPuppet` ABI (`float` vs `double`) | - | D準拠で `double deltaSeconds` に修正 |
+| [x] | CP103 | behavior_diff | `compat-unity_native.md` | `njgEmitCommands` ABI (`SharedBufferSnapshot* + const CommandQueueView**` vs `CommandQueueView*`) | - | D準拠で `CommandQueueView* outView` に修正し、shared は `njgGetSharedBuffers` へ分離 |
+| [x] | CP104 | behavior_diff | `compat-unity_native.md` | `NjgRenderCommandKind` 列挙値順（`DrawMask` 欠落） | - | `DrawMask/BeginComposite/DrawCompositeQuad/EndComposite` を含む D 準拠順へ修正 |
+| [x] | CP105 | behavior_diff | `compat-unity_native.md` | `NjgPartDrawPacket` レイアウト（`renderMatrix`/`renderRotation` 欠落） | - | D 準拠レイアウトへ修正、queue 詰め替えを更新 |
+| [x] | CP106 | behavior_diff | `compat-unity_native.md` | `NjgDynamicCompositePass` レイアウト（`autoScaled`/`drawBufferCount`/`hasStencil` 欠落） | - | D 準拠レイアウトへ修正、queue 詰め替えを更新 |
+| [x] | CP107 | behavior_diff | `compat-unity_native.md` | `CommandQueueView.commands` 型不一致（`const void*`） | - | D 準拠で `const NjgQueuedCommand*` へ修正 |
+| [x] | CP109 | behavior_diff | `compat-unity_native.md` | `MaskDrawableKind` 列挙値（内部 `Part/Drawable/Mask` を export） | - | D 準拠で export は `Part/Mask` の2値へ修正 |
+| [x] | CP108 | behavior_diff | `compat-unity_native.md` | `nijiv-opengl --test` で `0xC0000409` (BEX64) | - | `njgLoadPuppet` 例外未捕捉を C API 境界で捕捉し `Failure` 返却へ修正、原因切り分け可能化 |
+| [x] | CP110 | behavior_diff | `compat-binfmt.md` | `MAGIC_BYTES`/`TEX_SECTION`/`EXT_SECTION` 定数不一致（`INOCHI02` 系） | - | D準拠 `TRNSRTS\\0` / `TEX_SECT` / `EXT_SECT` へ修正し `.inx` 読み込みを復旧 |
+| [x] | CP111 | behavior_diff | `compat-vec2array.md` | `Vec2Array/Vec3Array/Vec4Array` の copy semantics（浅いポインタコピー） | - | D準拠の値型動作に修正（copy ctor/copy assign で実データ複製、内部ポインタ再同期） |
+| [x] | CP112 | behavior_diff | `compat-vec2array.md` | `copyFrom` 初期化漏れ（`logicalLength_` 未リセットで `ensureLength` 早期 return） | - | `logicalLength_=0` を含む完全初期化へ修正し、`nijiv --test` の AV (`0xC0000005`) を解消 |
+| [x] | CP113 | missing_impl | `compat-path_deformer.md` | `deform(Vec2Array)` | - | D準拠で `deformedCurve = createCurve(...)` を実装し、`applyPathDeform` から呼び出すよう修正 |
+| [x] | CP114 | behavior_diff | `compat-path_deformer.md` | `applyPathDeform` の driver 初期化 (`setup` vs `updateDefaultShape`) | - | D準拠で初回初期化を `driver.setup()` に統一 |
+| [x] | CP115 | behavior_diff | `compat-path_deformer.md` | `applyDeformToChildren` 終端処理 | - | D準拠で `physicsOnly = true` 後に `rebuffer(empty)` を実施 |
+| [x] | CP116 | behavior_diff | `compat-deformable.md` | `preProcess/postProcess` と `DeformationStack` の更新順 | - | D準拠で stack/filter の更新順と shared deform dirty 反映を一致化 |
+| [x] | CP117 | behavior_diff | `compat-node.md` | `FilterHook` 同一性管理 | - | Dの `(stage,func)` 管理に対応するため C++側は `stage+tag` 管理へ統一し、登録/解除対称性を担保 |
+| [x] | CP118 | behavior_diff | `compat-drawable.md` | node attach/weld hook 解除条件 | - | D準拠の重複回避/解除に合わせ、`stage+tag` で一意管理 |
+| [x] | CP119 | behavior_diff | `compat-grid_deformer.md` | child filter 解除条件 | - | D準拠の登録/解除対称性に合わせ、`stage+tag` で一意管理 |
+| [x] | CP120 | behavior_diff | `compat-meshgroup.md` | child filter 解除条件 | - | D準拠の登録/解除対称性に合わせ、`stage+tag` で一意管理 |
+| [x] | CP121 | behavior_diff | `compat-vec2array.md` | `bindExternalStorage` と `x/y` 直接アクセスの整合性 | - | 先に `Vec2Array` の外部ビュー時アクセス規約を D 版へ写経し、`core/nodes/*`/`core/render/*` の直接 `x/y` 参照を規約準拠に統一してから `shared_deform_buffer` を D 同等（bindExternalStorage 使用）へ戻す |
+| [x] | CP122 | behavior_diff | `compat-queue.md` | shared deform buffer の frame 間一貫性回帰 | `tools/check_shared_deform_consistency.sh` 追加、`vo=1947/2044` の `d0 range=0.0` を両系統で確認 | `nijiv --test ... --queue-dump` を nicxlive/nijilive で同条件比較し、`vo=1947/2044` を含む複数パーツの `d0` がフレーム間で発散しないことを完了条件として自動化/手順化 |
+| [x] | CP123 | behavior_diff | `compat-drawable.md` | shared atlas producer 側の外部ビュー整合 (`core/nodes/drawable.cpp/.hpp`) | `vertices` 直登録へ移行、毎フレーム mirror copy/upload 経路を撤去済み | `Drawable` の atlas producer を D 準拠へ寄せ、`vertices` を直接 atlas 登録。`writeSharedBuffers` の毎フレームコピー/即時uploadを撤去し、`updateVertices/updateDeform` で dirty/resize 契約を統一 |
+| [x] | CP124 | behavior_diff | `compat-part.md`, `compat-mask.md` | packet 生成側の atlas 参照整合 (`core/nodes/part.cpp`, `core/nodes/mask.cpp`) | `Part::updateUVs` を atlas 登録済み `sharedUvs` resize+反映へ修正済み | `Part::updateUVs` を D 準拠へ修正し、atlas 登録済み `sharedUvs` を resize+反映。`deformOffset/vertexOffset` と stride 参照契約を維持 |
+| [>] | CP125 | behavior_diff | `compat-command_emitter.md` | shared buffer upload/hash 経路の外部ビュー整合 (`core/render/command_emitter.cpp`) | upload 条件は D 同等化済み、`HASH d` frame間固定差分が残存 | upload 条件を D 同等（dirty かつ length>0 のときのみ upload）に修正済み。`HASH d` 固定差分は継続調査 |
+| [x] | CP126 | behavior_diff | `compat-unity_native.md` | Unity export/snapshot の外部ビュー整合 (`core/unity_native.cpp`) | `hashVec2Array` を `xAt/yAt` 化、shared 読み出しの生ポインタ依存を除去済み | `njgGetSharedBuffers` は D 同等に `rawStorage` + `vertex/uv/deformCount` を返却維持。関連読み出しは `xAt/yAt` ベースで統一（`hashVec2Array` を含む） |
+| [x] | CP127 | behavior_diff | `compat-queue.md` | backend queue の shared buffer 保持整合 (`core/render/backend_queue.cpp/.hpp`) | `uploadShared*` の保持を `dup()` 固定化、alias/stale 参照を遮断済み | queue backend の shared buffer 保持を `dup()` に固定し、外部ビュー alias を遮断してフレーム間 stale 参照を防止 |
+| [>] | CP128 | behavior_diff | `compat-deformable.md` | deformable 基盤の外部ビュー整合 (`core/nodes/deformable.cpp`) | `preUpdate` zero-fill 化と不要 dirty 除去は完了、`HASH d` 差分は未解消 | `DeformationStack::preUpdate` を D 同等の zero-fill のみに戻し、`updateDeform` の不要 dirty 強制を除去。frame間 deform hash 固定の残差分は継続調査 |
+| [>] | CP129 | behavior_diff | `compat-grid_deformer.md`, `compat-path_deformer.md`, `compat-meshgroup.md` | deformer/filter 消費側の外部ビュー整合 | 対象の `x/y` 直接参照は `xAt/yAt/set/fill` へ置換済み、最終同値検証待ち | `core/nodes/grid_deformer.cpp`, `core/nodes/path_deformer.cpp`, `core/nodes/mesh_group.cpp` の `x/y` 直接参照を監査し、外部ビュー入力でも同値になるよう修正 |
+| [>] | CP130 | behavior_diff | `compat-binding.md`, `compat-parameter.md` | parameter/binding 側の Vec2Array 参照整合 | `Parameter::finalize` の valid 判定を D 同等へ修正済み、slot 操作監査を継続 | `core/param/parameter.hpp`, `core/param/binding_impl.hpp` の deformation slot 操作を監査し、外部ビュー前提でも破綻しないアクセス規約へ統一 |
+| [>] | CP131 | behavior_diff | `compat-triangle.md`, `compat-common.md` | 幾何補助と曲線処理の Vec2Array 参照整合 | 対象の `x/y` 直接参照は置換済み、外部ビュー化後の計算一致を継続確認中 | `core/nodes/curve.cpp`, `core/nodes/deformer/drivers/phys.cpp`, `core/common/utils.hpp` 周辺の `x/y` 参照を監査し、外部ビュー化後の計算一致を確認 |

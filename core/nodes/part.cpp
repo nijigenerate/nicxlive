@@ -772,12 +772,6 @@ void Part::enqueueRenderCommands(core::RenderContext& ctx, const std::function<v
 
     auto scopeHint = determineRenderScopeHint();
     if (scopeHint.skip) return;
-    if (vertexOffset == 1621 || vertexOffset == 1563 || vertexOffset == 1504) {
-        auto p = parentPtr();
-        std::fprintf(stderr, "[nicxlive] enqueue part uuid=%u parent=%u vo=%u z=%.6f base=%.6f rel=%.6f off=%.6f scope(kind=%d token=%zu)\n",
-                     uuid, p ? p->uuid : 0u, vertexOffset, zSort(), zSortBase(), relZSort(), offsetSort,
-                     static_cast<int>(scopeHint.kind), scopeHint.token);
-    }
     auto self = std::dynamic_pointer_cast<Part>(shared_from_this());
     auto cleanup = post;
     ctx.renderGraph->enqueueItem(zSort(), scopeHint, [self, maskBindings, useStencil, cleanup](core::RenderCommandEmitter& emitter) {

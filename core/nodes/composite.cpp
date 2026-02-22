@@ -36,6 +36,7 @@ void Composite::setPropagateMeshGroup(bool value) { propagateMeshGroup = value; 
 float Composite::threshold() const { return maskAlphaThreshold; }
 void Composite::setThreshold(float value) { maskAlphaThreshold = value; }
 
+Transform Composite::transform() { return Part::transform(); }
 Transform Composite::transform() const { return Part::transform(); }
 
 bool Composite::mustPropagate() const { return propagateMeshGroup; }
@@ -83,9 +84,10 @@ void Composite::serializeSelfImpl(::nicxlive::core::serde::InochiSerializer& ser
     if (auto thr = data.get_optional<float>("mask_threshold")) maskAlphaThreshold = *thr;
     if (auto tinStr = data.get_optional<std::string>("tint")) {
         char comma;
+        Vec3 parsed = tint;
         std::stringstream ss(*tinStr);
-        if (!(ss >> tint.x >> comma >> tint.y >> comma >> tint.z)) {
-            tint = Vec3{};
+        if (ss >> parsed.x >> comma >> parsed.y >> comma >> parsed.z) {
+            tint = parsed;
         }
     } else if (auto tin = data.get_child_optional("tint")) {
         tint.x = tin->get<float>("x", tint.x);
@@ -94,9 +96,10 @@ void Composite::serializeSelfImpl(::nicxlive::core::serde::InochiSerializer& ser
     }
     if (auto stStr = data.get_optional<std::string>("screenTint")) {
         char comma;
+        Vec3 parsed = screenTint;
         std::stringstream ss(*stStr);
-        if (!(ss >> screenTint.x >> comma >> screenTint.y >> comma >> screenTint.z)) {
-            screenTint = Vec3{};
+        if (ss >> parsed.x >> comma >> parsed.y >> comma >> parsed.z) {
+            screenTint = parsed;
         }
     } else if (auto st = data.get_child_optional("screenTint")) {
         screenTint.x = st->get<float>("x", screenTint.x);

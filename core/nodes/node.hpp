@@ -158,8 +158,8 @@ public:
     virtual void preProcess();
     virtual void postProcess(int id = 0);
 
-    Transform transform();
-    Transform transform() const;
+    virtual Transform transform();
+    virtual Transform transform() const;
     Transform transformLocal();
     Transform transformLocal() const;
     Transform transformNoLock();

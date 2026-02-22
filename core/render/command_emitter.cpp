@@ -23,18 +23,6 @@ bool traceSharedEnabled() {
     return enabled != 0;
 }
 
-bool traceCompositeTexEnabled() {
-    static int enabled = -1;
-    if (enabled >= 0) return enabled != 0;
-    const char* v = std::getenv("NJCX_TRACE_COMPOSITE_TEX");
-    if (!v) {
-        enabled = 0;
-        return false;
-    }
-    enabled = (std::strcmp(v, "1") == 0 || std::strcmp(v, "true") == 0 || std::strcmp(v, "TRUE") == 0) ? 1 : 0;
-    return enabled != 0;
-}
-
 uint64_t hashVec2Array(const ::nicxlive::core::nodes::Vec2Array& arr) {
     constexpr uint64_t kOffset = 1469598103934665603ull;
     constexpr uint64_t kPrime = 1099511628211ull;
@@ -141,57 +129,10 @@ void QueueCommandEmitter::endMask() {
 }
 
 void QueueCommandEmitter::drawPartPacket(const nodes::PartDrawPacket& packet) {
-    if (packet.textureUUIDs[0] == 0 && packet.textureUUIDs[1] == 0 && packet.textureUUIDs[2] == 0) {
-        if (auto node = packet.node.lock()) {
-            std::fprintf(stderr, "[nicxlive] enqueue tex0 uuid=%u vo=%u idx=%u vtx=%u isMask=%d\n",
-                         node->uuid, packet.vertexOffset, packet.indexCount, packet.vertexCount, packet.isMask ? 1 : 0);
-        } else {
-            std::fprintf(stderr, "[nicxlive] enqueue tex0 uuid=<expired> vo=%u idx=%u vtx=%u isMask=%d\n",
-                         packet.vertexOffset, packet.indexCount, packet.vertexCount, packet.isMask ? 1 : 0);
-        }
-    }
     QueuedCommand cmd{};
     cmd.kind = RenderCommandKind::DrawPart;
     cmd.partPacket = packet;
     if (backend_) {
-        if (traceCompositeTexEnabled()) {
-            const uint32_t vo = packet.vertexOffset;
-            const bool compositeChildCandidate =
-                vo == 1169 || vo == 1135 || vo == 1087 || vo == 1063 || vo == 1032 || vo == 977 || vo == 920 ||
-                vo == 1567 || vo == 1583 || vo == 1587 || vo == 1508 || vo == 1527 || vo == 1531;
-            if (compositeChildCandidate) {
-                uint32_t nodeId = 0;
-                const char* nodeName = "<expired>";
-                if (auto node = packet.node.lock()) {
-                    nodeId = node->uuid;
-                    nodeName = node->name.c_str();
-                }
-                std::fprintf(stderr,
-                             "[nicxlive] composite-draw vo=%u node=%u name=%s texUUID=(%u,%u,%u) idx=%u vtx=%u mask=%d bm=%d op=%.3f tint=(%.3f,%.3f,%.3f) scr=(%.3f,%.3f,%.3f)\n",
-                             vo,
-                             nodeId,
-                             nodeName,
-                             packet.textureUUIDs[0], packet.textureUUIDs[1], packet.textureUUIDs[2],
-                             packet.indexCount, packet.vertexCount, packet.isMask ? 1 : 0,
-                             static_cast<int>(packet.blendMode), packet.opacity,
-                             packet.clampedTint.x, packet.clampedTint.y, packet.clampedTint.z,
-                             packet.clampedScreen.x, packet.clampedScreen.y, packet.clampedScreen.z);
-            }
-        }
-        if (packet.vertexOffset == 916 || packet.vertexOffset == 1563 || packet.vertexOffset == 1504) {
-            if (auto node = packet.node.lock()) {
-                std::fprintf(stderr, "[nicxlive] emit push idx=%zu kind=DrawPart vo=%u node=%u type=%s name=%s\n",
-                             backend_->queue.size(),
-                             packet.vertexOffset,
-                             node->uuid,
-                             node->typeId().c_str(),
-                             node->name.c_str());
-            } else {
-                std::fprintf(stderr, "[nicxlive] emit push idx=%zu kind=DrawPart vo=%u node=<expired>\n",
-                             backend_->queue.size(),
-                             packet.vertexOffset);
-            }
-        }
         backend_->queue.push_back(std::move(cmd));
     }
 }
@@ -304,7 +245,5 @@ void QueueCommandEmitter::uploadSharedBuffers() {
 }
 
 } // namespace nicxlive::core::render
-
-
 
 

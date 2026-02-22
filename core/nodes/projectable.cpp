@@ -506,6 +506,24 @@ bool Projectable::initTarget() {
     }
     texWidth = static_cast<uint32_t>(std::ceil(size.x)) + 1;
     texHeight = static_cast<uint32_t>(std::ceil(size.y)) + 1;
+    static int gInitTargetLogCount = 0;
+    if (gInitTargetLogCount < 128) {
+        std::fprintf(stderr,
+                     "[nicxlive] initTarget type=%s uuid=%u name=%s auto=%d size=(%.6f,%.6f) tex=(%u,%u) bounds=(%.6f,%.6f,%.6f,%.6f)\n",
+                     typeId().c_str(),
+                     uuid,
+                     name.c_str(),
+                     autoResizedMesh ? 1 : 0,
+                     size.x,
+                     size.y,
+                     texWidth,
+                     texHeight,
+                     b[0],
+                     b[1],
+                     b[2],
+                     b[3]);
+        ++gInitTargetLogCount;
+    }
     Vec2 deformOffset = deformationTranslationOffset();
     auto t = transform();
     textureOffset = Vec2{(b[0]+b[2])/2.0f, (b[1]+b[3])/2.0f};
@@ -577,6 +595,12 @@ bool Projectable::updateDynamicRenderStateFlags() {
 }
 
 void Projectable::dynamicRenderBegin(core::RenderContext& ctx) {
+    static int gProjBeginLogCount = 0;
+    if (gProjBeginLogCount < 64) {
+        std::fprintf(stderr, "[nicxlive] proj begin type=%s uuid=%u name=%s auto=%d\n",
+                     typeId().c_str(), uuid, name.c_str(), autoResizedMesh ? 1 : 0);
+        ++gProjBeginLogCount;
+    }
     dynamicScopeActive = false;
     dynamicScopeToken = static_cast<std::size_t>(-1);
     reuseCachedTextureThisFrame = false;

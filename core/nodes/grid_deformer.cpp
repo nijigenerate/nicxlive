@@ -25,29 +25,6 @@ constexpr float kAxisTolerance = 1e-4f;
 constexpr float kBoundaryTolerance = 1e-4f;
 constexpr int kGridFilterStage = 1;
 
-uint32_t traceNodeUuid() {
-    static bool init = false;
-    static uint32_t value = 0;
-    if (init) return value;
-    init = true;
-    const char* v = std::getenv("NJCX_TRACE_NODE_UUID");
-    if (!v || *v == '\0') return 0;
-    value = static_cast<uint32_t>(std::strtoul(v, nullptr, 10));
-    return value;
-}
-
-int traceFrameInterval() {
-    static bool init = false;
-    static int value = 30;
-    if (init) return value;
-    init = true;
-    const char* v = std::getenv("NJCX_TRACE_NODE_INTERVAL");
-    if (!v || *v == '\0') return value;
-    int parsed = std::atoi(v);
-    if (parsed > 0) value = parsed;
-    return value;
-}
-
 bool traceDeformerSummaryEnabled() {
     static int enabled = -1;
     if (enabled >= 0) return enabled != 0;
@@ -333,20 +310,6 @@ DeformResult GridDeformer::deformChildren(const std::shared_ptr<Node>& target,
                              static_cast<unsigned long long>(kv.second));
                 if (++printed >= 8) break;
             }
-        }
-    }
-    const uint32_t watch = traceNodeUuid();
-    if (watch != 0 && target && target->uuid == watch) {
-        const int interval = traceFrameInterval();
-        static uint64_t sFrame = 0;
-        ++sFrame;
-        if (interval > 0 && (sFrame % static_cast<uint64_t>(interval)) == 0) {
-            std::fprintf(stderr,
-                         "[nicxlive][GridDeformer][TraceNode] target=%s uuid=%u changed=%d outSize=%zu\n",
-                         target->name.c_str(),
-                         target->uuid,
-                         res.changed ? 1 : 0,
-                         res.vertices.size());
         }
     }
     return res;

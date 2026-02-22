@@ -24,7 +24,8 @@ public:
     float threshold() const;
     void setThreshold(float value);
 
-    Transform transform() const;
+    Transform transform() override;
+    Transform transform() const override;
     bool mustPropagate() const override;
     void serializeSelfImpl(::nicxlive::core::serde::InochiSerializer& serializer, bool recursive, SerializeNodeFlags flags) const override;
     ::nicxlive::core::serde::SerdeException deserializeFromFghj(const ::nicxlive::core::serde::Fghj& data) override;

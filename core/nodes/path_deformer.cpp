@@ -32,29 +32,6 @@ constexpr std::size_t kInvalidLogInterval = 10;
 constexpr std::size_t kInvalidLogFrameInterval = 30;
 constexpr std::size_t kInvalidInitialLogAllowance = 3;
 
-uint32_t traceNodeUuid() {
-    static bool init = false;
-    static uint32_t value = 0;
-    if (init) return value;
-    init = true;
-    const char* v = std::getenv("NJCX_TRACE_NODE_UUID");
-    if (!v || *v == '\0') return 0;
-    value = static_cast<uint32_t>(std::strtoul(v, nullptr, 10));
-    return value;
-}
-
-int traceFrameInterval() {
-    static bool init = false;
-    static int value = 30;
-    if (init) return value;
-    init = true;
-    const char* v = std::getenv("NJCX_TRACE_NODE_INTERVAL");
-    if (!v || *v == '\0') return value;
-    int parsed = std::atoi(v);
-    if (parsed > 0) value = parsed;
-    return value;
-}
-
 bool traceDeformerSummaryEnabled() {
     static int enabled = -1;
     if (enabled >= 0) return enabled != 0;
@@ -948,19 +925,6 @@ DeformResult PathDeformer::deformChildren(const std::shared_ptr<Node>& target,
                 pathLog("[PathDeformer][Summary] targetUuid=", kv.first, " hits=", kv.second);
                 if (++printed >= 8) break;
             }
-        }
-    }
-    const uint32_t watch = traceNodeUuid();
-    if (watch != 0 && target && target->uuid == watch) {
-        const int interval = traceFrameInterval();
-        if (interval > 0 && (frameCounter % static_cast<uint64_t>(interval)) == 0) {
-            pathLog("[PathDeformer][TraceNode] frame=", frameCounter,
-                    " target=", target->name,
-                    " uuid=", target->uuid,
-                    " changed=", res.changed ? 1 : 0,
-                    " maxOffset=", lastMaxOffset,
-                    " avgOffset=", lastAvgOffset,
-                    " outSize=", res.vertices.size());
         }
     }
     return res;

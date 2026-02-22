@@ -67,8 +67,8 @@ public:
 
     // Core behaviour approximations
     virtual Transform fullTransform() const;
-    Transform transform();
-    Transform transform() const;
+    Transform transform() override;
+    Transform transform() const override;
     virtual Mat4 fullTransformMatrix() const;
     virtual Vec4 boundsFromMatrix(const std::shared_ptr<Part>& child, const Mat4& matrix) const;
     virtual bool detectAncestorTransformChange(std::size_t frameId);
