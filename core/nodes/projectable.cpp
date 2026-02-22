@@ -111,9 +111,8 @@ Transform Projectable::fullTransform() const {
         if (auto pup = puppetRef()) {
             if (auto root = pup->root) {
                 return base.calcOffset(root->localTransform);
-            } else {
-                return base.calcOffset(pup->transform);
             }
+            return base.calcOffset(Transform{Vec3{0.0f, 0.0f, 0.0f}});
         }
         return base;
     }
@@ -154,10 +153,11 @@ Vec4 Projectable::boundsFromMatrix(const std::shared_ptr<Part>& child, const Mat
     Vec4 bounds{tx, ty, tx, ty};
     if (!child || child->vertices.size() == 0) return bounds;
     for (std::size_t i = 0; i < child->vertices.size(); ++i) {
-        Vec2 local{child->vertices.x[i], child->vertices.y[i]};
+        Vec2 local = child->vertices[i];
         if (i < child->deformation.size()) {
-            local.x += child->deformation.x[i];
-            local.y += child->deformation.y[i];
+            auto d = child->deformation[i];
+            local.x += d.x;
+            local.y += d.y;
         }
         Vec3 res = matrix.transformPoint(Vec3{local.x, local.y, 0});
         bounds.x = std::min(bounds.x, res.x);
@@ -168,18 +168,42 @@ Vec4 Projectable::boundsFromMatrix(const std::shared_ptr<Part>& child, const Mat
     return bounds;
 }
 
+bool Projectable::detectAncestorTransformChange(std::size_t frameId) {
+    if (lastAncestorTransformCheckFrame == frameId) {
+        return false;
+    }
+    lastAncestorTransformCheckFrame = frameId;
+    auto full = fullTransform();
+    if (!hasCachedAncestorTransform) {
+        prevTranslation = full.translation;
+        prevRotation = full.rotation;
+        prevScale = full.scale;
+        hasCachedAncestorTransform = true;
+        return false;
+    }
+    constexpr float TransformEpsilon = 0.0001f;
+    const bool changed =
+        std::abs(full.translation.x - prevTranslation.x) > TransformEpsilon ||
+        std::abs(full.translation.y - prevTranslation.y) > TransformEpsilon ||
+        std::abs(full.translation.z - prevTranslation.z) > TransformEpsilon ||
+        std::abs(full.rotation.x - prevRotation.x) > TransformEpsilon ||
+        std::abs(full.rotation.y - prevRotation.y) > TransformEpsilon ||
+        std::abs(full.rotation.z - prevRotation.z) > TransformEpsilon ||
+        std::abs(full.scale.x - prevScale.x) > TransformEpsilon ||
+        std::abs(full.scale.y - prevScale.y) > TransformEpsilon;
+    if (changed) {
+        prevTranslation = full.translation;
+        prevRotation = full.rotation;
+        prevScale = full.scale;
+    }
+    return changed;
+}
+
 Vec4 Projectable::getChildrenBounds(bool forceUpdate) {
     constexpr std::size_t MaxBoundsResetInterval = 120;
     auto frameId = currentProjectableFrame();
     if (useMaxChildrenBounds) {
         if (frameId - maxBoundsStartFrame < MaxBoundsResetInterval) {
-            if (uuid == 3011143577u || uuid == 200444691u || uuid == 977552066u) {
-                std::fprintf(stderr,
-                             "[nicxlive] childBounds cached uuid=%u name=%s frame=%zu start=%zu out=(%.3f,%.3f,%.3f,%.3f)\n",
-                             uuid, name.c_str(),
-                             frameId, maxBoundsStartFrame,
-                             maxChildrenBounds.x, maxChildrenBounds.y, maxChildrenBounds.z, maxChildrenBounds.w);
-            }
             return maxChildrenBounds;
         }
         useMaxChildrenBounds = false;
@@ -197,15 +221,8 @@ Vec4 Projectable::getChildrenBounds(bool forceUpdate) {
     };
     for (auto& p : subParts) {
         if (!p) continue;
-        bool traced = (uuid == 3011143577u || uuid == 200444691u || uuid == 977552066u);
         if (auto b = p->bounds; b && boundsFinite(Vec4{(*b)[0], (*b)[1], (*b)[2], (*b)[3]})) {
             Vec4 pb{(*b)[0], (*b)[1], (*b)[2], (*b)[3]};
-            if (traced) {
-                std::fprintf(stderr,
-                             "[nicxlive] childBounds uuid=%u name=%s child=%u childName=%s src=stored b=(%.3f,%.3f,%.3f,%.3f)\n",
-                             uuid, name.c_str(), p->uuid, p->name.c_str(),
-                             pb.x, pb.y, pb.z, pb.w);
-            }
             if (!hasBounds) { bounds = pb; hasBounds = true; }
             else {
                 bounds.x = std::min(bounds.x, pb.x);
@@ -216,12 +233,6 @@ Vec4 Projectable::getChildrenBounds(bool forceUpdate) {
         } else {
             auto childMatrix = Mat4::multiply(correction, p->transform().toMat4());
             auto childBounds = boundsFromMatrix(p, childMatrix);
-            if (traced) {
-                std::fprintf(stderr,
-                             "[nicxlive] childBounds uuid=%u name=%s child=%u childName=%s src=matrix b=(%.3f,%.3f,%.3f,%.3f)\n",
-                             uuid, name.c_str(), p->uuid, p->name.c_str(),
-                             childBounds.x, childBounds.y, childBounds.z, childBounds.w);
-            }
             if (!hasBounds) { bounds = childBounds; hasBounds = true; }
             else {
                 bounds.x = std::min(bounds.x, childBounds.x);
@@ -255,10 +266,11 @@ Vec4 Projectable::mergeBounds(const std::vector<Vec4>& bounds, const Vec4& origi
 
 Vec2 Projectable::deformationTranslationOffset() const {
     if (deformation.size() == 0) return Vec2{0,0};
-    Vec2 base{deformation.x[0], deformation.y[0]};
+    Vec2 base = deformation[0];
     const float eps = 0.0001f;
     for (std::size_t i = 0; i < deformation.size(); ++i) {
-        if (std::abs(deformation.x[i] - base.x) > eps || std::abs(deformation.y[i] - base.y) > eps) {
+        auto d = deformation[i];
+        if (std::abs(d.x - base.x) > eps || std::abs(d.y - base.y) > eps) {
             return Vec2{0,0};
         }
     }
@@ -362,15 +374,6 @@ bool Projectable::createSimpleMesh() {
         autoResizedSize = Vec2{bounds.z - bounds.x, bounds.w - bounds.y};
         textureOffset = Vec2{(bounds.x + bounds.z) / 2.0f + deformOffset.x - originOffset.x,
                              (bounds.y + bounds.w) / 2.0f + deformOffset.y - originOffset.y};
-        if (uuid == 3011143577u || uuid == 200444691u || uuid == 977552066u) {
-            std::fprintf(stderr,
-                         "[nicxlive] createSimpleMesh resize uuid=%u name=%s bounds=(%.3f,%.3f,%.3f,%.3f) deform=(%.3f,%.3f) origin=(%.3f,%.3f) texOff=(%.3f,%.3f)\n",
-                         uuid, name.c_str(),
-                         bounds.x, bounds.y, bounds.z, bounds.w,
-                         deformOffset.x, deformOffset.y,
-                         originOffset.x, originOffset.y,
-                         textureOffset.x, textureOffset.y);
-        }
     } else {
         Vec2 newTextureOffset{(bounds.x + bounds.z) / 2.0f + deformOffset.x - originOffset.x,
                               (bounds.y + bounds.w) / 2.0f + deformOffset.y - originOffset.y};
@@ -385,21 +388,7 @@ bool Projectable::createSimpleMesh() {
             autoResizedSize = Vec2{bounds.z - bounds.x, bounds.w - bounds.y};
             updateVertices();
             textureOffset = newTextureOffset;
-            if (uuid == 3011143577u || uuid == 200444691u || uuid == 977552066u) {
-                std::fprintf(stderr,
-                             "[nicxlive] createSimpleMesh update uuid=%u name=%s bounds=(%.3f,%.3f,%.3f,%.3f) deform=(%.3f,%.3f) origin=(%.3f,%.3f) texOff=(%.3f,%.3f)\n",
-                             uuid, name.c_str(),
-                             bounds.x, bounds.y, bounds.z, bounds.w,
-                             deformOffset.x, deformOffset.y,
-                             originOffset.x, originOffset.y,
-                             textureOffset.x, textureOffset.y);
-            }
         }
-    }
-    if (uuid == 3011143577u || uuid == 200444691u || uuid == 977552066u) {
-        std::fprintf(stderr,
-                     "[nicxlive] childBounds merged uuid=%u name=%s out=(%.3f,%.3f,%.3f,%.3f)\n",
-                     uuid, name.c_str(), bounds.x, bounds.y, bounds.z, bounds.w);
     }
     return resizing;
 }
@@ -476,8 +465,9 @@ bool Projectable::initTarget() {
         for (std::size_t i = 0; i < mesh->vertices.size(); ++i) {
             Vec2 pos = mesh->vertices[i];
             if (i < deformation.size()) {
-                pos.x += deformation.x[i];
-                pos.y += deformation.y[i];
+                auto d = deformation[i];
+                pos.x += d.x;
+                pos.y += d.y;
             }
             Vec3 v = matrix.transformPoint(Vec3{pos.x, pos.y, 0.0f});
             if (!seeded) {
@@ -541,19 +531,16 @@ bool Projectable::initTarget() {
 }
 
 bool Projectable::updateDynamicRenderStateFlags() {
+    bool resized = false;
     auto frameId = currentProjectableFrame();
+    if (autoResizedMesh && detectAncestorTransformChange(frameId)) {
+        deferredChanged = true;
+        useMaxChildrenBounds = false;
+    }
     if (deferredChanged) {
         if (autoResizedMesh) {
             bool ran = false;
-            bool resized = updateAutoResizedMeshOnce(ran);
-            pendingAncestorChangeFrame = static_cast<std::size_t>(-1);
-            if (ancestorChangeQueued) {
-                auto full = fullTransform();
-                prevTranslation = full.translation;
-                prevRotation = full.rotation;
-                prevScale = Vec2{full.scale.x, full.scale.y};
-                ancestorChangeQueued = false;
-            }
+            resized = updateAutoResizedMeshOnce(ran);
             if (ran && resized) {
                 initialized = false;
             }
@@ -577,18 +564,6 @@ bool Projectable::updateDynamicRenderStateFlags() {
             textureInvalidated = true;
             initialized = false;
         }
-    }
-    if (autoResizedMesh && pendingAncestorChangeFrame == frameId) {
-        auto full = fullTransform();
-        if (full.translation.x != prevTranslation.x || full.translation.y != prevTranslation.y ||
-            full.rotation.z != prevRotation.z || full.scale.x != prevScale.x || full.scale.y != prevScale.y) {
-            textureInvalidated = true;
-            initialized = false;
-        }
-        prevTranslation = full.translation;
-        prevRotation = full.rotation;
-        prevScale = Vec2{full.scale.x, full.scale.y};
-        pendingAncestorChangeFrame = static_cast<std::size_t>(-1);
     }
     if (!initialized) {
         if (lastInitAttemptFrame == frameId) return false;
@@ -842,6 +817,20 @@ void Projectable::enqueueRenderCommands(core::RenderContext& ctx) {
 
 void Projectable::runRenderTask(core::RenderContext&) {}
 
+void Projectable::runDynamicTask(core::RenderContext& ctx) {
+    if (autoResizedMesh) {
+        if (shouldUpdateVertices) {
+            shouldUpdateVertices = false;
+        }
+        bool ran = false;
+        if (updateAutoResizedMeshOnce(ran) && ran) {
+            initialized = false;
+        }
+    } else {
+        Part::runDynamicTask(ctx);
+    }
+}
+
 void Projectable::runRenderBeginTask(core::RenderContext& ctx) {
     dynamicRenderBegin(ctx);
 }
@@ -852,24 +841,10 @@ void Projectable::runRenderEndTask(core::RenderContext& ctx) {
 
 void Projectable::runBeginTask(core::RenderContext& ctx) {
     Part::runBeginTask(ctx);
-    useMaxChildrenBounds = false;
-    ancestorChangeQueued = false;
-    pendingAncestorChangeFrame = static_cast<std::size_t>(-1);
-    dynamicScopeActive = false;
-    reuseCachedTextureThisFrame = false;
-    subParts.clear();
-    maskParts.clear();
-    scanPartsRecurse(shared_from_this());
 }
 
 void Projectable::runPostTaskImpl(std::size_t priority, core::RenderContext& ctx) {
     Part::runPostTaskImpl(priority, ctx);
-    if (priority == 0) {
-        useMaxChildrenBounds = false;
-    }
-    if (priority == 1 && ancestorChangeQueued) {
-        boundsDirty = true;
-    }
 }
 
 void Projectable::notifyChange(const std::shared_ptr<Node>& target, NotifyReason reason) {
@@ -900,16 +875,6 @@ void Projectable::notifyChange(const std::shared_ptr<Node>& target, NotifyReason
         loggedFirstRenderAttempt = false;
         invalidateChildrenBounds();
         boundsDirty = true;
-    }
-
-    if (autoResizedMesh && reason == NotifyReason::Transformed) {
-        auto frameId = currentProjectableFrame();
-        if (pendingAncestorChangeFrame != frameId) {
-            pendingAncestorChangeFrame = frameId;
-            deferredChanged = true;
-            ancestorChangeQueued = true;
-            useMaxChildrenBounds = false;
-        }
     }
 
     if (autoResizedMesh && reason == NotifyReason::AttributeChanged) {
@@ -948,17 +913,13 @@ void Projectable::setupSelf() {
     }
     textureInvalidated = true;
     boundsDirty = false;
-    auto selfNode = std::dynamic_pointer_cast<Node>(shared_from_this());
-    for (auto c = shared_from_this(); c; c = c->parentPtr()) {
-        c->addNotifyListener(selfNode);
-    }
+    hasCachedAncestorTransform = false;
+    lastAncestorTransformCheckFrame = static_cast<std::size_t>(-1);
 }
 
 void Projectable::releaseSelf() {
-    auto selfNode = std::dynamic_pointer_cast<Node>(shared_from_this());
-    for (auto c = shared_from_this(); c; c = c->parentPtr()) {
-        c->removeNotifyListener(selfNode);
-    }
+    hasCachedAncestorTransform = false;
+    lastAncestorTransformCheckFrame = static_cast<std::size_t>(-1);
 }
 
 void Projectable::onAncestorChanged(const std::shared_ptr<Node>&, NotifyReason reason) {

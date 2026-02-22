@@ -29,16 +29,6 @@ bool traceSharedEnabled() {
     return enabled != 0;
 }
 
-uint32_t tracePartUuid() {
-    static bool init = false;
-    static uint32_t value = 0;
-    if (init) return value;
-    init = true;
-    const char* v = std::getenv("NJCX_TRACE_PART_UUID");
-    if (!v || *v == '\0') return 0;
-    value = static_cast<uint32_t>(std::strtoul(v, nullptr, 10));
-    return value;
-}
 }
 
 static std::vector<MaskBinding> dedupMasks(const std::vector<MaskBinding>& masks);
@@ -115,7 +105,10 @@ const std::string& Part::typeId() const {
 void Part::initPartTasks() { requireRenderTask(); }
 
 void Part::updateUVs() {
-    sharedUvResize(mesh->uvs, mesh->uvs.size());
+    sharedUvResize(sharedUvs, mesh->uvs.size());
+    for (std::size_t i = 0; i < mesh->uvs.size(); ++i) {
+        sharedUvs.set(i, mesh->uvs[i]);
+    }
     sharedUvMarkDirty();
 }
 
@@ -601,22 +594,6 @@ void Part::fillDrawPacket(const Node& header, PartDrawPacket& packet, bool isMas
                          packet.vertexCount,
                          static_cast<unsigned>(packet.deformAtlasStride));
         }
-        const uint32_t watchUuid = tracePartUuid();
-        if (watchUuid != 0 && watchUuid == uuid && !deformation.empty()) {
-            static uint64_t sTraceCounter = 0;
-            ++sTraceCounter;
-            if ((sTraceCounter % 30) == 0) {
-                std::fprintf(stderr,
-                             "[nicxlive][shared-check][part] uuid=%u name=%s deform0=(%.6f,%.6f) deformOffset=%u vertexCount=%u deformStride=%u\n",
-                             uuid,
-                             name.c_str(),
-                             deformation.x[0],
-                             deformation.y[0],
-                             packet.deformOffset,
-                             packet.vertexCount,
-                             packet.deformAtlasStride);
-            }
-        }
     }
     for (std::size_t i = 0; i < textures.size() && i < 3; ++i) {
         std::shared_ptr<::nicxlive::core::Texture> tex = textures[i];
@@ -641,34 +618,6 @@ void Part::fillDrawPacket(const Node& header, PartDrawPacket& packet, bool isMas
                 qb->uploadDrawableIndices(packet.indexBuffer, packet.indices);
             }
         }
-    }
-    if ((packet.vertexOffset == 1947 ||
-         packet.vertexOffset == 3267 ||
-         packet.vertexOffset == 3427 ||
-         packet.vertexOffset == 239 ||
-         packet.vertexOffset == 0 ||
-         packet.vertexOffset == 916 ||
-         packet.vertexOffset == 1563 ||
-         packet.vertexOffset == 1504) &&
-        packet.deformation.size() > 0) {
-        auto t = transform();
-        auto p = parentPtr();
-        const char* pType = p ? p->typeId().c_str() : "null";
-        const char* pName = p ? p->name.c_str() : "null";
-        std::fprintf(stderr,
-                     "[nicxlive] dbg vo=%u do=%u uuid=%u parent=%u parentType=%s parentName=%s name=%s deform0=(%g,%g) localT=(%g,%g) offT=(%g,%g) worldT=(%g,%g) pre=%zu post=%zu\n",
-                     static_cast<unsigned>(packet.vertexOffset),
-                     static_cast<unsigned>(packet.deformOffset),
-                     uuid,
-                     p ? p->uuid : 0u,
-                     pType,
-                     pName,
-                     name.c_str(),
-                     packet.deformation.x[0], packet.deformation.y[0],
-                     localTransform.translation.x, localTransform.translation.y,
-                     offsetTransform.translation.x, offsetTransform.translation.y,
-                     t.translation.x, t.translation.y,
-                     preProcessFilters.size(), postProcessFilters.size());
     }
     packet.node = std::dynamic_pointer_cast<Part>(const_cast<Part*>(this)->shared_from_this());
 }

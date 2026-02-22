@@ -174,10 +174,11 @@ Vec4 Composite::localBoundsFromMatrix(const std::shared_ptr<Part>& child, const 
     if (!child || child->vertices.size() == 0) return bounds;
     auto deform = child->deformation;
     for (std::size_t i = 0; i < child->vertices.size(); ++i) {
-        Vec2 localVertex{child->vertices.x[i], child->vertices.y[i]};
+        Vec2 localVertex = child->vertices[i];
         if (i < deform.size()) {
-            localVertex.x += deform.x[i];
-            localVertex.y += deform.y[i];
+            auto d = deform[i];
+            localVertex.x += d.x;
+            localVertex.y += d.y;
         }
         auto vertOriented = matrix.transformPoint(Vec3{localVertex.x, localVertex.y, 0});
         bounds.x = std::min(bounds.x, vertOriented.x);
@@ -262,11 +263,6 @@ Vec4 Composite::getChildrenBounds(bool forceUpdate) {
         } else {
             hasMaxChildrenBoundsLocal = false;
         }
-    }
-    if (uuid == 3011143577u || uuid == 200444691u || uuid == 977552066u) {
-        std::fprintf(stderr,
-            "[nicxlive] comp bounds uuid=%u name=%s scale=(%.3f,%.3f) out=(%.3f,%.3f,%.3f,%.3f)\n",
-            uuid, name.c_str(), scale.x, scale.y, bounds.x, bounds.y, bounds.z, bounds.w);
     }
     return bounds;
 }
@@ -389,13 +385,6 @@ bool Composite::createSimpleMesh() {
             updateVertices();
             textureOffset = newTextureOffset;
         }
-    }
-    if (uuid == 3011143577u || uuid == 200444691u || uuid == 977552066u) {
-        std::fprintf(stderr,
-            "[nicxlive] comp mesh uuid=%u name=%s bounds=(%.3f,%.3f,%.3f,%.3f) origin=(%.3f,%.3f) texOff=(%.3f,%.3f) resize=%d\n",
-            uuid, name.c_str(), bounds.x, bounds.y, bounds.z, bounds.w,
-            t.translation.x * scale.x, t.translation.y * scale.y,
-            textureOffset.x, textureOffset.y, resizing ? 1 : 0);
     }
     return resizing;
 }
@@ -553,10 +542,11 @@ void Composite::fillDrawPacket(const Node& header, PartDrawPacket& packet, bool 
 
 Vec2 Composite::deformationTranslationOffsetLocal() const {
     if (deformation.size() == 0) return Vec2{0, 0};
-    Vec2 base{deformation.x[0], deformation.y[0]};
+    Vec2 base = deformation[0];
     constexpr float eps = 0.0001f;
     for (std::size_t i = 0; i < deformation.size(); ++i) {
-        if (std::abs(deformation.x[i] - base.x) > eps || std::abs(deformation.y[i] - base.y) > eps) {
+        auto d = deformation[i];
+        if (std::abs(d.x - base.x) > eps || std::abs(d.y - base.y) > eps) {
             return Vec2{0, 0};
         }
     }

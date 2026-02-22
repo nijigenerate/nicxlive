@@ -60,9 +60,9 @@ bool calculateTransformInTriangle(const MeshData& mesh, const std::array<std::si
     original[1][0] = p0.y; original[1][1] = p1.y; original[1][2] = p2.y;
     original[2][0] = 1.0f; original[2][1] = 1.0f; original[2][2] = 1.0f;
 
-    Vec2 p3{p0.x + (tri[0] < deform.size() ? deform.x[tri[0]] : 0.0f), p0.y + (tri[0] < deform.size() ? deform.y[tri[0]] : 0.0f)};
-    Vec2 p4{p1.x + (tri[1] < deform.size() ? deform.x[tri[1]] : 0.0f), p1.y + (tri[1] < deform.size() ? deform.y[tri[1]] : 0.0f)};
-    Vec2 p5{p2.x + (tri[2] < deform.size() ? deform.x[tri[2]] : 0.0f), p2.y + (tri[2] < deform.size() ? deform.y[tri[2]] : 0.0f)};
+    Vec2 p3{p0.x + (tri[0] < deform.size() ? deform.xAt(tri[0]) : 0.0f), p0.y + (tri[0] < deform.size() ? deform.yAt(tri[0]) : 0.0f)};
+    Vec2 p4{p1.x + (tri[1] < deform.size() ? deform.xAt(tri[1]) : 0.0f), p1.y + (tri[1] < deform.size() ? deform.yAt(tri[1]) : 0.0f)};
+    Vec2 p5{p2.x + (tri[2] < deform.size() ? deform.xAt(tri[2]) : 0.0f), p2.y + (tri[2] < deform.size() ? deform.yAt(tri[2]) : 0.0f)};
 
     Mat3x3 transformed{};
     transformed[0][0] = p3.x; transformed[0][1] = p4.x; transformed[0][2] = p5.x;
@@ -95,24 +95,20 @@ bool calculateTransformInTriangle(const MeshData& mesh, const std::array<std::si
 
 Drawable::Drawable() : Deformable() {
     ::nicxlive::core::render::sharedDeformRegister(deformation, &deformOffset);
-    ::nicxlive::core::render::sharedVertexRegister(sharedVertices, &vertexOffset);
+    ::nicxlive::core::render::sharedVertexRegister(vertices, &vertexOffset);
     ::nicxlive::core::render::sharedUvRegister(sharedUvs, &uvOffset);
 }
 
 Drawable::Drawable(const std::shared_ptr<Node>& parent) : Deformable(parent) {
     ::nicxlive::core::render::sharedDeformRegister(deformation, &deformOffset);
-    for (const auto& v : mesh->vertices) sharedVertices.push_back(v);
-    ::nicxlive::core::render::sharedVertexRegister(sharedVertices, &vertexOffset);
-    for (const auto& uv : mesh->uvs) sharedUvs.push_back(uv);
+    ::nicxlive::core::render::sharedVertexRegister(vertices, &vertexOffset);
     ::nicxlive::core::render::sharedUvRegister(sharedUvs, &uvOffset);
 }
 
 Drawable::Drawable(const MeshData& data, uint32_t uuidVal, const std::shared_ptr<Node>& parent)
     : Deformable(uuidVal, parent), mesh(std::make_shared<MeshData>(data)) {
     ::nicxlive::core::render::sharedDeformRegister(deformation, &deformOffset);
-    for (const auto& v : mesh->vertices) sharedVertices.push_back(v);
-    ::nicxlive::core::render::sharedVertexRegister(sharedVertices, &vertexOffset);
-    for (const auto& uv : mesh->uvs) sharedUvs.push_back(uv);
+    ::nicxlive::core::render::sharedVertexRegister(vertices, &vertexOffset);
     ::nicxlive::core::render::sharedUvRegister(sharedUvs, &uvOffset);
     updateIndices();
     updateVertices();
@@ -120,7 +116,7 @@ Drawable::Drawable(const MeshData& data, uint32_t uuidVal, const std::shared_ptr
 
 Drawable::~Drawable() {
     ::nicxlive::core::render::sharedDeformUnregister(deformation);
-    ::nicxlive::core::render::sharedVertexUnregister(sharedVertices);
+    ::nicxlive::core::render::sharedVertexUnregister(vertices);
     ::nicxlive::core::render::sharedUvUnregister(sharedUvs);
 }
 
@@ -206,10 +202,10 @@ Vec2Array& sharedVertexBufferData() { return ::nicxlive::core::render::sharedVer
 Vec2Array& sharedUvBufferData() { return ::nicxlive::core::render::sharedUvBufferData(); }
 Vec2Array& sharedDeformBufferData() { return ::nicxlive::core::render::sharedDeformBufferData(); }
 
-void sharedVertexResize(Vec2Array& target, std::size_t newLength) { target.resize(newLength); ::nicxlive::core::render::sharedVertexResize(target, newLength); }
-void sharedUvResize(Vec2Array& target, std::size_t newLength) { target.resize(newLength); ::nicxlive::core::render::sharedUvResize(target, newLength); }
+void sharedVertexResize(Vec2Array& target, std::size_t newLength) { ::nicxlive::core::render::sharedVertexResize(target, newLength); }
+void sharedUvResize(Vec2Array& target, std::size_t newLength) { ::nicxlive::core::render::sharedUvResize(target, newLength); }
 void sharedUvResize(std::vector<Vec2>& target, std::size_t newLength) { target.resize(newLength); }
-void sharedDeformResize(Vec2Array& target, std::size_t newLength) { target.resize(newLength); ::nicxlive::core::render::sharedDeformResize(target, newLength); }
+void sharedDeformResize(Vec2Array& target, std::size_t newLength) { ::nicxlive::core::render::sharedDeformResize(target, newLength); }
 void sharedVertexMarkDirty() { ::nicxlive::core::render::sharedVertexMarkDirty(); }
 void sharedUvMarkDirty() { ::nicxlive::core::render::sharedUvMarkDirty(); }
 void sharedDeformMarkDirty() { ::nicxlive::core::render::sharedDeformMarkDirty(); }
@@ -343,9 +339,9 @@ void Drawable::updateBounds() {
             vx += deformationOffsets[i].x;
             vy += deformationOffsets[i].y;
         }
-        if (i < deformation.x.size()) {
-            vx += deformation.x[i];
-            vy += deformation.y[i];
+        if (i < deformation.size()) {
+            vx += deformation.xAt(i);
+            vy += deformation.yAt(i);
         }
         minx = std::min(minx, vx);
         maxx = std::max(maxx, vx);
@@ -452,48 +448,23 @@ std::tuple<Vec2Array, std::optional<Mat4>, bool> Drawable::nodeAttachProcessor(c
     return {Vec2Array{}, std::nullopt, changed};
 }
 
-void Drawable::writeSharedBuffers() {
-    // vertices
-    sharedVertices.resize(mesh->vertices.size());
-    for (std::size_t i = 0; i < mesh->vertices.size(); ++i) {
-        sharedVertices.x[i] = mesh->vertices[i].x;
-        sharedVertices.y[i] = mesh->vertices[i].y;
-    }
-    sharedVertexResize(sharedVertices, sharedVertices.size());
-    sharedVertexMarkDirty();
-    // uvs
-    sharedUvs.resize(mesh->uvs.size());
-    for (std::size_t i = 0; i < mesh->uvs.size(); ++i) {
-        sharedUvs.x[i] = mesh->uvs[i].x;
-        sharedUvs.y[i] = mesh->uvs[i].y;
-    }
-    sharedUvResize(sharedUvs, sharedUvs.size());
-    sharedUvMarkDirty();
-    // deformation
-    sharedDeformResize(deformation, deformation.size());
-    sharedDeformMarkDirty();
-
-    if (auto backend = core::getCurrentRenderBackend()) {
-        backend->uploadSharedVertexBuffer(sharedVertexBufferData());
-        backend->uploadSharedUvBuffer(sharedUvBufferData());
-        backend->uploadSharedDeformBuffer(sharedDeformBufferData());
-    }
-}
-
 void Drawable::updateVertices() {
-    Vec2Array verts(mesh->vertices.size());
+    sharedVertexResize(vertices, mesh->vertices.size());
     for (std::size_t i = 0; i < mesh->vertices.size(); ++i) {
-        verts.x[i] = mesh->vertices[i].x;
-        verts.y[i] = mesh->vertices[i].y;
+        vertices.set(i, mesh->vertices[i]);
     }
-    vertices = verts;
-    deformation.resize(vertices.size());
-    std::fill(deformation.x.begin(), deformation.x.end(), 0.0f);
-    std::fill(deformation.y.begin(), deformation.y.end(), 0.0f);
-    deformationOffsets.resize(vertices.size(), Vec2{});
-    sharedVertexResize(vertices, vertices.size());
-    sharedDeformResize(deformation, deformation.size());
     sharedVertexMarkDirty();
+
+    sharedUvResize(sharedUvs, mesh->uvs.size());
+    for (std::size_t i = 0; i < mesh->uvs.size(); ++i) {
+        sharedUvs.set(i, mesh->uvs[i]);
+    }
+    sharedUvMarkDirty();
+
+    deformation.resize(vertices.size());
+    deformation.fill(Vec2{0.0f, 0.0f});
+    deformationOffsets.resize(vertices.size(), Vec2{});
+    sharedDeformResize(deformation, deformation.size());
     sharedDeformMarkDirty();
     updateDeform();
 }
@@ -508,14 +479,12 @@ void Drawable::updateDeform() {
     Deformable::updateDeform();
     sharedDeformMarkDirty();
     updateBounds();
-    writeSharedBuffers();
 }
 
 void Drawable::reset() {
-    vertices.resize(mesh->vertices.size());
+    sharedVertexResize(vertices, mesh->vertices.size());
     for (std::size_t i = 0; i < mesh->vertices.size(); ++i) {
-        vertices.x[i] = mesh->vertices[i].x;
-        vertices.y[i] = mesh->vertices[i].y;
+        vertices.set(i, mesh->vertices[i]);
     }
     sharedVertexMarkDirty();
 }
@@ -704,7 +673,6 @@ void Drawable::clearCache() {
 void Drawable::runBeginTask(core::RenderContext& ctx) {
     weldingApplied.clear();
     Deformable::runBeginTask(ctx);
-    writeSharedBuffers();
 }
 
 void Drawable::runPostTaskImpl(std::size_t priority, core::RenderContext& ctx) {
@@ -723,7 +691,6 @@ void Drawable::runPostTaskImpl(std::size_t priority, core::RenderContext& ctx) {
             }
         }
     }
-    writeSharedBuffers();
 }
 
 void Drawable::normalizeUv() {
@@ -794,16 +761,25 @@ void Drawable::setupChildDrawable() {
         FilterHook hook;
         hook.stage = 0;
         hook.tag = kNodeAttachFilterTag;
-        hook.func = [weakSelf](std::shared_ptr<Node> self, const std::vector<Vec2>&, const std::vector<Vec2>&, const Mat4* mat) {
+        hook.func = [weakSelf](std::shared_ptr<Node> self, const std::vector<Vec2>& verts, const std::vector<Vec2>& deform, const Mat4* mat) {
             auto owner = weakSelf.lock();
             if (!owner) return std::make_tuple(std::vector<Vec2>{}, std::optional<Mat4>{}, false);
-            Vec2Array verts = owner->vertices;
-            Vec2Array deform = owner->deformation;
-            auto res = owner->nodeAttachProcessor(self, verts, deform, mat);
+            Vec2Array v;
+            v.resize(verts.size());
+            for (std::size_t i = 0; i < verts.size(); ++i) {
+                v.set(i, verts[i]);
+            }
+            Vec2Array d;
+            d.resize(deform.size());
+            for (std::size_t i = 0; i < deform.size(); ++i) {
+                d.set(i, deform[i]);
+            }
+            auto res = owner->nodeAttachProcessor(self, v, d, mat);
             std::vector<Vec2> out;
             const auto& def = std::get<0>(res);
-            if (!def.empty()) {
-                out.push_back(Vec2{def.x[0], def.y[0]});
+            out.reserve(def.size());
+            for (std::size_t i = 0; i < def.size(); ++i) {
+                out.push_back(Vec2{def.xAt(i), def.yAt(i)});
             }
             return std::make_tuple(out, std::optional<Mat4>{}, std::get<2>(res));
         };
@@ -837,7 +813,6 @@ void Drawable::buildDrawable(bool force) {
         }
         updateIndices();
         updateVertices();
-        writeSharedBuffers();
     }
     if (backend && ibo != 0 && !mesh->indices.empty()) {
         backend->drawDrawableElements(ibo, mesh->indices.size());
@@ -902,14 +877,14 @@ void Drawable::registerWeldFilter(const std::shared_ptr<Drawable>& target) {
         auto tgt = weakTarget.lock();
         if (!tgt) return std::make_tuple(std::vector<Vec2>{}, std::optional<Mat4>{}, false);
         Vec2Array v; v.resize(verts.size());
-        for (std::size_t i = 0; i < verts.size(); ++i) { v.x[i] = verts[i].x; v.y[i] = verts[i].y; }
+        for (std::size_t i = 0; i < verts.size(); ++i) { v.set(i, verts[i]); }
         Vec2Array d; d.resize(deform.size());
-        for (std::size_t i = 0; i < deform.size(); ++i) { d.x[i] = deform[i].x; d.y[i] = deform[i].y; }
+        for (std::size_t i = 0; i < deform.size(); ++i) { d.set(i, deform[i]); }
         auto res = weldingProcessor(tgt, v, d, mat);
         std::vector<Vec2> out;
         const auto& def = std::get<0>(res);
         out.reserve(def.size());
-        for (std::size_t i = 0; i < def.size(); ++i) out.push_back(Vec2{def.x[i], def.y[i]});
+        for (std::size_t i = 0; i < def.size(); ++i) out.push_back(Vec2{def.xAt(i), def.yAt(i)});
         return std::make_tuple(out, std::optional<Mat4>{}, std::get<2>(res));
     };
     postProcessFilters.push_back(std::move(hook));
@@ -956,13 +931,11 @@ void Drawable::serializeSelfImpl(::nicxlive::core::serde::InochiSerializer& seri
         if (auto exc = mesh->deserializeFromFghj(*m)) return exc;
         vertices.resize(mesh->vertices.size());
         for (std::size_t i = 0; i < mesh->vertices.size(); ++i) {
-            vertices.x[i] = mesh->vertices[i].x;
-            vertices.y[i] = mesh->vertices[i].y;
+            vertices.set(i, mesh->vertices[i]);
         }
         deformation.resize(mesh->vertices.size());
         updateIndices();
         updateVertices();
-        writeSharedBuffers();
     }
     if (auto wl = data.get_child_optional("weldedLinks")) {
         weldedLinks.clear();

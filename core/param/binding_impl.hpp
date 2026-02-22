@@ -4,6 +4,8 @@
 #include "../nodes/common.hpp"
 #include "../serde.hpp"
 #include <algorithm>
+#include <cstdlib>
+#include <cstring>
 #include <cstdio>
 #include <limits>
 #include <memory>
@@ -23,6 +25,18 @@ namespace nicxlive::core::param {
 
 bool pushDeformationToNode(const std::shared_ptr<Node>& node, const DeformSlot& value);
 bool getDeformationNodeVertexCount(const std::shared_ptr<Node>& node, std::size_t& outVertexCount);
+
+inline bool traceParamBindingEnabled() {
+    static int enabled = -1;
+    if (enabled >= 0) return enabled != 0;
+    const char* v = std::getenv("NJCX_TRACE_PARAM_BIND");
+    if (!v) {
+        enabled = 0;
+        return false;
+    }
+    enabled = (std::strcmp(v, "1") == 0 || std::strcmp(v, "true") == 0 || std::strcmp(v, "TRUE") == 0) ? 1 : 0;
+    return enabled != 0;
+}
 
 template <typename T>
 class ParameterBindingImpl : public ParameterBinding {
@@ -558,8 +572,7 @@ public:
         std::size_t vertexCount = 0;
         if (getDeformationNodeVertexCount(target.target.lock(), vertexCount)) {
             v.vertexOffsets.resize(vertexCount);
-            std::fill(v.vertexOffsets.x.begin(), v.vertexOffsets.x.end(), 0.0f);
-            std::fill(v.vertexOffsets.y.begin(), v.vertexOffsets.y.end(), 0.0f);
+            v.vertexOffsets.fill(Vec2{0.0f, 0.0f});
             return;
         }
         v.vertexOffsets.clear();
@@ -592,16 +605,16 @@ public:
         DeformSlot cur = values[index.x][index.y];
         if (axis == -1) {
             for (std::size_t i = 0; i < cur.vertexOffsets.size(); ++i) {
-                cur.vertexOffsets.x[i] *= scale;
-                cur.vertexOffsets.y[i] *= scale;
+                cur.vertexOffsets.xAt(i) *= scale;
+                cur.vertexOffsets.yAt(i) *= scale;
             }
         } else if (axis == 0) {
             for (std::size_t i = 0; i < cur.vertexOffsets.size(); ++i) {
-                cur.vertexOffsets.x[i] *= scale;
+                cur.vertexOffsets.xAt(i) *= scale;
             }
         } else if (axis == 1) {
             for (std::size_t i = 0; i < cur.vertexOffsets.size(); ++i) {
-                cur.vertexOffsets.y[i] *= scale;
+                cur.vertexOffsets.yAt(i) *= scale;
             }
         }
         setValue(index, cur);
@@ -621,8 +634,7 @@ public:
                     for (std::size_t oldIdx = 0; oldIdx < remap.size(); ++oldIdx) {
                         auto newIdx = remap[oldIdx];
                         if (newIdx < reordered.size()) {
-                            reordered.x[newIdx] = offsets.x[oldIdx];
-                            reordered.y[newIdx] = offsets.y[oldIdx];
+                            reordered.set(newIdx, Vec2{offsets.xAt(oldIdx), offsets.yAt(oldIdx)});
                         }
                     }
                     offsets = reordered;
@@ -632,8 +644,7 @@ public:
                     if (x < isSetFlags.size() && y < isSetFlags[x].size()) isSetFlags[x][y] = true;
                 } else {
                     offsets.resize(newLength);
-                    std::fill(offsets.x.begin(), offsets.x.end(), 0.0f);
-                    std::fill(offsets.y.begin(), offsets.y.end(), 0.0f);
+                    offsets.fill(Vec2{0.0f, 0.0f});
                     if (x < isSetFlags.size() && y < isSetFlags[x].size()) isSetFlags[x][y] = false;
                 }
             }
@@ -783,11 +794,12 @@ inline void Parameter::finalize(const std::shared_ptr<::nicxlive::core::Puppet>&
         if (!b) continue;
         auto targetUuid = b->getNodeUUID();
         if (targetUuid == 0) continue;
+        // D parity: keep binding when either Node or Parameter UUID resolves.
         bool validTarget = false;
         if (::nicxlive::core::resolvePuppetNodeById(puppet, targetUuid)) {
             validTarget = true;
-        } else if (b->getName() == "X" || b->getName() == "Y") {
-            validTarget = static_cast<bool>(::nicxlive::core::resolvePuppetParameterById(puppet, targetUuid));
+        } else if (::nicxlive::core::resolvePuppetParameterById(puppet, targetUuid)) {
+            validTarget = true;
         }
         if (validTarget) {
             b->finalize(puppet);
@@ -806,6 +818,11 @@ inline void Parameter::update() {
         (value.x + sum.x) * mul.x,
         (value.y + sum.y) * mul.y,
     };
+    if (bindingMap.empty() && traceParamBindingEnabled()) {
+        std::fprintf(stderr,
+                     "[nicxlive][Param] no-binding uuid=%u name=%s value=(%.6f,%.6f) latest=(%.6f,%.6f)\n",
+                     uuid, name.c_str(), value.x, value.y, latestInternal.x, latestInternal.y);
+    }
 
     auto mapInternalValue = [&](const Vec2& in) {
         const float rx = (max.x - min.x);
@@ -821,57 +838,8 @@ inline void Parameter::update() {
     Vec2 sub{};
     auto mapped = mapInternalValue(latestInternal);
     findOffset(mapped, left, sub);
-    if (name == "Skirt:: Physics") {
-        std::fprintf(stderr,
-                     "[nicxlive] param-update %s value=(%g,%g) latest=(%g,%g) mapped=(%g,%g) left=(%zu,%zu) sub=(%g,%g)\n",
-                     name.c_str(),
-                     value.x, value.y,
-                     latestInternal.x, latestInternal.y,
-                     mapped.x, mapped.y,
-                     left.x, left.y,
-                     sub.x, sub.y);
-    }
     for (auto& [_, b] : bindingMap) {
         if (!b) continue;
-        if (name == "Skirt:: Physics") {
-            if (auto db = std::dynamic_pointer_cast<DeformationParameterBinding>(b)) {
-                auto slot = db->sample(left, sub);
-                const bool setCenter = db->isSetAt(left);
-                const auto v00 = db->valueAt(Vec2u{0, 0});
-                const auto v11 = db->valueAt(Vec2u{1, 1});
-                float d0x = 0.0f;
-                float d0y = 0.0f;
-                float maxAbs = 0.0f;
-                std::size_t firstNz = static_cast<std::size_t>(-1);
-                if (slot.vertexOffsets.size() > 0) {
-                    d0x = slot.vertexOffsets.x[0];
-                    d0y = slot.vertexOffsets.y[0];
-                    for (std::size_t i = 0; i < slot.vertexOffsets.size(); ++i) {
-                        const float ax = std::fabs(slot.vertexOffsets.x[i]);
-                        const float ay = std::fabs(slot.vertexOffsets.y[i]);
-                        if (firstNz == static_cast<std::size_t>(-1) && (ax > 1e-6f || ay > 1e-6f)) {
-                            firstNz = i;
-                        }
-                        maxAbs = std::max(maxAbs, ax);
-                        maxAbs = std::max(maxAbs, ay);
-                    }
-                }
-                float v00d0x = 0.0f, v00d0y = 0.0f;
-                float v11d0x = 0.0f, v11d0y = 0.0f;
-                if (v00.vertexOffsets.size() > 0) { v00d0x = v00.vertexOffsets.x[0]; v00d0y = v00.vertexOffsets.y[0]; }
-                if (v11.vertexOffsets.size() > 0) { v11d0x = v11.vertexOffsets.x[0]; v11d0y = v11.vertexOffsets.y[0]; }
-                std::fprintf(stderr,
-                             "[nicxlive] skirt-phys sample target=%u left=(%zu,%zu) sub=(%g,%g) setCenter=%d size=%zu d0=(%g,%g) maxAbs=%g firstNz=%zu v00=(%g,%g) v11=(%g,%g)\n",
-                             db->getNodeUUID(),
-                             left.x, left.y,
-                             sub.x, sub.y,
-                             setCenter ? 1 : 0,
-                             slot.vertexOffsets.size(),
-                             d0x, d0y, maxAbs, firstNz,
-                             v00d0x, v00d0y,
-                             v11d0x, v11d0y);
-            }
-        }
         b->apply(left, sub);
         if (auto node = b->getTarget().target.lock()) {
             if (valueChanged()) {
@@ -974,10 +942,10 @@ inline boost::property_tree::ptree serializeValueNode(const DeformSlot& v) {
     boost::property_tree::ptree ys;
     for (std::size_t i = 0; i < v.vertexOffsets.size(); ++i) {
         boost::property_tree::ptree xv;
-        xv.put("", v.vertexOffsets.x[i]);
+        xv.put("", v.vertexOffsets.xAt(i));
         xs.push_back({"", xv});
         boost::property_tree::ptree yv;
-        yv.put("", v.vertexOffsets.y[i]);
+        yv.put("", v.vertexOffsets.yAt(i));
         ys.push_back({"", yv});
     }
     node.add_child("x", xs);
@@ -1004,11 +972,11 @@ inline void deserializeValueNode(const boost::property_tree::ptree& node, Deform
         out.vertexOffsets.resize(n);
         std::size_t idx = 0;
         for (auto it = xs.begin(); it != xs.end() && idx < n; ++it, ++idx) {
-            out.vertexOffsets.x[idx] = it->second.get_value<float>();
+            out.vertexOffsets.xAt(idx) = it->second.get_value<float>();
         }
         idx = 0;
         for (auto it = ys.begin(); it != ys.end() && idx < n; ++it, ++idx) {
-            out.vertexOffsets.y[idx] = it->second.get_value<float>();
+            out.vertexOffsets.yAt(idx) = it->second.get_value<float>();
         }
         return;
     }
@@ -1045,8 +1013,7 @@ inline void deserializeValueNode(const boost::property_tree::ptree& node, Deform
     }
     out.vertexOffsets.resize(xs.size());
     for (std::size_t i = 0; i < xs.size(); ++i) {
-        out.vertexOffsets.x[i] = xs[i];
-        out.vertexOffsets.y[i] = ys[i];
+        out.vertexOffsets.set(i, Vec2{xs[i], ys[i]});
     }
 }
 } // namespace detail

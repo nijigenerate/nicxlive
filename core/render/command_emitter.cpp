@@ -39,13 +39,12 @@ uint64_t hashVec2Array(const ::nicxlive::core::nodes::Vec2Array& arr) {
     constexpr uint64_t kOffset = 1469598103934665603ull;
     constexpr uint64_t kPrime = 1099511628211ull;
     uint64_t h = kOffset;
-    const float* xs = arr.dataX();
-    const float* ys = arr.dataY();
-    if (!xs || !ys) return h;
     for (std::size_t i = 0; i < arr.size(); ++i) {
         uint32_t bx = 0, by = 0;
-        std::memcpy(&bx, &xs[i], sizeof(float));
-        std::memcpy(&by, &ys[i], sizeof(float));
+        const float x = arr.xAt(i);
+        const float y = arr.yAt(i);
+        std::memcpy(&bx, &x, sizeof(float));
+        std::memcpy(&by, &y, sizeof(float));
         h ^= static_cast<uint64_t>(bx);
         h *= kPrime;
         h ^= static_cast<uint64_t>(by);
@@ -282,22 +281,29 @@ void QueueCommandEmitter::uploadSharedBuffers() {
     using ::nicxlive::core::render::sharedUvMarkUploaded;
 
     if (sharedVertexBufferDirty()) {
-        activeBackend_->uploadSharedVertexBuffer(sharedVertexBufferData());
+        auto& vertices = sharedVertexBufferData();
+        if (vertices.size()) {
+            activeBackend_->uploadSharedVertexBuffer(vertices);
+        }
         sharedVertexMarkUploaded();
     }
     if (sharedUvBufferDirty()) {
-        activeBackend_->uploadSharedUvBuffer(sharedUvBufferData());
+        auto& uvs = sharedUvBufferData();
+        if (uvs.size()) {
+            activeBackend_->uploadSharedUvBuffer(uvs);
+        }
         sharedUvMarkUploaded();
     }
     if (sharedDeformBufferDirty()) {
-        activeBackend_->uploadSharedDeformBuffer(sharedDeformBufferData());
+        auto& deform = sharedDeformBufferData();
+        if (deform.size()) {
+            activeBackend_->uploadSharedDeformBuffer(deform);
+        }
         sharedDeformMarkUploaded();
     }
 }
 
 } // namespace nicxlive::core::render
-
-
 
 
 

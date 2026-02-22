@@ -135,8 +135,8 @@ void MeshGroup::applyDeformToChildren(const std::vector<std::shared_ptr<core::pa
                     } else if (shouldTransferTranslate && !isComposite) {
                         Vec2Array oneVertex;
                         oneVertex.resize(1);
-                        oneVertex.x[0] = node->localTransform.translation.x;
-                        oneVertex.y[0] = node->localTransform.translation.y;
+                        oneVertex.xAt(0) = node->localTransform.translation.x;
+                        oneVertex.yAt(0) = node->localTransform.translation.y;
 
                         auto parentNode = node->parent.lock();
                         Mat4 matrix = parentNode ? parentNode->transform().toMat4() : Mat4::identity();
@@ -147,16 +147,16 @@ void MeshGroup::applyDeformToChildren(const std::vector<std::shared_ptr<core::pa
                             param->getOrAddBinding(node, "transform.t.y"));
                         Vec2Array nodeDeform;
                         nodeDeform.resize(1);
-                        nodeDeform.x[0] = node->offsetTransform.translation.x;
-                        nodeDeform.y[0] = node->offsetTransform.translation.y;
+                        nodeDeform.xAt(0) = node->offsetTransform.translation.x;
+                        nodeDeform.yAt(0) = node->offsetTransform.translation.y;
 
                         auto filtered = filterChildren(node, oneVertex, nodeDeform, &matrix);
                         const auto& outDeform = std::get<0>(filtered);
                         if (outDeform.size() > 0 && nodeBindingX && nodeBindingY) {
                             float curX = nodeBindingX->valueAt(core::param::Vec2u{x, y});
                             float curY = nodeBindingY->valueAt(core::param::Vec2u{x, y});
-                            nodeBindingX->update(core::param::Vec2u{x, y}, curX + outDeform.x[0]);
-                            nodeBindingY->update(core::param::Vec2u{x, y}, curY + outDeform.y[0]);
+                            nodeBindingX->update(core::param::Vec2u{x, y}, curX + outDeform.xAt(0));
+                            nodeBindingY->update(core::param::Vec2u{x, y}, curY + outDeform.yAt(0));
                         }
                     }
 
@@ -208,9 +208,9 @@ void MeshGroup::runPreProcessTask(core::RenderContext&) {
         auto i0 = mesh->indices[i];
         auto i1 = mesh->indices[i + 1];
         auto i2 = mesh->indices[i + 2];
-        Vec2 p1{transformedVertices.x[i0], transformedVertices.y[i0]};
-        Vec2 p2{transformedVertices.x[i1], transformedVertices.y[i1]};
-        Vec2 p3{transformedVertices.x[i2], transformedVertices.y[i2]};
+        Vec2 p1{transformedVertices.xAt(i0), transformedVertices.yAt(i0)};
+        Vec2 p2{transformedVertices.xAt(i1), transformedVertices.yAt(i1)};
+        Vec2 p3{transformedVertices.xAt(i2), transformedVertices.yAt(i2)};
         Mat3 mat{};
         mat[0][0] = p2.x - p1.x; mat[0][1] = p3.x - p1.x; mat[0][2] = p1.x;
         mat[1][0] = p2.y - p1.y; mat[1][1] = p3.y - p1.y; mat[1][2] = p1.y;
@@ -242,8 +242,8 @@ void MeshGroup::rebuffer(const MeshData& data) {
     vertices.resize(mesh->vertices.size());
     deformation.resize(mesh->vertices.size());
     for (std::size_t i = 0; i < mesh->vertices.size(); ++i) {
-        vertices.x[i] = mesh->vertices[i].x;
-        vertices.y[i] = mesh->vertices[i].y;
+        vertices.xAt(i) = mesh->vertices[i].x;
+        vertices.yAt(i) = mesh->vertices[i].y;
     }
     precalculated = false;
 }
@@ -606,14 +606,14 @@ void MeshGroup::setupChildNoRecurse(const std::shared_ptr<Node>& node, bool prep
     hook.tag = reinterpret_cast<std::uintptr_t>(this);
     hook.func = [this](auto t, auto v, auto d, auto mat) {
                                                      Vec2Array verts; verts.resize(v.size());
-                                                     for (std::size_t i = 0; i < v.size(); ++i) { verts.x[i] = v[i].x; verts.y[i] = v[i].y; }
+                                                     for (std::size_t i = 0; i < v.size(); ++i) { verts.xAt(i) = v[i].x; verts.yAt(i) = v[i].y; }
                                                      Vec2Array def; def.resize(d.size());
-                                                     for (std::size_t i = 0; i < d.size(); ++i) { def.x[i] = d[i].x; def.y[i] = d[i].y; }
+                                                     for (std::size_t i = 0; i < d.size(); ++i) { def.xAt(i) = d[i].x; def.yAt(i) = d[i].y; }
                                                      auto res = filterChildren(t, verts, def, mat);
                                                      std::vector<Vec2> out;
                                                      const auto& defOut = std::get<0>(res);
                                                      out.reserve(defOut.size());
-                                                     for (std::size_t i = 0; i < defOut.size(); ++i) out.push_back(Vec2{defOut.x[i], defOut.y[i]});
+                                                     for (std::size_t i = 0; i < defOut.size(); ++i) out.push_back(Vec2{defOut.xAt(i), defOut.yAt(i)});
                                                      return std::make_tuple(out, std::get<1>(res), std::get<2>(res));
                                                   };
     auto& pre = node->preProcessFilters;

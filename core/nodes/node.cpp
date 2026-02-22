@@ -653,7 +653,6 @@ void Node::runRenderBeginTask(core::RenderContext&) {}
 void Node::runRenderEndTask(core::RenderContext&) {}
 
 void Node::registerRenderTasks(core::TaskScheduler& scheduler) {
-    if (!allowRenderTasks) return;
     scheduler.addTask(core::TaskOrder::Init, core::TaskKind::Init, [this](core::RenderContext& ctx) { runBeginTask(ctx); });
 
     auto hasFlag = [&](NodeTaskFlag flag) { return has_flag(taskFlags, flag); };

@@ -85,7 +85,7 @@ Status: `[ ]` todo, `[>]` in progress, `[x]` done, `[?]` blocked.
 | RQ2 | render/command_emitter.d | 23 | core/render/command_emitter.cpp | 197 | ◯ |
 | RQ3 | render/graph_builder.d | 230 | core/render/graph_builder.cpp | 185 | ◯ |
 | RQ4 | render/scheduler.d | 84 | core/render/scheduler.cpp | 35 | ◯ |
-| RQ5 | render/shared_deform_buffer.d | 200 | core/render/shared_deform_buffer.cpp | 120 | ◯ |
+| RQ5 | render/shared_deform_buffer.d | 200 | core/render/shared_deform_buffer.cpp | 191 | △ |
 | RQ6 | render/immediate.d | 38 | core/render/immediate.cpp | 22 | ◯ |
 | RQ7 | render/passes.d | 34 | core/render/render_pass.hpp | 14 | ◯ |
 | RQ8 | render/profiler.d | 99 | core/render/profiler.cpp | 93 | ◯ |
@@ -240,4 +240,32 @@ Status: `[ ]` todo, `[>]` in progress, `[x]` done, `[?]` blocked.
 | [x] | CP118 | behavior_diff | `compat-drawable.md` | node attach/weld hook 解除条件 | D準拠の重複回避/解除に合わせ、`stage+tag` で一意管理 |
 | [x] | CP119 | behavior_diff | `compat-grid_deformer.md` | child filter 解除条件 | D準拠の登録/解除対称性に合わせ、`stage+tag` で一意管理 |
 | [x] | CP120 | behavior_diff | `compat-meshgroup.md` | child filter 解除条件 | D準拠の登録/解除対称性に合わせ、`stage+tag` で一意管理 |
+| [x] | CP121 | behavior_diff | `compat-vec2array.md` | `bindExternalStorage` と `x/y` 直接アクセスの整合性 | 先に `Vec2Array` の外部ビュー時アクセス規約を D 版へ写経し、`core/nodes/*`/`core/render/*` の直接 `x/y` 参照を規約準拠に統一してから `shared_deform_buffer` を D 同等（bindExternalStorage 使用）へ戻す |
+| [x] | CP122 | behavior_diff | `compat-queue.md` | shared deform buffer の frame 間一貫性回帰 | `nijiv --test ... --queue-dump` を nicxlive/nijilive で同条件比較し、`vo=1947/2044` を含む複数パーツの `d0` がフレーム間で発散しないことを完了条件として自動化/手順化 |
+| [x] | CP123 | behavior_diff | `compat-drawable.md` | shared atlas producer 側の外部ビュー整合 (`core/nodes/drawable.cpp/.hpp`) | `Drawable` の atlas producer を D 準拠へ寄せ、`vertices` を直接 atlas 登録。`writeSharedBuffers` の毎フレームコピー/即時uploadを撤去し、`updateVertices/updateDeform` で dirty/resize 契約を統一 |
+| [x] | CP124 | behavior_diff | `compat-part.md`, `compat-mask.md` | packet 生成側の atlas 参照整合 (`core/nodes/part.cpp`, `core/nodes/mask.cpp`) | `Part::updateUVs` を D 準拠へ修正し、atlas 登録済み `sharedUvs` を resize+反映。`deformOffset/vertexOffset` と stride 参照契約を維持 |
+| [>] | CP125 | behavior_diff | `compat-command_emitter.md` | shared buffer upload/hash 経路の外部ビュー整合 (`core/render/command_emitter.cpp`) | upload 条件を D 同等（dirty かつ length>0 のときのみ upload）に修正済み。`HASH d` 固定差分は継続調査 |
+| [x] | CP126 | behavior_diff | `compat-unity_native.md` | Unity export/snapshot の外部ビュー整合 (`core/unity_native.cpp`) | `njgGetSharedBuffers` は D 同等に `rawStorage` + `vertex/uv/deformCount` を返却維持。関連読み出しは `xAt/yAt` ベースで統一（`hashVec2Array` を含む） |
+| [x] | CP127 | behavior_diff | `compat-queue.md` | backend queue の shared buffer 保持整合 (`core/render/backend_queue.cpp/.hpp`) | queue backend の shared buffer 保持を `dup()` に固定し、外部ビュー alias を遮断してフレーム間 stale 参照を防止 |
+| [>] | CP128 | behavior_diff | `compat-deformable.md` | deformable 基盤の外部ビュー整合 (`core/nodes/deformable.cpp`) | `DeformationStack::preUpdate` を D 同等の zero-fill のみに戻し、`updateDeform` の不要 dirty 強制を除去。frame間 deform hash 固定の残差分は継続調査 |
+| [>] | CP129 | behavior_diff | `compat-grid_deformer.md`, `compat-path_deformer.md`, `compat-meshgroup.md` | deformer/filter 消費側の外部ビュー整合 | `core/nodes/grid_deformer.cpp`, `core/nodes/path_deformer.cpp`, `core/nodes/mesh_group.cpp` の `x/y` 直接参照を監査し、外部ビュー入力でも同値になるよう修正 |
+| [>] | CP130 | behavior_diff | `compat-binding.md`, `compat-parameter.md` | parameter/binding 側の Vec2Array 参照整合 | `core/param/parameter.hpp`, `core/param/binding_impl.hpp` の deformation slot 操作を監査し、外部ビュー前提でも破綻しないアクセス規約へ統一 |
+| [>] | CP131 | behavior_diff | `compat-triangle.md`, `compat-common.md` | 幾何補助と曲線処理の Vec2Array 参照整合 | `core/nodes/curve.cpp`, `core/nodes/deformer/drivers/phys.cpp`, `core/common/utils.hpp` 周辺の `x/y` 参照を監査し、外部ビュー化後の計算一致を確認 |
 
+補足（2026-02-22）
+- `CP129/CP130/CP131` について、対象ファイルの `x/y` 直接アクセスを `xAt/yAt/set/fill` へ置換済み。
+- `core/math/veca.hpp` の `Vec2Array` 代入で、外部ビュー時に所有ストレージへ戻ってしまう挙動を修正（外部ビューを維持したまま値コピー）。
+- `CP122` 自動化: `tools/check_shared_deform_consistency.sh` を追加。`queue-nicx-f40-bindfix.log` / `queue-nijilive-f40-cp131.log` で `vo=1947/2044` の `d0` range は双方 `0.0`（発散なし）を確認。
+- ただし `HASH d` は依然として `nicxlive` 固定・`nijilive` 可変の差分が残るため、次段は順序どおり `CP123`（shared atlas producer 側）を進める。
+- `CP123` 着手: `core/nodes/drawable.cpp` の shared atlas wrapper から事前 `resize` を除去し、D同様に atlas 側 `shared*Resize` の再構築に一本化。
+- `CP123` 完了: `Drawable` の shared atlas producer を D 準拠へ修正。`vertices` 直登録に切替え、`writeSharedBuffers` による毎フレームの mirror copy / backend 直接 upload を撤去。
+- `CP124` 完了: `Part::updateUVs` を atlas 登録済み `sharedUvs` の resize+反映に修正（`mesh->uvs` 直接 resize の経路を除去）。
+- `CP125` 継続: `QueueCommandEmitter::uploadSharedBuffers` を D 準拠（dirty + length>0 upload）へ修正。
+- `CP128` 継続: `DeformationStack::preUpdate` を D 同等（zero-fill のみ）へ戻し、`Deformable::updateDeform` の余剰 dirty 強制を削除。
+- `CP126` 完了: shared 読み出し経路の API 統一として `hashVec2Array` を `xAt/yAt` ベースへ変更（外部ビュー時の生ポインタ参照依存を除去）。
+- `CP127` 完了: `QueueRenderBackend::uploadShared*` を `dup()` 保持に変更し、外部ビュー alias を遮断。
+- 検証: `nijiv --test --frames 20/40 --fixed-delta 0.0166667 --unity-dll nicxlive` は完走するが、`HASH d` が frame 間固定の差分は残存（`queue-nicx-f20-cp128.log`）。
+- 追加検証: `nijilive` では `vo=0/239/3267/3427` の `d0` が frame 間で変化する一方、`nicxlive` は同 `vo` が `d0=(0,0)` 固定。次段は driver->parameter->deformation 適用経路の写経突合で原因を特定する。
+- `CP130` 追補（写経修正）: `Parameter::finalize` の valid 判定を D 同等へ修正。`target uuid` が `Node` または `Parameter` のどちらかで解決できれば binding を維持するように変更（`core/param/binding_impl.hpp`）。
+- `CP128` 追補（写経修正）: `Drawable::setupChildDrawable` の node attach filter を D 同等に修正。入力の `origVertices/origDeformation` をそのまま `nodeAttachProcessor` へ渡し、戻りの `Vec2Array` も全要素を返すように変更（先頭1要素のみ返す C++ 独自処理を撤去）。
+- 検証（2026-02-22 追加）: `queue-nicx-f5-continue-final.log` でも `HASH d` 固定は継続。`Part::fillDrawPacket` の追跡で `vo=0`（part `4079733156`）は `maxAbs>0` だが `d0=0`、`vo=239/3267/3427` は `maxAbs=0` を確認。次段は対象 part の初期/駆動パラメータ値と D 側の初期値適用差分を突合する。

@@ -7,10 +7,13 @@
 #include <cstddef>
 #include <functional>
 #include <initializer_list>
-#include <immintrin.h>
 #include <memory>
 #include <utility>
 #include <vector>
+
+#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
+#include <immintrin.h>
+#endif
 
 namespace nicxlive::core::math {
 
@@ -45,7 +48,25 @@ struct Vec2Array {
         return *this;
     }
     Vec2Array(Vec2Array&&) noexcept = default;
-    Vec2Array& operator=(Vec2Array&&) noexcept = default;
+    Vec2Array& operator=(Vec2Array&& rhs) noexcept {
+        if (this == &rhs) return *this;
+        if (!ownsStorage_) {
+            copyFrom(rhs);
+            return *this;
+        }
+        x = std::move(rhs.x);
+        y = std::move(rhs.y);
+        xPtr_ = rhs.xPtr_;
+        yPtr_ = rhs.yPtr_;
+        logicalLength_ = rhs.logicalLength_;
+        laneStride_ = rhs.laneStride_;
+        laneBase_ = rhs.laneBase_;
+        viewCapacity_ = rhs.viewCapacity_;
+        ownsStorage_ = rhs.ownsStorage_;
+        alignment_ = rhs.alignment_;
+        backing_ = std::move(rhs.backing_);
+        return *this;
+    }
     explicit Vec2Array(std::size_t n) { ensureLength(n); }
     Vec2Array(std::initializer_list<Vec2> init) { assign(std::vector<Vec2>(init)); }
     explicit Vec2Array(const Vec2& v) { ensureLength(1); xPtr_[0] = v.x; yPtr_[0] = v.y; }
@@ -62,8 +83,8 @@ struct Vec2Array {
     void ensureLength(std::size_t len) {
         if (logicalLength_ == len) return;
         if (!ownsStorage_) {
-            assert(len <= viewCapacity_);
             logicalLength_ = len;
+            viewCapacity_ = len;
             return;
         }
         x.resize(len);
@@ -145,6 +166,19 @@ struct Vec2Array {
         }
     }
     void copyFrom(const Vec2Array& rhs) {
+        if (!ownsStorage_) {
+            const auto dstLen = logicalLength_;
+            const auto copyLen = std::min(dstLen, rhs.size());
+            for (std::size_t i = 0; i < copyLen; ++i) {
+                xPtr_[laneBase_ + i] = rhs.xAt(i);
+                yPtr_[laneBase_ + i] = rhs.yAt(i);
+            }
+            for (std::size_t i = copyLen; i < dstLen; ++i) {
+                xPtr_[laneBase_ + i] = 0.0f;
+                yPtr_[laneBase_ + i] = 0.0f;
+            }
+            return;
+        }
         ownsStorage_ = true;
         xPtr_ = nullptr;
         yPtr_ = nullptr;
@@ -236,6 +270,30 @@ struct Vec2Array {
 
     const float* dataX() const { return xPtr_ ? xPtr_ + laneBase_ : nullptr; }
     const float* dataY() const { return yPtr_ ? yPtr_ + laneBase_ : nullptr; }
+    float* dataXMutable() { return xPtr_ ? xPtr_ + laneBase_ : nullptr; }
+    float* dataYMutable() { return yPtr_ ? yPtr_ + laneBase_ : nullptr; }
+    float& xAt(std::size_t i) {
+        assert(i < logicalLength_);
+        return xPtr_[laneBase_ + i];
+    }
+    float& yAt(std::size_t i) {
+        assert(i < logicalLength_);
+        return yPtr_[laneBase_ + i];
+    }
+    float xAt(std::size_t i) const {
+        assert(i < logicalLength_);
+        return xPtr_[laneBase_ + i];
+    }
+    float yAt(std::size_t i) const {
+        assert(i < logicalLength_);
+        return yPtr_[laneBase_ + i];
+    }
+    void fill(const Vec2& v) {
+        for (std::size_t i = 0; i < logicalLength_; ++i) {
+            xPtr_[laneBase_ + i] = v.x;
+            yPtr_[laneBase_ + i] = v.y;
+        }
+    }
     std::size_t length() const { return logicalLength_; }
 
     std::vector<Vec2> toArray() const {
@@ -500,8 +558,8 @@ struct Vec3Array {
     void ensureLength(std::size_t len) {
         if (logicalLength_ == len) return;
         if (!ownsStorage_) {
-            assert(len <= viewCapacity_);
             logicalLength_ = len;
+            viewCapacity_ = len;
             return;
         }
         x.resize(len);
@@ -766,8 +824,8 @@ struct Vec4Array {
     void ensureLength(std::size_t len) {
         if (logicalLength_ == len) return;
         if (!ownsStorage_) {
-            assert(len <= viewCapacity_);
             logicalLength_ = len;
+            viewCapacity_ = len;
             return;
         }
         x.resize(len);

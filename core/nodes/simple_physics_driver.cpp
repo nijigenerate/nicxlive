@@ -7,6 +7,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
+#include <cstring>
 #include <iostream>
 #include <memory>
 #include <limits>
@@ -54,6 +56,18 @@ bool parseParamMapMode(const std::string& value, ParamMapMode& out) {
         return true;
     }
     return false;
+}
+
+bool traceParamBindingEnabled() {
+    static int enabled = -1;
+    if (enabled >= 0) return enabled != 0;
+    const char* v = std::getenv("NJCX_TRACE_PARAM_BIND");
+    if (!v) {
+        enabled = 0;
+        return false;
+    }
+    enabled = (std::strcmp(v, "1") == 0 || std::strcmp(v, "true") == 0 || std::strcmp(v, "TRUE") == 0) ? 1 : 0;
+    return enabled != 0;
 }
 
 } // namespace
@@ -448,15 +462,6 @@ void SimplePhysicsDriver::runPreProcessTask(core::RenderContext& ctx) {
     Driver::runPreProcessTask(ctx);
     Vec3 anchorPos = (localOnly ? Vec3{transformLocal().translation.x, transformLocal().translation.y, 0.0f}
                                 : transform().toMat4().transformPoint(Vec3{0, 0, 0}));
-    if (uuid == 810680760) {
-        static int sPreLog = 0;
-        if (sPreLog < 40) {
-            std::fprintf(stderr,
-                         "[nicxlive] phys-pre uuid=%u prev=(%g,%g) now=(%g,%g)\n",
-                         uuid, prevPos.x, prevPos.y, anchorPos.x, anchorPos.y);
-            ++sPreLog;
-        }
-    }
     if (!std::isfinite(anchorPos.x) || !std::isfinite(anchorPos.y)) {
         logPhysicsState("preProcess:anchorNonFinite");
         return;
@@ -474,15 +479,6 @@ void SimplePhysicsDriver::runPostTaskImpl(std::size_t id, core::RenderContext& c
     Driver::runPostTaskImpl(id, ctx);
     Vec3 anchorPos = (localOnly ? Vec3{transformLocal().translation.x, transformLocal().translation.y, 0.0f}
                                 : transform().toMat4().transformPoint(Vec3{0, 0, 0}));
-    if (uuid == 810680760) {
-        static int sPostLog = 0;
-        if (sPostLog < 40) {
-            std::fprintf(stderr,
-                         "[nicxlive] phys-post uuid=%u prev=(%g,%g) now=(%g,%g) id=%zu\n",
-                         uuid, prevPos.x, prevPos.y, anchorPos.x, anchorPos.y, id);
-            ++sPostLog;
-        }
-    }
     if (!std::isfinite(anchorPos.x) || !std::isfinite(anchorPos.y)) {
         logPhysicsState("postProcess:anchorNonFinite");
         return;
@@ -555,19 +551,6 @@ void SimplePhysicsDriver::serializeSelfImpl(::nicxlive::core::serde::InochiSeria
     if (auto osx = data.get_optional<float>("output_scale_x")) outputScale[0] = *osx;
     if (auto osy = data.get_optional<float>("output_scale_y")) outputScale[1] = *osy;
     if (auto lo = data.get_optional<bool>("local_only")) localOnly = *lo;
-    if (uuid == 810680760) {
-        std::fprintf(stderr,
-                     "[nicxlive] phys-deser uuid=%u hasModel=%d hasMap=%d hasScale=%d model=%d map=%d localOnly=%d len=%g outScale=(%g,%g)\n",
-                     uuid,
-                     hasModelType ? 1 : 0,
-                     hasMapMode ? 1 : 0,
-                     hasOutputScale ? 1 : 0,
-                     static_cast<int>(modelType),
-                     static_cast<int>(mapMode),
-                     localOnly ? 1 : 0,
-                     length,
-                     outputScale[0], outputScale[1]);
-    }
     reset();
     return err;
 }
@@ -659,24 +642,6 @@ std::shared_ptr<core::param::Parameter> SimplePhysicsDriver::resolveParam() {
 }
 
 void SimplePhysicsDriver::updateDriver() {
-    if (uuid == 810680760) {
-        static int sSkirtCfgLog = 0;
-        if (sSkirtCfgLog < 20) {
-            std::fprintf(stderr,
-                         "[nicxlive] phys-cfg uuid=%u model=%d map=%d localOnly=%d g=%g len=%g freq=%g ad=%g ld=%g dt=%g\n",
-                         uuid,
-                         static_cast<int>(modelType),
-                         static_cast<int>(mapMode),
-                         localOnly ? 1 : 0,
-                         gravity,
-                         length,
-                         frequency,
-                         angleDamping,
-                         lengthDamping,
-                         deltaTime());
-            ++sSkirtCfgLog;
-        }
-    }
     if (!system || systemModel != modelType) {
         if (modelType == PhysicsModel::SpringPendulum) {
             system = std::make_unique<SpringPendulumSystem>(this);
@@ -696,28 +661,12 @@ void SimplePhysicsDriver::updateDriver() {
         h -= 0.01f;
     }
     system->tick(h);
-    if (uuid == 810680760) {
-        static int sStateLog = 0;
-        if (sStateLog < 40) {
-            std::fprintf(stderr,
-                         "[nicxlive] phys-state uuid=%u anchor=(%g,%g) output=(%g,%g) h=%g\n",
-                         uuid, anchor.x, anchor.y, output.x, output.y, h);
-            ++sStateLog;
-        }
-    }
     updateOutputs();
     prevAnchorSet = false;
 }
 
 void SimplePhysicsDriver::reset() {
     updateInputs();
-    if (uuid == 810680760) {
-        static int sResetLog = 0;
-        if (sResetLog < 40) {
-            std::fprintf(stderr, "[nicxlive] phys-reset uuid=%u anchor=(%g,%g)\n", uuid, anchor.x, anchor.y);
-            ++sResetLog;
-        }
-    }
     offsetGravity = 1.0f;
     offsetLength = 0.0f;
     offsetFrequency = 1.0f;
@@ -756,23 +705,15 @@ void SimplePhysicsDriver::updateInputs() {
 
 void SimplePhysicsDriver::updateOutputs() {
     auto paramPtr = resolveParam();
-    if (uuid == 810680760) {
-        static int sSkirtParamLog = 0;
-        if (sSkirtParamLog < 40) {
-            std::fprintf(stderr,
-                         "[nicxlive] phys-out uuid=%u name=%s paramRef=%u resolved=%s value=(%g,%g) latest=(%g,%g)\n",
-                         uuid,
-                         name.c_str(),
-                         paramRef,
-                         paramPtr ? paramPtr->name.c_str() : "<null>",
-                         paramPtr ? paramPtr->value.x : 0.0f,
-                         paramPtr ? paramPtr->value.y : 0.0f,
-                         paramPtr ? paramPtr->latestInternal.x : 0.0f,
-                         paramPtr ? paramPtr->latestInternal.y : 0.0f);
-            ++sSkirtParamLog;
+    if (!paramPtr) {
+        static int sNoParamCount = 0;
+        if (sNoParamCount < 40) {
+            std::fprintf(stderr, "[nicxlive][SimplePhysics] no-param driver=%u name=%s paramRef=%u\n",
+                         uuid, name.c_str(), paramRef);
+            ++sNoParamCount;
         }
+        return;
     }
-    if (!paramPtr) return;
 
     if (!std::isfinite(output.x) || !std::isfinite(output.y)) {
         logPhysicsState("updateOutputs:outputNonFinite");
@@ -856,40 +797,26 @@ void SimplePhysicsDriver::updateOutputs() {
         logPhysicsState("updateOutputs:paramOffsetNonFinite");
         return;
     }
+    static int sTraceCount = 0;
+    if (sTraceCount < 80) {
+        std::fprintf(stderr,
+                     "[nicxlive][SimplePhysics] push driver=%u name=%s param=%u offset=(%.6f,%.6f) out=(%.6f,%.6f) anchor=(%.6f,%.6f)\n",
+                     uuid, name.c_str(), paramPtr->uuid,
+                     paramOffset.x, paramOffset.y, output.x, output.y, anchor.x, anchor.y);
+        ++sTraceCount;
+    }
 
     paramPtr->pushIOffset(paramOffset, core::param::ParamMergeMode::Forced);
     paramPtr->update();
-    if (uuid == 810680760) {
-        static int sSkirtAfterLog = 0;
-        if (sSkirtAfterLog < 40) {
-            std::fprintf(stderr,
-                         "[nicxlive] phys-out-applied uuid=%u offset=(%g,%g) value=(%g,%g) latest=(%g,%g)\n",
-                         uuid,
-                         paramOffset.x, paramOffset.y,
-                         paramPtr->value.x, paramPtr->value.y,
-                         paramPtr->latestInternal.x, paramPtr->latestInternal.y);
-            ++sSkirtAfterLog;
-        }
-    }
 }
 
 void SimplePhysicsDriver::finalize() {
-    static int sFinalizeLog = 0;
     if (auto pup = puppetRef()) {
         param_ = pup->findParameter(paramRef);
         paramCached = param_;
     } else {
         param_.reset();
         paramCached.reset();
-    }
-    if (sFinalizeLog < 64) {
-        std::fprintf(stderr,
-                     "[nicxlive] phys-finalize uuid=%u name=%s paramRef=%u param=%s\n",
-                     uuid,
-                     name.c_str(),
-                     paramRef,
-                     param_ ? param_->name.c_str() : "<null>");
-        ++sFinalizeLog;
     }
     Driver::finalize();
     reset();

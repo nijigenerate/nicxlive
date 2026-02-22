@@ -14,7 +14,8 @@
 | `toArray` | AoS 配列化 | 実装あり | ◯ |
 | `toArrayInto` | AoS 配列化 | 実装あり | ◯ |
 | `rawStorage` | 外部バッファ参照取得 | 非オーナービュー対応 | ◯ |
-| `bindExternalStorage` | 外部バッファビューを構築 | 長さチェックあり | ◯ |
+| `bindExternalStorage` | 外部バッファビューを構築 | API は存在するが、`x/y` 直接アクセス経路との整合が未保証 | △ |
+| 外部ビュー + lane直接アクセスの一貫性 | 外部ビュー時でも `lane(0/1)` と各種演算/参照が破綻しない | `x/y` 直接参照コードが多く、ビュー時に atlas先頭/別配列参照へ崩れる経路が残る | △ |
 | コピー構築/コピー代入 | 値型（レーン実体を複製） | `Vec2Array/Vec3Array/Vec4Array` で copy ctor/copy assign を明示実装し、内部ポインタ再同期込みで値コピー | ◯ |
 | `copyFrom` 初期化 | コピー前に内部状態を一貫初期化 | `logicalLength_` を含む状態初期化を実装し、`ensureLength` 早期 return による不正ポインタ書き込みを解消 | ◯ |
 | `front` mutable | vecv を返す | Vec2View | ◯ |

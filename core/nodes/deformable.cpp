@@ -14,8 +14,7 @@ std::vector<Vec2> toStdVec(const Vec2Array& src) {
 void fromStdVec(Vec2Array& dst, const std::vector<Vec2>& src) {
     dst.resize(src.size());
     for (std::size_t i = 0; i < src.size(); ++i) {
-        dst.x[i] = src[i].x;
-        dst.y[i] = src[i].y;
+        dst.set(i, src[i]);
     }
 }
 } // namespace
@@ -26,8 +25,8 @@ Deformation Deformation::operator-() const {
     Deformation out;
     out.vertexOffsets = vertexOffsets;
     for (std::size_t i = 0; i < out.vertexOffsets.size(); ++i) {
-        out.vertexOffsets.x[i] *= -1.0f;
-        out.vertexOffsets.y[i] *= -1.0f;
+        out.vertexOffsets.xAt(i) *= -1.0f;
+        out.vertexOffsets.yAt(i) *= -1.0f;
     }
     return out;
 }
@@ -37,8 +36,8 @@ Deformation Deformation::operator+(const Deformation& other) const {
     auto n = std::min(vertexOffsets.size(), other.vertexOffsets.size());
     out.vertexOffsets.resize(n);
     for (std::size_t i = 0; i < n; ++i) {
-        out.vertexOffsets.x[i] = vertexOffsets.x[i] + other.vertexOffsets.x[i];
-        out.vertexOffsets.y[i] = vertexOffsets.y[i] + other.vertexOffsets.y[i];
+        out.vertexOffsets.xAt(i) = vertexOffsets.xAt(i) + other.vertexOffsets.xAt(i);
+        out.vertexOffsets.yAt(i) = vertexOffsets.yAt(i) + other.vertexOffsets.yAt(i);
     }
     return out;
 }
@@ -48,8 +47,8 @@ Deformation Deformation::operator-(const Deformation& other) const {
     auto n = std::min(vertexOffsets.size(), other.vertexOffsets.size());
     out.vertexOffsets.resize(n);
     for (std::size_t i = 0; i < n; ++i) {
-        out.vertexOffsets.x[i] = vertexOffsets.x[i] - other.vertexOffsets.x[i];
-        out.vertexOffsets.y[i] = vertexOffsets.y[i] - other.vertexOffsets.y[i];
+        out.vertexOffsets.xAt(i) = vertexOffsets.xAt(i) - other.vertexOffsets.xAt(i);
+        out.vertexOffsets.yAt(i) = vertexOffsets.yAt(i) - other.vertexOffsets.yAt(i);
     }
     return out;
 }
@@ -58,8 +57,8 @@ Deformation Deformation::operator*(float s) const {
     Deformation out;
     out.vertexOffsets = vertexOffsets;
     for (std::size_t i = 0; i < out.vertexOffsets.size(); ++i) {
-        out.vertexOffsets.x[i] *= s;
-        out.vertexOffsets.y[i] *= s;
+        out.vertexOffsets.xAt(i) *= s;
+        out.vertexOffsets.yAt(i) *= s;
     }
     return out;
 }
@@ -67,19 +66,9 @@ Deformation Deformation::operator*(float s) const {
 DeformationStack::DeformationStack(Deformable* owner) : owner_(owner) {}
 
 void DeformationStack::preUpdate() {
-    if (owner_) {
-        bool changed = owner_->deformation.size() != owner_->vertices.size();
-        owner_->deformation.resize(owner_->vertices.size());
-        for (std::size_t i = 0; i < owner_->deformation.size(); ++i) {
-            if (owner_->deformation.x[i] != 0.0f || owner_->deformation.y[i] != 0.0f) {
-                changed = true;
-            }
-            owner_->deformation.x[i] = 0.0f;
-            owner_->deformation.y[i] = 0.0f;
-        }
-        if (changed) {
-            ::nicxlive::core::render::sharedDeformMarkDirty();
-        }
+    if (!owner_) return;
+    for (std::size_t i = 0; i < owner_->deformation.size(); ++i) {
+        owner_->deformation.set(i, Vec2{0.0f, 0.0f});
     }
 }
 
@@ -139,9 +128,7 @@ bool Deformable::mustPropagate() const { return true; }
 void Deformable::updateDeform() {
     if (deformation.size() != vertices.size()) {
         deformation.resize(vertices.size());
-        std::fill(deformation.x.begin(), deformation.x.end(), 0.0f);
-        std::fill(deformation.y.begin(), deformation.y.end(), 0.0f);
-        ::nicxlive::core::render::sharedDeformMarkDirty();
+        deformation.fill(Vec2{0.0f, 0.0f});
     }
 }
 

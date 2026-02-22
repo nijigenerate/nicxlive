@@ -381,12 +381,12 @@ static void packQueuedCommands(RendererCtx& ctx) {
                 const bool uInRange = (uo + vc) <= ubuf.size();
                 const bool dInRange = (dfo + vc) <= dbuf.size();
                 const bool idxInRange = (idxPtr != nullptr) && (pp.indexCount <= idxAvail);
-                const float vx0 = vInRange && vc > 0 ? vbuf.x[vo] : 0.0f;
-                const float vy0 = vInRange && vc > 0 ? vbuf.y[vo] : 0.0f;
-                const float ux0 = uInRange && vc > 0 ? ubuf.x[uo] : 0.0f;
-                const float uy0 = uInRange && vc > 0 ? ubuf.y[uo] : 0.0f;
-                const float dx0 = dInRange && vc > 0 ? dbuf.x[dfo] : 0.0f;
-                const float dy0 = dInRange && vc > 0 ? dbuf.y[dfo] : 0.0f;
+                const float vx0 = vInRange && vc > 0 ? vbuf.xAt(vo) : 0.0f;
+                const float vy0 = vInRange && vc > 0 ? vbuf.yAt(vo) : 0.0f;
+                const float ux0 = uInRange && vc > 0 ? ubuf.xAt(uo) : 0.0f;
+                const float uy0 = uInRange && vc > 0 ? ubuf.yAt(uo) : 0.0f;
+                const float dx0 = dInRange && vc > 0 ? dbuf.xAt(dfo) : 0.0f;
+                const float dy0 = dInRange && vc > 0 ? dbuf.yAt(dfo) : 0.0f;
                 const unsigned i0 = idxInRange && pp.indexCount > 0 ? idxPtr[0] : 0;
                 const unsigned i1 = idxInRange && pp.indexCount > 1 ? idxPtr[1] : 0;
                 const unsigned i2 = idxInRange && pp.indexCount > 2 ? idxPtr[2] : 0;
@@ -631,6 +631,21 @@ NjgResult njgLoadPuppet(void* renderer, const char* pathUtf8, void** outPuppet) 
             pup->root->setPuppet(pup);
             pup->root->reconstruct();
             pup->root->finalize();
+        }
+        if (auto root = pup->actualRoot()) {
+            // D parity (nijilive.integration.unity): for dynamic composite offscreen
+            // children, ignore puppet transform on all Projectable nodes.
+            std::function<void(const std::shared_ptr<nodes::Node>&)> markProjectablesIgnorePuppet;
+            markProjectablesIgnorePuppet = [&](const std::shared_ptr<nodes::Node>& n) {
+                if (!n) return;
+                if (auto proj = std::dynamic_pointer_cast<nodes::Projectable>(n)) {
+                    proj->setIgnorePuppet(true);
+                }
+                for (const auto& child : n->childrenList()) {
+                    markProjectablesIgnorePuppet(child);
+                }
+            };
+            markProjectablesIgnorePuppet(root);
         }
         if (pup->root) {
             std::size_t nodeCount = 0;

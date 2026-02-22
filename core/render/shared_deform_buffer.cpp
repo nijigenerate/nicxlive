@@ -87,60 +87,54 @@ struct SharedVecAtlas {
     }
 
     std::size_t stride() const { return storage.size(); }
-    Vec2Array& data() {
-        syncInPlace();
-        return storage;
-    }
+    Vec2Array& data() { return storage; }
     bool isDirty() const { return dirty; }
     void markDirty() { dirty = true; }
     void markUploaded() { dirty = false; }
 
 private:
-    void syncInPlace() {
-        for (const auto& binding : bindings) {
-            auto len = binding.length;
-            if (len == 0) continue;
-            auto copyLen = std::min(len, binding.target->size());
-            for (std::size_t i = 0; i < copyLen; ++i) {
-                storage.x[binding.offset + i] = binding.target->x[i];
-                storage.y[binding.offset + i] = binding.target->y[i];
-            }
-            if (copyLen < len) {
-                std::fill(storage.x.begin() + static_cast<std::ptrdiff_t>(binding.offset + copyLen),
-                          storage.x.begin() + static_cast<std::ptrdiff_t>(binding.offset + len), 0.0f);
-                std::fill(storage.y.begin() + static_cast<std::ptrdiff_t>(binding.offset + copyLen),
-                          storage.y.begin() + static_cast<std::ptrdiff_t>(binding.offset + len), 0.0f);
-            }
-        }
-    }
-
     void rebuild() {
         std::size_t total = 0;
         for (const auto& binding : bindings) total += binding.length;
-        Vec2Array newStorage(total);
-        std::size_t offset = 0;
-        for (auto& binding : bindings) {
-            auto len = binding.length;
-            if (len) {
-                auto copyLen = std::min(len, binding.target->size());
-                for (std::size_t i = 0; i < copyLen; ++i) {
-                    newStorage.x[offset + i] = binding.target->x[i];
-                    newStorage.y[offset + i] = binding.target->y[i];
+        Vec2Array newStorage;
+        if (total) {
+            newStorage.setLength(total);
+            std::size_t offset = 0;
+            for (auto& binding : bindings) {
+                auto len = binding.length;
+                if (len) {
+                    auto copyLen = std::min(len, binding.target->size());
+                    auto dstX = newStorage.dataXMutable() + offset;
+                    auto dstY = newStorage.dataYMutable() + offset;
+                    const float* srcX = binding.target->dataX();
+                    const float* srcY = binding.target->dataY();
+                    if (copyLen && srcX && srcY) {
+                        std::copy_n(srcX, copyLen, dstX);
+                        std::copy_n(srcY, copyLen, dstY);
+                    }
+                    if (copyLen < len) {
+                        std::fill(dstX + static_cast<std::ptrdiff_t>(copyLen), dstX + static_cast<std::ptrdiff_t>(len), 0.0f);
+                        std::fill(dstY + static_cast<std::ptrdiff_t>(copyLen), dstY + static_cast<std::ptrdiff_t>(len), 0.0f);
+                    }
+                } else {
+                    binding.target->clear();
                 }
-                if (copyLen < len) {
-                    std::fill(newStorage.x.begin() + static_cast<std::ptrdiff_t>(offset + copyLen),
-                              newStorage.x.begin() + static_cast<std::ptrdiff_t>(offset + len), 0.0f);
-                    std::fill(newStorage.y.begin() + static_cast<std::ptrdiff_t>(offset + copyLen),
-                              newStorage.y.begin() + static_cast<std::ptrdiff_t>(offset + len), 0.0f);
-                }
-            } else {
+                binding.offset = offset;
+                offset += len;
+            }
+        } else {
+            for (auto& binding : bindings) {
+                binding.offset = 0;
                 binding.target->clear();
             }
-            binding.offset = offset;
-            offset += len;
         }
         storage = std::move(newStorage);
         for (auto& binding : bindings) {
+            if (binding.length) {
+                binding.target->bindExternalStorage(storage, binding.offset, binding.length);
+            } else {
+                binding.target->clear();
+            }
             if (binding.offsetSink) *binding.offsetSink = binding.offset;
         }
         dirty = true;
