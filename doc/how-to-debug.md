@@ -30,10 +30,9 @@ cmd /c _build_nicx.cmd
 cd C:\Users\siget\src\nijigenerate\nijiv
 cmd /c '"C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 && set PATH=C:\opt\ldc-1.41\bin;%PATH% && dub build -c opengl'
 ```
-3. Copy latest `nicxlive.dll` to `nijiv`.
-```powershell
-Copy-Item -Force "C:\Users\siget\src\nijigenerate\nicxlive\build\RelWithDebInfo\nicxlive.dll" "C:\Users\siget\src\nijigenerate\nijiv\nicxlive.dll"
-```
+3. Do **not** copy `nicxlive.dll` to `nijiv`.
+   - `nijiv` resolves `nicxlive` directly from `nicxlive/build/*` (Debug -> RelWithDebInfo -> Release -> build root).
+   - Keep a single source of truth: the just-built artifact.
 
 ## 2) Run phase (same args, two flavors)
 1. Run with `nijilive`.
@@ -44,6 +43,10 @@ cd C:\Users\siget\src\nijigenerate\nijiv
 2. Run with `nicxlive`.
 ```powershell
 .\nijiv-opengl.exe --test "C:\Users\siget\OneDrive\Inochi2d\Aka-0.9.3.inx" --frames 120 --fixed-delta 0.0166667 --unity-dll nicxlive --queue-dump "queue-nicxlive-f120.log" *> "run-nicx-f120.txt"
+```
+3. Verify the actually loaded library path in logs.
+```powershell
+rg -n "^\[unity\] flavor=nicxlive path=" run-nicx-f120.txt
 ```
 
 ## 3) Success criteria for each run
@@ -101,4 +104,3 @@ rg -n "BeginDynamicComposite|EndDynamicComposite" queue-nicxlive-f120.log
   - `...`
 - Remaining diffs in priority order:
   - `...`
-

@@ -18,6 +18,7 @@
 | `UnityResourceCallbacks.createTexture` | 定義あり | 定義あり | ◯ |
 | `UnityResourceCallbacks.updateTexture` | 定義あり | 定義あり | ◯ |
 | `UnityResourceCallbacks.releaseTexture` | 定義あり | 定義あり | ◯ |
+| DynamicComposite の外部テクスチャ初期化（create→update） | `ensureTextureHandle` で `createTexture` 後に常に `updateTexture` を呼ぶ | `ensureDynamicTextureHandle` で空データ時に update を省略していたが、0埋め転送で常時 update 呼び出しへ修正 | ◯ |
 | `njgRuntimeInit` | export 関数あり | あり | ◯ |
 | `njgRuntimeTerm` | export 関数あり | あり | ◯ |
 | `njgCreateRenderer` | export 関数あり | あり | ◯ |

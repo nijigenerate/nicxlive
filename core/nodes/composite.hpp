@@ -36,6 +36,7 @@ public:
     ::nicxlive::core::DynamicCompositePass prepareDynamicCompositePass() override;
     void dynamicRenderBegin(core::RenderContext& ctx) override;
     void fillDrawPacket(const Node& header, PartDrawPacket& packet, bool isMask = false) const override;
+    void rebuffer(const MeshData& data) override;
 
 private:
     Vec2 deformationTranslationOffsetLocal() const;

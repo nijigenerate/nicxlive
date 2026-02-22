@@ -97,6 +97,7 @@ public:
     void runBeginTask(core::RenderContext& ctx) override;
     void runPostTaskImpl(std::size_t priority, core::RenderContext& ctx) override;
     void notifyChange(const std::shared_ptr<Node>& target, NotifyReason reason = NotifyReason::AttributeChanged) override;
+    void rebuffer(const MeshData& data) override;
     bool setupChild(const std::shared_ptr<Node>& child) override;
     bool releaseChild(const std::shared_ptr<Node>& child) override;
     void setupSelf() override;

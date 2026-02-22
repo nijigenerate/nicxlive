@@ -177,7 +177,7 @@ static size_t ensureDynamicTextureHandle(RendererCtx& ctx, const std::shared_ptr
         return found->second;
     }
 
-    if (!ctx.callbacks.createTexture) {
+    if (!ctx.callbacks.createTexture || !ctx.callbacks.updateTexture) {
         return backendId;
     }
 
@@ -193,11 +193,21 @@ static size_t ensureDynamicTextureHandle(RendererCtx& ctx, const std::shared_ptr
     ctx.stats.created++;
     ctx.stats.current++;
 
-    if (ctx.callbacks.updateTexture) {
+    std::vector<uint8_t> upload;
+    std::size_t expected = 0;
+    if (w > 0 && h > 0 && c > 0) {
+        expected = static_cast<std::size_t>(w) * static_cast<std::size_t>(h) * static_cast<std::size_t>(c);
+    }
+    if (expected > 0) {
+        upload.resize(expected, 0);
         const auto& data = tex->data();
         if (!data.empty()) {
-            ctx.callbacks.updateTexture(handle, data.data(), data.size(), w, h, c, ctx.callbacks.userData);
+            auto copyLen = (std::min)(expected, data.size());
+            std::copy_n(data.begin(), copyLen, upload.begin());
         }
+        ctx.callbacks.updateTexture(handle, upload.data(), upload.size(), w, h, c, ctx.callbacks.userData);
+    } else {
+        ctx.callbacks.updateTexture(handle, nullptr, 0, w, h, c, ctx.callbacks.userData);
     }
 
     return handle;

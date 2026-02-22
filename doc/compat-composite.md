@@ -9,6 +9,7 @@
 | method `typeId` | "Composite" | 同等 | ◯ |
 | method `transform` | Partのtransformを返す | 同等 | ◯ |
 | method `mustPropagate` | propagateMeshGroup を返す | 同等 | ◯ |
+| method `rebuffer(ref MeshData)` | `Projectable.rebuffer` 後に `autoResizedMesh=true` を維持 | 欠落していたため追加修正済み | ◯ |
 | method `propagateMeshGroupEnabled` | propagateMeshGroup getter | 同等 | ◯ |
 | method `setPropagateMeshGroup` | propagateMeshGroup setter | 同等 | ◯ |
 | method `threshold` | maskAlphaThreshold を返す | maskAlphaThreshold を返す | ◯ |
@@ -17,6 +18,7 @@
 | method `deserializeFromFghj` | 上記フィールド読み込み、textures=null、autoResizedMesh=true | 同等（mask mode復元・texturesクリア） | ◯ |
 | method `getChildrenBounds` | autoResizedMesh時は行列でbounds、非autoはmergeBounds、frameでmaxBoundsリセット | 同等（frame管理／autoResizedを反映） | ◯ |
 | method `enableMaxChildrenBounds` | frame管理しつつmaxChildrenBounds更新、target補正 | 同等（frame管理＋autoResized時のローカルbounds補正） | ◯ |
+| method `updateDynamicRenderStateFlags` | compositeAutoScale/回転/カメラ回転の変化を検知し、基底更新に合流 | 同等 | ◯ |
 | method `childOffscreenMatrix` | textureOffset考慮で子行列生成 | 同等（transform逆行列ベース） | ◯ |
 | method `childCoreMatrix` | 子transform行列を返す | 同等 | ◯ |
 | method `localBoundsFromMatrix` | 行列適用で子bounds算出 | 同等 | ◯ |
@@ -26,4 +28,3 @@
 | field `maxChildrenBounds` | boundsキャッシュ | 同等 | ◯ |
 | field `useMaxChildrenBounds` | キャッシュ使用フラグ | 同等 | ◯ |
 | field `maxBoundsStartFrame` | キャッシュ開始フレーム | 同等 | ◯ |
-

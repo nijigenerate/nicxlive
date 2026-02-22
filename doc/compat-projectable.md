@@ -25,6 +25,7 @@
 | method `enableMaxChildrenBounds()` | max bounds を更新し保持 | maxBoundsStartFrame更新済み | ◯ | - |
 | method `invalidateChildrenBounds()` | max bounds キャッシュ無効化 | 同等 | ◯ | - |
 | method `createSimpleMesh()` | 子 bounds から自動リサイズメッシュ | D同等のサイズ調整・offset更新 | ◯ | - |
+| method `rebuffer(ref MeshData)` | auto_resized 判定更新＋`initialized=false`＋`notifyChange(this)` | `Part::rebuffer` 直呼びのみで再初期化契約が欠落していたため追加修正済み | ◯ | - |
 | method `updateAutoResizedMeshOnce()` | 1フレーム自動サイズ更新 | 同等 | ◯ | - |
 | method `updatePartMeshOnce()` | 1回だけメッシュ更新 | 同等 | ◯ | - |
 | method `autoResizeMeshOnce()` | 1回だけ自動リサイズ | 同等 | ◯ | - |
@@ -72,4 +73,3 @@
 | method `setupSelf()` | listener登録・初期化処理 | D同等 | ◯ | - |
 | method `releaseSelf()` | listener解除 | D同等 | ◯ | - |
 | method `onAncestorChanged()` | ancestor変化検知でdeferred設定 | D同等 | ◯ | - |
-

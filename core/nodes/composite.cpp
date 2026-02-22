@@ -39,6 +39,11 @@ void Composite::setThreshold(float value) { maskAlphaThreshold = value; }
 Transform Composite::transform() { return Part::transform(); }
 Transform Composite::transform() const { return Part::transform(); }
 
+void Composite::rebuffer(const MeshData& data) {
+    Projectable::rebuffer(data);
+    autoResizedMesh = true;
+}
+
 bool Composite::mustPropagate() const { return propagateMeshGroup; }
 
 void Composite::serializeSelfImpl(::nicxlive::core::serde::InochiSerializer& serializer, bool recursive, SerializeNodeFlags flags) const {

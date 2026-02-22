@@ -122,7 +122,7 @@ public:
 
     void runBeginTask(core::RenderContext& ctx) override;
 
-    void rebuffer(const MeshData& data);
+    virtual void rebuffer(const MeshData& data);
     void setTexture(std::size_t slot, const std::shared_ptr<::nicxlive::core::Texture>& tex);
     std::shared_ptr<::nicxlive::core::Texture> getTexture(std::size_t slot) const;
     void markTextureDirty(std::size_t slot);

@@ -330,25 +330,31 @@ void Drawable::updateBounds() {
         bounds.reset();
         return;
     }
-    float minx = mesh->vertices[0].x, maxx = mesh->vertices[0].x;
-    float miny = mesh->vertices[0].y, maxy = mesh->vertices[0].y;
+    Transform wtransform = transform();
+    std::array<float, 4> b{
+        wtransform.translation.x,
+        wtransform.translation.y,
+        wtransform.translation.x,
+        wtransform.translation.y
+    };
+    Mat4 matrix = getDynamicMatrix();
     for (std::size_t i = 0; i < mesh->vertices.size(); ++i) {
-        auto vx = mesh->vertices[i].x;
-        auto vy = mesh->vertices[i].y;
+        Vec2 v = mesh->vertices[i];
         if (i < deformationOffsets.size()) {
-            vx += deformationOffsets[i].x;
-            vy += deformationOffsets[i].y;
+            v.x += deformationOffsets[i].x;
+            v.y += deformationOffsets[i].y;
         }
         if (i < deformation.size()) {
-            vx += deformation.xAt(i);
-            vy += deformation.yAt(i);
+            v.x += deformation.xAt(i);
+            v.y += deformation.yAt(i);
         }
-        minx = std::min(minx, vx);
-        maxx = std::max(maxx, vx);
-        miny = std::min(miny, vy);
-        maxy = std::max(maxy, vy);
+        Vec3 oriented = matrix.transformPoint(Vec3{v.x, v.y, 0.0f});
+        b[0] = std::min(b[0], oriented.x);
+        b[1] = std::min(b[1], oriented.y);
+        b[2] = std::max(b[2], oriented.x);
+        b[3] = std::max(b[3], oriented.y);
     }
-    bounds = std::array<float, 4>{minx, miny, maxx, maxy};
+    bounds = b;
 }
 
 void Drawable::drawMeshLines() const {

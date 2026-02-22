@@ -369,7 +369,7 @@ bool Projectable::createSimpleMesh() {
         data.indices = {0, 1, 2, 2, 1, 3};
         data.origin = Vec2{0, 0};
         data.gridAxes.clear();
-        rebuffer(data);
+        Part::rebuffer(data);
         shouldUpdateVertices = true;
         autoResizedSize = Vec2{bounds.z - bounds.x, bounds.w - bounds.y};
         textureOffset = Vec2{(bounds.x + bounds.z) / 2.0f + deformOffset.x - originOffset.x,
@@ -609,7 +609,7 @@ void Projectable::dynamicRenderBegin(core::RenderContext& ctx) {
     }
     queuedOffscreenParts.clear();
     if (!renderEnabled() || !ctx.renderGraph) return;
-    if (!updateDynamicRenderStateFlags()) return;
+    updateDynamicRenderStateFlags();
     bool needsRedraw = textureInvalidated || deferred > 0;
     if (!needsRedraw) {
         reuseCachedTextureThisFrame = true;
@@ -909,6 +909,14 @@ void Projectable::notifyChange(const std::shared_ptr<Node>& target, NotifyReason
     }
 
     Part::notifyChange(target, reason);
+}
+
+void Projectable::rebuffer(const MeshData& data) {
+    autoResizedMesh = data.vertices.empty();
+    Part::rebuffer(data);
+    initialized = false;
+    setIgnorePuppet(false);
+    notifyChange(shared_from_this(), NotifyReason::Transformed);
 }
 
 bool Projectable::setupChild(const std::shared_ptr<Node>& child) {
