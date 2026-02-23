@@ -510,6 +510,11 @@ void Puppet::recordNodeChange(nodes::NotifyReason reason) {
             p->reconstruct(self);
             p->finalize(self);
         }
+        if (root) {
+            root->name = "Root";
+            scanParts(true, root);
+            selfSort();
+        }
     } catch (const std::exception& ex) {
         return std::string(ex.what());
     }

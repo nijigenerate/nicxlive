@@ -31,7 +31,9 @@ cd C:\Users\siget\src\nijigenerate\nijiv
 cmd /c '"C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 && set PATH=C:\opt\ldc-1.41\bin;%PATH% && dub build -c opengl'
 ```
 3. Do **not** copy `nicxlive.dll` to `nijiv`.
-   - `nijiv` resolves `nicxlive` directly from `nicxlive/build/*` (Debug -> RelWithDebInfo -> Release -> build root).
+   - `nijiv` resolves `nicxlive` directly from `nicxlive/build/*`.
+   - Windows: `Debug -> RelWithDebInfo -> Release -> build root`.
+   - macOS/Linux: `build root -> Debug -> RelWithDebInfo -> Release`.
    - Keep a single source of truth: the just-built artifact.
 
 ## 2) Run phase (same args, two flavors)

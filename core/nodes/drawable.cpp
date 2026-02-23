@@ -209,7 +209,10 @@ void sharedDeformResize(Vec2Array& target, std::size_t newLength) { ::nicxlive::
 void sharedVertexMarkDirty() { ::nicxlive::core::render::sharedVertexMarkDirty(); }
 void sharedUvMarkDirty() { ::nicxlive::core::render::sharedUvMarkDirty(); }
 void sharedDeformMarkDirty() { ::nicxlive::core::render::sharedDeformMarkDirty(); }
-void inSetUpdateBounds(bool state) { gDoGenerateBounds = state; }
+void inSetUpdateBounds(bool state) {
+    (void)state;
+    gDoGenerateBounds = true;
+}
 bool inGetUpdateBounds() { return gDoGenerateBounds; }
 
 void MeshData::serialize(::nicxlive::core::serde::InochiSerializer& serializer) const {

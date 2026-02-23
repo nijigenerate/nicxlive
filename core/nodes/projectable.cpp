@@ -495,8 +495,31 @@ bool Projectable::initTarget() {
         return false;
     }
 
-    Vec2 size{b[2]-b[0], b[3]-b[1]};
-    if (size.x <= 0 || size.y <= 0) {
+    Vec2 minPos{};
+    Vec2 maxPos{};
+    bool first = true;
+    const std::size_t count = vertices.size();
+    for (std::size_t i = 0; i < count; ++i) {
+        Vec2 pos = vertices[i];
+        if (i < deformation.size()) {
+            auto d = deformation[i];
+            pos.x += d.x;
+            pos.y += d.y;
+        }
+        if (first) {
+            minPos = pos;
+            maxPos = pos;
+            first = false;
+        } else {
+            minPos.x = std::min(minPos.x, pos.x);
+            minPos.y = std::min(minPos.y, pos.y);
+            maxPos.x = std::max(maxPos.x, pos.x);
+            maxPos.y = std::max(maxPos.y, pos.y);
+        }
+    }
+
+    Vec2 size{maxPos.x - minPos.x, maxPos.y - minPos.y};
+    if (!std::isfinite(size.x) || !std::isfinite(size.y) || size.x <= 0 || size.y <= 0) {
         if (gProjectableFailLogs < 32) {
             std::fprintf(stderr, "[nicxlive] projectable initTarget fail: invalid size uuid=%u size=(%.3f,%.3f)\n",
                          uuid, size.x, size.y);
@@ -799,44 +822,7 @@ void Projectable::renderMask(bool dodge) {
 }
 
 void Projectable::enqueueRenderCommands(core::RenderContext& ctx) {
-    selfSort();
-    if (!ctx.renderGraph) return;
-
-    auto passData = prepareDynamicCompositePass();
-    dynamicScopeToken = ctx.renderGraph->pushDynamicComposite(std::dynamic_pointer_cast<Projectable>(shared_from_this()), passData, zSort());
-    if (gProjectablePushLogs < 32) {
-        auto p = parentPtr();
-        std::fprintf(stderr, "[nicxlive] push dyn uuid=%u parent=%u z=%.6f base=%.6f rel=%.6f off=%.6f token=%zu\n",
-                     uuid, p ? p->uuid : 0u, zSort(), zSortBase(), relZSort(), offsetSort, dynamicScopeToken);
-        ++gProjectablePushLogs;
-    }
-    dynamicScopeActive = true;
-
-    Mat4 translate = Mat4::translation(Vec3{-textureOffset.x, -textureOffset.y, 0});
-    Mat4 correction = Mat4::multiply(fullTransformMatrix(), Mat4::inverse(transform().toMat4()));
-    Mat4 childBasis = Mat4::multiply(translate, Mat4::inverse(transform().toMat4()));
-    queuedOffscreenParts.clear();
-
-    for (auto& p : subParts) {
-        if (!p) continue;
-        Mat4 childMatrix = Mat4::multiply(correction, p->transform().toMat4());
-        Mat4 finalMatrix = Mat4::multiply(childBasis, childMatrix);
-        p->setOffscreenModelMatrix(finalMatrix);
-        if (auto dynChild = std::dynamic_pointer_cast<Projectable>(p)) {
-            dynChild->renderNestedOffscreen(ctx);
-        } else {
-            p->enqueueRenderCommands(ctx);
-        }
-        queuedOffscreenParts.push_back(p);
-    }
-    for (auto& m : maskParts) {
-        if (!m) continue;
-        Mat4 maskMatrix = Mat4::multiply(correction, m->transform().toMat4());
-        Mat4 finalMatrix = Mat4::multiply(translate, maskMatrix);
-        m->setOffscreenModelMatrix(finalMatrix);
-        m->enqueueRenderCommands(ctx);
-        queuedOffscreenParts.push_back(m);
-    }
+    Part::enqueueRenderCommands(ctx);
 }
 
 void Projectable::runRenderTask(core::RenderContext&) {}
