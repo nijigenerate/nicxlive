@@ -4,15 +4,39 @@
 #include "../render.hpp"
 #include "../render/commands.hpp"
 #include "../render/backend_queue.hpp"
+#include "../runtime_state.hpp"
 #include "../texture.hpp"
+#include "../../fmt/fmt.hpp"
 
 #include <algorithm>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <limits>
 #include <set>
 
 namespace nicxlive::core::nodes {
+namespace {
+bool traceSharedEnabled() {
+    static int enabled = -1;
+    if (enabled >= 0) return enabled != 0;
+    const char* v = std::getenv("NJCX_TRACE_SHARED");
+    if (!v) {
+        enabled = 0;
+        return false;
+    }
+    enabled = (std::strcmp(v, "1") == 0 || std::strcmp(v, "true") == 0 || std::strcmp(v, "TRUE") == 0) ? 1 : 0;
+    return enabled != 0;
+}
+
+}
 
 static std::vector<MaskBinding> dedupMasks(const std::vector<MaskBinding>& masks);
 static void emitMasks(const std::vector<MaskBinding>& bindings, core::RenderCommandEmitter& emitter);
+
+Part::Part() {
+    initPartTasks();
+}
 
 Part::Part(const MeshData& data, const std::array<std::shared_ptr<::nicxlive::core::Texture>, 3>& tex, uint32_t uuidVal)
     : Drawable(data, uuidVal), textures(tex) {
@@ -81,7 +105,10 @@ const std::string& Part::typeId() const {
 void Part::initPartTasks() { requireRenderTask(); }
 
 void Part::updateUVs() {
-    sharedUvResize(mesh->uvs, mesh->uvs.size());
+    sharedUvResize(sharedUvs, mesh->uvs.size());
+    for (std::size_t i = 0; i < mesh->uvs.size(); ++i) {
+        sharedUvs.set(i, mesh->uvs[i]);
+    }
     sharedUvMarkDirty();
 }
 
@@ -208,7 +235,7 @@ void Part::serializeSelfImpl(::nicxlive::core::serde::InochiSerializer& serializ
         auto arr = serializer.listBegin();
         for (const auto& m : masks) {
             serializer.elemBegin();
-            serializer.putKey("maskSrcUUID");
+            serializer.putKey("source");
             serializer.putValue(m.maskSrcUUID);
             serializer.putKey("mode");
             serializer.putValue(static_cast<int>(m.mode));
@@ -220,8 +247,12 @@ void Part::serializeSelfImpl(::nicxlive::core::serde::InochiSerializer& serializ
 ::nicxlive::core::serde::SerdeException Part::deserializeFromFghj(const ::nicxlive::core::serde::Fghj& data) {
     if (auto err = Drawable::deserializeFromFghj(data)) return err;
     if (auto bm = data.get_optional<int>("blend_mode")) {
-        if (*bm >= 0 && *bm <= static_cast<int>(BlendMode::Multiply)) {
+        if (*bm >= 0 && *bm <= static_cast<int>(BlendMode::SliceFromLower)) {
             blendMode = static_cast<BlendMode>(*bm);
+        }
+    } else if (auto bs = data.get_optional<std::string>("blend_mode")) {
+        if (auto parsed = parseBlendMode(*bs)) {
+            blendMode = *parsed;
         }
     }
     if (auto th = data.get_optional<float>("mask_threshold")) maskAlphaThreshold = *th;
@@ -250,8 +281,13 @@ void Part::serializeSelfImpl(::nicxlive::core::serde::InochiSerializer& serializ
     }
     textureIds.clear();
     if (auto tx = data.get_child_optional("textures")) {
+        // Keep texture slots compact like D implementation:
+        // skip NO_TEXTURE sentinels instead of reserving empty entries.
+        constexpr uint32_t kNoTexture = std::numeric_limits<uint32_t>::max();
         for (const auto& e : *tx) {
-            textureIds.push_back(static_cast<int32_t>(e.second.get_value<std::size_t>()));
+            const uint32_t raw = static_cast<uint32_t>(e.second.get_value<std::size_t>());
+            if (raw == kNoTexture) continue;
+            textureIds.push_back(static_cast<int32_t>(raw));
         }
     }
     if (auto mb = data.get_child_optional("masked_by")) {
@@ -276,7 +312,7 @@ void Part::serializeSelfImpl(::nicxlive::core::serde::InochiSerializer& serializ
     if (auto ml = data.get_child_optional("masks")) {
         for (const auto& e : *ml) {
             MaskBinding mb;
-            mb.maskSrcUUID = e.second.get<uint32_t>("maskSrcUUID", 0);
+            mb.maskSrcUUID = e.second.get<uint32_t>("source", 0);
             int modeVal = e.second.get<int>("mode", 0);
             if (modeVal >= 0 && modeVal <= static_cast<int>(MaskingMode::DodgeMask)) {
                 mb.mode = static_cast<MaskingMode>(modeVal);
@@ -419,10 +455,41 @@ void Part::markTextureDirty(std::size_t slot) {
 }
 
 void Part::syncTextureIds() {
+    auto pup = puppetRef();
+    const bool inpMode = ::nicxlive::core::fmt::inIsINPMode();
+
+    if (pup) {
+        for (std::size_t i = 0; i < textureIds.size() && i < textures.size(); ++i) {
+            if (textureIds[i] < 0) continue;
+            const uint32_t id = static_cast<uint32_t>(textureIds[i]);
+            if (id < pup->textureSlots.size() && pup->textureSlots[id]) {
+                textures[i] = pup->textureSlots[id];
+            } else if (!inpMode) {
+                textures[i] = pup->resolveTextureSlot(id);
+            }
+        }
+    }
     if (textureIds.size() < textures.size()) textureIds.resize(textures.size(), -1);
+
+    if (inpMode) {
+        if (pup) {
+            for (std::size_t i = 0; i < textures.size(); ++i) {
+                if (textureIds[i] < 0 && textures[i]) {
+                    auto idx = pup->getTextureSlotIndexFor(textures[i]);
+                    if (idx >= 0) {
+                        textureIds[i] = static_cast<int32_t>(idx);
+                    }
+                }
+                if (textures[i]) {
+                    textureDirty[i] = false;
+                }
+            }
+        }
+        return;
+    }
+
     for (std::size_t i = 0; i < textures.size(); ++i) {
         if (textures[i]) {
-            textureIds[i] = static_cast<int32_t>(textures[i]->getRuntimeUUID());
             textureDirty[i] = false;
         }
     }
@@ -476,7 +543,14 @@ void Part::drawOneDirect(bool forMasking) {
 
 void Part::fillDrawPacket(const Node& header, PartDrawPacket& packet, bool isMask) const {
     packet.renderable = enabled && opacity > 0.0f && mesh->isReady();
-    packet.modelMatrix = header.transform().toMat4();
+    packet.modelMatrix = immediateModelMatrix();
+    auto renderSpace = currentRenderSpace();
+    packet.renderMatrix = renderSpace.matrix;
+    packet.renderRotation = renderSpace.rotation;
+    if (hasOffscreenModelMatrix && hasOffscreenRenderMatrix) {
+        packet.renderMatrix = offscreenRenderMatrix;
+        packet.renderRotation = 0.0f;
+    }
     if (auto pup = puppetRef()) {
         packet.puppetMatrix = pup->transform.toMat4();
     }
@@ -486,17 +560,17 @@ void Part::fillDrawPacket(const Node& header, PartDrawPacket& packet, bool isMas
     packet.emissionStrength = emissionStrength * offsetEmissionStrength;
     packet.blendMode = blendMode;
     packet.useMultistageBlend = useMultistageBlend(blendMode);
-    packet.hasEmissionOrBumpmap = (textures.size() > 1 && textures[1]) || (textures.size() > 2 && textures[2]);
+    packet.hasEmissionOrBumpmap = (textures.size() > 2) && (textures[1] || textures[2]);
     packet.maskThreshold = std::clamp(offsetMaskThreshold + maskAlphaThreshold, 0.0f, 1.0f);
     Vec3 tintAccum = tint;
-    tintAccum.x = std::clamp(tint.x * offsetTint.x, 0.0f, 1.0f);
-    tintAccum.y = std::clamp(tint.y * offsetTint.y, 0.0f, 1.0f);
-    tintAccum.z = std::clamp(tint.z * offsetTint.z, 0.0f, 1.0f);
+    if (!std::isnan(offsetTint.x)) tintAccum.x = std::clamp(tint.x * offsetTint.x, 0.0f, 1.0f);
+    if (!std::isnan(offsetTint.y)) tintAccum.y = std::clamp(tint.y * offsetTint.y, 0.0f, 1.0f);
+    if (!std::isnan(offsetTint.z)) tintAccum.z = std::clamp(tint.z * offsetTint.z, 0.0f, 1.0f);
     packet.clampedTint = tintAccum;
     Vec3 screenAccum = screenTint;
-    screenAccum.x = std::clamp(screenTint.x + offsetScreenTint.x, 0.0f, 1.0f);
-    screenAccum.y = std::clamp(screenTint.y + offsetScreenTint.y, 0.0f, 1.0f);
-    screenAccum.z = std::clamp(screenTint.z + offsetScreenTint.z, 0.0f, 1.0f);
+    if (!std::isnan(offsetScreenTint.x)) screenAccum.x = std::clamp(screenTint.x + offsetScreenTint.x, 0.0f, 1.0f);
+    if (!std::isnan(offsetScreenTint.y)) screenAccum.y = std::clamp(screenTint.y + offsetScreenTint.y, 0.0f, 1.0f);
+    if (!std::isnan(offsetScreenTint.z)) screenAccum.z = std::clamp(screenTint.z + offsetScreenTint.z, 0.0f, 1.0f);
     packet.clampedScreen = screenAccum;
     packet.origin = mesh->origin;
     packet.vertexOffset = vertexOffset;
@@ -507,15 +581,44 @@ void Part::fillDrawPacket(const Node& header, PartDrawPacket& packet, bool isMas
     packet.deformAtlasStride = sharedDeformBufferData().size();
     packet.vertexCount = static_cast<uint32_t>(mesh->vertices.size());
     packet.indexCount = static_cast<uint32_t>(mesh->indices.size());
-    packet.indexBuffer = 0; // 現状はソフト配列のみ
+    packet.indexBuffer = ibo;
+    if (traceSharedEnabled()) {
+        const std::size_t deformEnd = static_cast<std::size_t>(packet.deformOffset) +
+                                      static_cast<std::size_t>(packet.vertexCount);
+        if (deformEnd > packet.deformAtlasStride) {
+            std::fprintf(stderr,
+                         "[nicxlive][shared-check][OOB] part uuid=%u name=%s deformOffset=%u vertexCount=%u deformStride=%u\n",
+                         uuid,
+                         name.c_str(),
+                         packet.deformOffset,
+                         packet.vertexCount,
+                         static_cast<unsigned>(packet.deformAtlasStride));
+        }
+    }
     for (std::size_t i = 0; i < textures.size() && i < 3; ++i) {
-        packet.textureUUIDs[i] = textures[i] ? textures[i]->getRuntimeUUID() : 0;
-        packet.textures[i] = textures[i];
+        std::shared_ptr<::nicxlive::core::Texture> tex = textures[i];
+        if (tex) {
+            uint32_t texId = tex->getRuntimeUUID();
+            if (texId == 0) texId = tex->backendId();
+            packet.textureUUIDs[i] = texId;
+        } else {
+            packet.textureUUIDs[i] = 0;
+        }
+        packet.textures[i] = tex;
     }
     packet.vertices = mesh->vertices;
     packet.uvs = mesh->uvs;
     packet.indices = mesh->indices;
     packet.deformation = deformation;
+    // Keep queue backend IBO map in sync with packet handles.
+    // Some load paths can leave ibo assigned while index data is not registered yet.
+    if (packet.indexBuffer != 0 && !packet.indices.empty()) {
+        if (auto qb = std::dynamic_pointer_cast<core::render::QueueRenderBackend>(core::getCurrentRenderBackend())) {
+            if (!qb->hasDrawableIndices(packet.indexBuffer)) {
+                qb->uploadDrawableIndices(packet.indexBuffer, packet.indices);
+            }
+        }
+    }
     packet.node = std::dynamic_pointer_cast<Part>(const_cast<Part*>(this)->shared_from_this());
 }
 
@@ -527,8 +630,34 @@ Mat4 Part::immediateModelMatrix() const {
     return model;
 }
 
+RenderSpace Part::currentRenderSpace(bool forceIgnorePuppet) const {
+    const auto& cam = ::nicxlive::core::inGetCamera();
+    const auto pup = puppetRef();
+    const bool usePuppet = !forceIgnorePuppet && !ignorePuppet && static_cast<bool>(pup);
+    const Mat4 puppetMatrix = usePuppet ? pup->transform.toMat4() : Mat4::identity();
+    const Vec2 puppetScale = usePuppet ? pup->transform.scale : Vec2{1.0f, 1.0f};
+    const float puppetRot = usePuppet ? pup->transform.rotation.z : 0.0f;
+
+    float sx = cam.scale.x * puppetScale.x;
+    float sy = cam.scale.y * puppetScale.y;
+    if (!std::isfinite(sx) || sx == 0.0f) sx = 1.0f;
+    if (!std::isfinite(sy) || sy == 0.0f) sy = 1.0f;
+
+    float rot = cam.rotation + puppetRot;
+    if (!std::isfinite(rot)) rot = 0.0f;
+    if ((sx * sy) < 0.0f) rot = -rot;
+
+    RenderSpace space;
+    space.matrix = cam.matrix() * puppetMatrix;
+    space.scale = Vec2{sx, sy};
+    space.rotation = rot;
+    return space;
+}
+
 void Part::setOffscreenModelMatrix(const Mat4& m) { offscreenModelMatrix = m; hasOffscreenModelMatrix = true; }
+void Part::setOffscreenRenderMatrix(const Mat4& m) { offscreenRenderMatrix = m; hasOffscreenRenderMatrix = true; }
 void Part::clearOffscreenModelMatrix() { hasOffscreenModelMatrix = false; }
+void Part::clearOffscreenRenderMatrix() { hasOffscreenRenderMatrix = false; }
 
 bool Part::backendRenderable() const { return enabled && mesh->isReady(); }
 
@@ -549,16 +678,18 @@ void Part::finalize() {
     if (auto pup = puppetRef()) {
         std::vector<MaskBinding> valid;
         for (auto& m : masks) {
+            if (m.maskSrcUUID == 0) continue;
             auto node = pup->findNodeById(m.maskSrcUUID);
             m.maskSrc = std::dynamic_pointer_cast<Drawable>(node);
-            if (m.maskSrc) valid.push_back(m);
+            // Keep unresolved bindings; runtime fallback resolves by UUID.
+            valid.push_back(m);
         }
         masks = std::move(valid);
-        // resolve textures from slots if ids exist
+        // Resolve texture pointers from slot IDs at finalize time.
+        // During node deserialize, puppet texture slots may not be ready yet.
         for (std::size_t i = 0; i < textureIds.size() && i < textures.size(); ++i) {
-            if (!textures[i]) {
-                textures[i] = pup->resolveTextureSlot(static_cast<uint32_t>(textureIds[i]));
-            }
+            if (textureIds[i] < 0) continue;
+            textures[i] = pup->resolveTextureSlot(static_cast<uint32_t>(textureIds[i]));
         }
         // apply maskedBy legacy bindings
         for (auto id : maskedBy) {

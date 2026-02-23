@@ -1,4 +1,7 @@
 #include "backend_queue.hpp"
+#include "../runtime_state.hpp"
+
+#include <algorithm>
 
 namespace nicxlive::core::render {
 
@@ -8,9 +11,9 @@ void QueueRenderBackend::initializeDrawableResources() {}
 void QueueRenderBackend::bindDrawableVao() {}
 void QueueRenderBackend::createDrawableBuffers(RenderResourceHandle& outHandle) { outHandle = nextIndexId++; }
 void QueueRenderBackend::uploadDrawableIndices(RenderResourceHandle id, const std::vector<uint16_t>& indices) { indexBuffers[id] = indices; }
-void QueueRenderBackend::uploadSharedVertexBuffer(const ::nicxlive::core::nodes::Vec2Array& v) { sharedVertices = v; }
-void QueueRenderBackend::uploadSharedUvBuffer(const ::nicxlive::core::nodes::Vec2Array& u) { sharedUvs = u; }
-void QueueRenderBackend::uploadSharedDeformBuffer(const ::nicxlive::core::nodes::Vec2Array& d) { sharedDeform = d; }
+void QueueRenderBackend::uploadSharedVertexBuffer(const ::nicxlive::core::nodes::Vec2Array& v) { sharedVertices = v.dup(); }
+void QueueRenderBackend::uploadSharedUvBuffer(const ::nicxlive::core::nodes::Vec2Array& u) { sharedUvs = u.dup(); }
+void QueueRenderBackend::uploadSharedDeformBuffer(const ::nicxlive::core::nodes::Vec2Array& d) { sharedDeform = d.dup(); }
 void QueueRenderBackend::drawDrawableElements(RenderResourceHandle id, std::size_t count) { lastDraw[id] = count; }
 void QueueRenderBackend::setDebugPointSize(float v) { debugPointSize = v; }
 void QueueRenderBackend::setDebugLineWidth(float v) { debugLineWidth = v; }
@@ -43,18 +46,32 @@ void QueueRenderBackend::endMask() {
     queue.push_back(cmd);
 }
 void QueueRenderBackend::beginDynamicComposite(const ::nicxlive::core::DynamicCompositePass& pass) {
-    dynamicStack.push_back(pass);
+    auto passCopy = pass;
+    passCopy.origBuffer = framebufferHandle();
+    int vw = 0;
+    int vh = 0;
+    inGetViewport(vw, vh);
+    passCopy.origViewport[0] = 0;
+    passCopy.origViewport[1] = 0;
+    passCopy.origViewport[2] = vw;
+    passCopy.origViewport[3] = vh;
+
+    dynamicStack.push_back(passCopy);
     QueuedCommand cmd;
     cmd.kind = RenderCommandKind::BeginDynamicComposite;
-    cmd.dynamicPass = pass;
+    cmd.dynamicPass = passCopy;
     queue.push_back(cmd);
 }
 void QueueRenderBackend::endDynamicComposite(const ::nicxlive::core::DynamicCompositePass& pass) {
-    lastDynamic = pass;
-    if (!dynamicStack.empty()) dynamicStack.pop_back();
+    auto passCopy = pass;
+    if (!dynamicStack.empty()) {
+        passCopy = dynamicStack.back();
+        dynamicStack.pop_back();
+    }
+    lastDynamic = passCopy;
     QueuedCommand cmd;
     cmd.kind = RenderCommandKind::EndDynamicComposite;
-    cmd.dynamicPass = pass;
+    cmd.dynamicPass = passCopy;
     queue.push_back(cmd);
 }
 void QueueRenderBackend::destroyDynamicComposite(const std::shared_ptr<::nicxlive::core::DynamicCompositeSurface>&) {}
@@ -64,6 +81,27 @@ void QueueRenderBackend::drawPartPacket(const nodes::PartDrawPacket& packet) {
     cmd.partPacket = packet;
     queue.push_back(std::move(cmd));
 }
+void QueueRenderBackend::resizeViewportTargets(int, int) {}
+void QueueRenderBackend::dumpViewport(std::vector<uint8_t>& dumpTo, int width, int height) {
+    const auto required = static_cast<std::size_t>(std::max(0, width)) * static_cast<std::size_t>(std::max(0, height)) * 4;
+    if (dumpTo.size() < required) return;
+    std::fill_n(dumpTo.begin(), static_cast<std::ptrdiff_t>(required), static_cast<uint8_t>(0));
+}
+RenderResourceHandle QueueRenderBackend::renderImageHandle() {
+    return static_cast<RenderResourceHandle>(renderTargetHandle);
+}
+RenderResourceHandle QueueRenderBackend::framebufferHandle() {
+    return static_cast<RenderResourceHandle>(renderTargetHandle);
+}
+RenderResourceHandle QueueRenderBackend::mainAlbedoHandle() {
+    return static_cast<RenderResourceHandle>(renderTargetHandle);
+}
+RenderResourceHandle QueueRenderBackend::mainEmissiveHandle() { return 0; }
+RenderResourceHandle QueueRenderBackend::mainBumpHandle() { return 0; }
+RenderResourceHandle QueueRenderBackend::blendFramebufferHandle() { return 0; }
+RenderResourceHandle QueueRenderBackend::blendAlbedoHandle() { return 0; }
+RenderResourceHandle QueueRenderBackend::blendEmissiveHandle() { return 0; }
+RenderResourceHandle QueueRenderBackend::blendBumpHandle() { return 0; }
 void QueueRenderBackend::drawTextureAtPart(const Texture&, const std::shared_ptr<nodes::Part>&) {}
 void QueueRenderBackend::drawTextureAtPosition(const Texture&, const nodes::Vec2&, float, const nodes::Vec3&, const nodes::Vec3&) {}
 void QueueRenderBackend::drawTextureAtRect(const Texture&, const Rect&, const Rect&, float, const nodes::Vec3&, const nodes::Vec3&, void*, void*) {}
@@ -158,68 +196,6 @@ const TextureHandle* QueueRenderBackend::getTexture(uint32_t id) const {
     auto it = textures.find(id);
     if (it == textures.end()) return nullptr;
     return &it->second;
-}
-
-void QueueRenderBackend::playback(RenderBackend* backend) const {
-    if (!backend) return;
-
-    // Upload cached shared buffers/state before commands (D queue backend uploads before playback)
-    if (!sharedVertices.empty()) backend->uploadSharedVertexBuffer(sharedVertices);
-    if (!sharedUvs.empty()) backend->uploadSharedUvBuffer(sharedUvs);
-    if (!sharedDeform.empty()) backend->uploadSharedDeformBuffer(sharedDeform);
-    if (differenceAggregationEnabled) {
-        backend->setDifferenceAggregationEnabled(true);
-        backend->setDifferenceAggregationRegion(differenceRegion);
-    } else {
-        backend->setDifferenceAggregationEnabled(false);
-    }
-
-    // Replay texture/resource commands before draw commands
-    for (const auto& rc : resourceQueue) {
-        switch (rc.kind) {
-        case TextureCommandKind::Create:
-            backend->createTexture(rc.data, rc.width, rc.height, rc.inChannels, rc.stencil);
-            break;
-        case TextureCommandKind::Update:
-            backend->updateTexture(rc.id, rc.data, rc.width, rc.height, rc.inChannels);
-            break;
-        case TextureCommandKind::Params:
-            backend->setTextureParams(rc.id, rc.filtering, rc.wrapping, rc.anisotropy);
-            break;
-        case TextureCommandKind::Dispose:
-            backend->disposeTexture(rc.id);
-            break;
-        }
-    }
-
-    for (const auto& cmd : queue) {
-        switch (cmd.kind) {
-        case RenderCommandKind::DrawPart:
-            backend->drawPartPacket(cmd.partPacket);
-            break;
-        case RenderCommandKind::BeginDynamicComposite:
-            backend->beginDynamicComposite(cmd.dynamicPass);
-            break;
-        case RenderCommandKind::EndDynamicComposite:
-            backend->endDynamicComposite(cmd.dynamicPass);
-            break;
-        // RenderPassKind::BeginMaskContent/EndMask are already covered by commands; mask apply is replayed below.
-        case RenderCommandKind::BeginMask:
-            backend->beginMask(cmd.usesStencil);
-            break;
-        case RenderCommandKind::ApplyMask:
-            backend->applyMask(cmd.maskApplyPacket);
-            break;
-        case RenderCommandKind::BeginMaskContent:
-            backend->beginMaskContent();
-            break;
-        case RenderCommandKind::EndMask:
-            backend->endMask();
-            break;
-        default:
-            break;
-        }
-    }
 }
 
 } // namespace nicxlive::core::render

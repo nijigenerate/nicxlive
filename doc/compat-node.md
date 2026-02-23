@@ -1,7 +1,10 @@
-# Node 実装互換性チェック (D ↔ C++)
+﻿# Node 実装互換性チェック (D ↔ C++)
+
+判定基準: D実装を正とし、Dに存在してC++にない項目は `✗（未実装）`、Dに存在せずC++のみにある項目は `✗（削除候補）` とする。
 
 | メソッド | D 実装 | C++ 現状 | 互換性評価 |
 | --- | --- | --- | --- |
+| `FilterHook` 同一性 | `(stage, func)` 単位で管理 | `stage + tag` で一意管理（関数同値判定不能なC++事情に対応） | ◯ |
 | `serializeSelfImpl` | あり（flags対応） | transform/offset/子/型マップ対応 | ◯ |
 | `serializeSelf` | あり | 同等 | ◯ |
 | `serializePartial` | あり | 同等 | ◯ |
@@ -41,9 +44,11 @@
 | `getOneTimeTransform` | あり | 保持のみ | ◯ |
 | `setValue` | lockToRoot/pin連動 | 値更新・isFinite補正・transformChanged | ◯ |
 | `scaleValue` | 軸別スケール対応 | 軸別スケール対応 | ◯ |
-| `RenderScopeHint/Projectable` | あり | Projectable動的/再利用判定 | ◯ |
+| RenderScopeHint | あり | 同等 | ◯ |
+| Projectable 判定 | あり | 動的/再利用判定を実装 | ◯ |
 
 ### 補足
 - ノードファクトリ／型登録 (`inRegisterNodeType`/`inHasNodeType`/`inInstantiateNode`) をC++側に実装済み。未知型はスキップし、Tmpノードも登録。
 - UUID管理 (`inCreateUUID`/`inUnloadUUID`/`inClearUUIDs`) を実装済み。
 - 残る差分はデバッグ描画バックエンドが未接続な点と、D側にある詳細コメント/DBG呼び出しによる行数増のみ。実装機能としては概ねパリティ達成。
+

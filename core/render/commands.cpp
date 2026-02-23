@@ -24,7 +24,11 @@ PartDrawPacket makePartDrawPacket(const std::shared_ptr<Part>& part, bool isMask
     PartDrawPacket packet{};
     if (part) {
         packet.isMask = isMask;
-        part->fillDrawPacket(*part, packet, isMask);
+        if (auto composite = std::dynamic_pointer_cast<Composite>(part)) {
+            composite->fillDrawPacket(*composite, packet, isMask);
+        } else {
+            part->fillDrawPacket(*part, packet, isMask);
+        }
     }
     return packet;
 }

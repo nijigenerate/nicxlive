@@ -12,6 +12,8 @@ using RenderResourceHandle = uint32_t;
 
 struct PartDrawPacket {
     Mat4 modelMatrix{Mat4::identity()};
+    Mat4 renderMatrix{Mat4::identity()};
+    float renderRotation{0.0f};
     Mat4 puppetMatrix{Mat4::identity()};
     bool renderable{false};
     bool isMask{false};

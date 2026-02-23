@@ -52,6 +52,8 @@ public:
     Vec3 prevTranslation{};
     Vec3 prevRotation{};
     Vec2 prevScale{};
+    bool hasCachedAncestorTransform{false};
+    std::size_t lastAncestorTransformCheckFrame{static_cast<std::size_t>(-1)};
     bool deferredChanged{false};
     bool ancestorChangeQueued{false};
     std::size_t pendingAncestorChangeFrame{static_cast<std::size_t>(-1)};
@@ -65,8 +67,11 @@ public:
 
     // Core behaviour approximations
     virtual Transform fullTransform() const;
+    Transform transform() override;
+    Transform transform() const override;
     virtual Mat4 fullTransformMatrix() const;
     virtual Vec4 boundsFromMatrix(const std::shared_ptr<Part>& child, const Mat4& matrix) const;
+    virtual bool detectAncestorTransformChange(std::size_t frameId);
     virtual Vec4 getChildrenBounds(bool forceUpdate = true);
     virtual Vec4 mergeBounds(const std::vector<Vec4>& bounds, const Vec4& origin = Vec4{});
     virtual Vec2 deformationTranslationOffset() const;
@@ -88,9 +93,11 @@ public:
     void runRenderBeginTask(core::RenderContext& ctx) override;
     void runRenderTask(core::RenderContext& ctx) override;
     void runRenderEndTask(core::RenderContext& ctx) override;
+    void runDynamicTask(core::RenderContext& ctx) override;
     void runBeginTask(core::RenderContext& ctx) override;
     void runPostTaskImpl(std::size_t priority, core::RenderContext& ctx) override;
     void notifyChange(const std::shared_ptr<Node>& target, NotifyReason reason = NotifyReason::AttributeChanged) override;
+    void rebuffer(const MeshData& data) override;
     bool setupChild(const std::shared_ptr<Node>& child) override;
     bool releaseChild(const std::shared_ptr<Node>& child) override;
     void setupSelf() override;

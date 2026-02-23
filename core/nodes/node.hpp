@@ -86,6 +86,7 @@ class Node : public std::enable_shared_from_this<Node> {
 public:
     struct FilterHook {
         int stage{0};
+        std::uintptr_t tag{0};
         using Func = std::function<std::tuple<std::vector<Vec2>, std::optional<Mat4>, bool>(
             std::shared_ptr<Node>, const std::vector<Vec2>&, const std::vector<Vec2>&, const Mat4*)>;
         Func func{};
@@ -154,11 +155,11 @@ public:
     void requireRenderTask();
     void requireRenderEndTask();
 
-    void preProcess();
-    void postProcess(int id = 0);
+    virtual void preProcess();
+    virtual void postProcess(int id = 0);
 
-    Transform transform();
-    Transform transform() const;
+    virtual Transform transform();
+    virtual Transform transform() const;
     Transform transformLocal();
     Transform transformLocal() const;
     Transform transformNoLock();

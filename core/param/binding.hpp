@@ -26,7 +26,7 @@ struct Vec2u {
 };
 
 struct BindTarget {
-    std::weak_ptr<nodes::Node> node{};
+    std::weak_ptr<nodes::Node> target{};
     std::string name{};
     uint32_t uuid{0};
 };

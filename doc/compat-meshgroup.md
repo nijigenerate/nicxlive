@@ -1,4 +1,6 @@
-# MeshGroup 実装互換性チェック (D ↔ C++)
+﻿# MeshGroup 実装互換性チェック (D ↔ C++)
+
+判定基準: D実装を正とし、Dに存在してC++にない項目は `✗（未実装）`、Dに存在せずC++のみにある項目は `✗（削除候補）` とする。
 
 | 項目 | D 実装 | C++ 現状 | 互換性評価 |
 | --- | --- | --- | --- |
@@ -28,6 +30,7 @@
 | `setupChild` | super＋子孫へ filter 登録 | 同等 | ◯ |
 | `releaseChildNoRecurse` | pre/post から filter を除去 | 自身のフィルタのみ除去 | ◯ |
 | `releaseChild` | 子孫から filter を解除 | 子孫処理あり | ◯ |
+| filter hook 同一性管理 | `(stage, func)` 単位で登録/解除 | `stage + tag` 単位で登録/解除を一致化 | ◯ |
 | `captureTarget` | children_ref に追加し setupChildNoRecurse | add+フィルタ設定 | ◯ |
 | `releaseTarget` | フィルタ解除し children_ref から除去 | フィルタ解除＋削除 | ◯ |
 | `applyDeformToChildren` | translateChildren/dynamic に応じ deform 伝達→メッシュ破棄 | パラメータの deform binding 反映後 filterChildren→meshクリア | ◯ |
@@ -40,3 +43,4 @@
 | `build` | precalc→子setup→super | precalc＋子setup＋Drawable build | ◯ |
 | `coverOthers` | true | 同等 | ◯ |
 | `mustPropagate` | false | 同等 | ◯ |
+

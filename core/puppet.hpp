@@ -49,7 +49,10 @@ struct PuppetMeta {
     bool preservePixels{false};
     uint32_t thumbnailId{std::numeric_limits<uint32_t>::max()};
 };
-struct PuppetPhysics {};
+struct PuppetPhysics {
+    float pixelsPerMeter{1000.0f};
+    float gravity{9.8f};
+};
 
 class Puppet : public std::enable_shared_from_this<Puppet> {
 public:
@@ -93,9 +96,14 @@ public:
     // rendering
     void draw();
     void drawImmediateFallback();
+    void applyDeformToChildren();
     void rescanNodes();
     void updateTextureState();
     RenderCommandEmitter* commandEmitter();
+    void setRenderBackend(const std::shared_ptr<::nicxlive::core::RenderBackend>& backend);
+    bool isRenderGraphEmpty() const;
+    std::size_t rootPartCount() const;
+    ::nicxlive::core::serde::SerdeException deserializeFromFghj(const ::nicxlive::core::serde::Fghj& data);
 
     // textures
     uint32_t addTextureToSlot(const std::shared_ptr<::nicxlive::core::Texture>& texture);
@@ -143,5 +151,7 @@ private:
     void drawImmediateFallbackInternal() { drawImmediateFallback(); }
     std::shared_ptr<Parameter> findParameterInternal(uint32_t uuid) { return findParameter(uuid); }
 };
+
+std::shared_ptr<nodes::Node> resolvePuppetNodeById(const std::shared_ptr<Puppet>& puppet, uint32_t uuid);
 
 } // namespace nicxlive::core

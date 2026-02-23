@@ -1,6 +1,7 @@
 #include "phys.hpp"
 #include "../../path_deformer.hpp"
 #include "../../../common/utils.hpp"
+#include "../../../timing.hpp"
 
 #include <cmath>
 #include <sstream>
@@ -60,7 +61,7 @@ float clampAngle(float a) {
 }
 
 float deltaTime() {
-    return 0.016f; // stub; replace with real frame delta if available
+    return static_cast<float>(::nicxlive::core::deltaTime());
 }
 
 float screenToPhysicsY(float y) { return -y; }
@@ -203,8 +204,7 @@ void ConnectedPendulumDriver::setup(PathDeformer* deformer) {
     angularVelocities_.assign(angles_.size(), 0.0f);
     physDeformation_.resize(deformer_->vertices.size());
     for (std::size_t i = 0; i < physDeformation_.size(); ++i) {
-        physDeformation_.x[i] = 0;
-        physDeformation_.y[i] = 0;
+        physDeformation_.set(i, Vec2{0.0f, 0.0f});
     }
     base_ = Vec2{deformer_->controlPoints.empty() ? 0.0f : deformer_->controlPoints[0].x,
                  deformer_->controlPoints.empty() ? 0.0f : screenToPhysicsY(deformer_->controlPoints[0].y)};
@@ -229,23 +229,21 @@ void ConnectedPendulumDriver::update(PathDeformer* deformer, core::common::Vec2A
         Vec2 physPos = newPositions[i];
         Vec2 screenPos{physPos.x, physicsToScreenY(physPos.y)};
         if (!guardFinite(deformer, "pendulum:newPosition", screenPos, i)) {
-            physDeformation_.x[i] = physDeformation_.y[i] = 0;
+            physDeformation_.set(i, Vec2{0.0f, 0.0f});
             continue;
         }
         Vec2 delta{screenPos.x - deformer->controlPoints[i].x, screenPos.y - deformer->controlPoints[i].y};
         if (!guardFinite(deformer, "pendulum:newDelta", delta, i)) {
-            physDeformation_.x[i] = physDeformation_.y[i] = 0;
+            physDeformation_.set(i, Vec2{0.0f, 0.0f});
             continue;
         }
-        physDeformation_.x[i] = delta.x;
-        physDeformation_.y[i] = delta.y;
+        physDeformation_.set(i, delta);
     }
     outOffsets.resize(deformer->vertices.size());
     for (std::size_t i = 0; i < deformer->vertices.size(); ++i) {
-        float dx = (i < physDeformation_.x.size()) ? physDeformation_.x[i] : 0.0f;
-        float dy = (i < physDeformation_.y.size()) ? physDeformation_.y[i] : 0.0f;
-        outOffsets.x[i] = dx;
-        outOffsets.y[i] = dy;
+        float dx = (i < physDeformation_.size()) ? physDeformation_.xAt(i) : 0.0f;
+        float dy = (i < physDeformation_.size()) ? physDeformation_.yAt(i) : 0.0f;
+        outOffsets.set(i, Vec2{dx, dy});
     }
 }
 
@@ -309,8 +307,7 @@ void ConnectedSpringPendulumDriver::updateDefaultShape(PathDeformer* deformer) {
             initialPositions_.clear();
             return;
         }
-        initialPositions_.x[i] = pt.x;
-        initialPositions_.y[i] = pt.y;
+        initialPositions_.set(i, pt);
     }
 }
 
@@ -322,18 +319,18 @@ void ConnectedSpringPendulumDriver::setup(PathDeformer* deformer) {
     positions_ = initialPositions_;
     velocities_.resize(positions_.size());
     for (std::size_t i = 0; i < velocities_.size(); ++i) {
-        velocities_.x[i] = velocities_.y[i] = 0.0f;
+        velocities_.set(i, Vec2{0.0f, 0.0f});
     }
     physDeformation_.resize(deformer_->vertices.size());
     for (std::size_t i = 0; i < physDeformation_.size(); ++i) {
-        physDeformation_.x[i] = physDeformation_.y[i] = 0.0f;
+        physDeformation_.set(i, Vec2{0.0f, 0.0f});
     }
     lengths_.resize(positions_.size() > 0 ? positions_.size() - 1 : 0);
     const float lengthEpsilon = 1e-6f;
     bool degenerate = false;
     for (std::size_t i = 0; i < lengths_.size(); ++i) {
-        Vec2 a{positions_.x[i], positions_.y[i]};
-        Vec2 b{positions_.x[i + 1], positions_.y[i + 1]};
+        Vec2 a{positions_.xAt(i), positions_.yAt(i)};
+        Vec2 b{positions_.xAt(i + 1), positions_.yAt(i + 1)};
         if (!guardFinite(deformer_, "springPendulum:position", a, i) ||
             !guardFinite(deformer_, "springPendulum:position", b, i + 1)) {
             degenerate = true;
@@ -364,26 +361,24 @@ void ConnectedSpringPendulumDriver::update(PathDeformer* deformer, core::common:
     updateSpringPendulum(positions_, velocities_, initialPositions_, lengths_, damping_, springConstant_, restorationConstant_, h);
 
     for (std::size_t i = 0; i < positions_.size() && i < deformer->controlPoints.size(); ++i) {
-        Vec2 pos{positions_.x[i], positions_.y[i]};
+        Vec2 pos{positions_.xAt(i), positions_.yAt(i)};
         Vec2 screenPos{pos.x, physicsToScreenY(pos.y)};
         if (!guardFinite(deformer, "springPendulum:position", screenPos, i)) {
-            physDeformation_.x[i] = physDeformation_.y[i] = 0;
+            physDeformation_.set(i, Vec2{0.0f, 0.0f});
             continue;
         }
         Vec2 delta{screenPos.x - deformer->controlPoints[i].x, screenPos.y - deformer->controlPoints[i].y};
         if (!guardFinite(deformer, "springPendulum:delta", delta, i)) {
-            physDeformation_.x[i] = physDeformation_.y[i] = 0;
+            physDeformation_.set(i, Vec2{0.0f, 0.0f});
             continue;
         }
-        physDeformation_.x[i] = delta.x;
-        physDeformation_.y[i] = delta.y;
+        physDeformation_.set(i, delta);
     }
     outOffsets.resize(deformer->vertices.size());
     for (std::size_t i = 0; i < deformer->vertices.size(); ++i) {
-        float dx = (i < physDeformation_.x.size()) ? physDeformation_.x[i] : 0.0f;
-        float dy = (i < physDeformation_.y.size()) ? physDeformation_.y[i] : 0.0f;
-        outOffsets.x[i] = dx;
-        outOffsets.y[i] = dy;
+        float dx = (i < physDeformation_.size()) ? physDeformation_.xAt(i) : 0.0f;
+        float dy = (i < physDeformation_.size()) ? physDeformation_.yAt(i) : 0.0f;
+        outOffsets.set(i, Vec2{dx, dy});
     }
 }
 
@@ -399,9 +394,9 @@ void ConnectedSpringPendulumDriver::updateSpringPendulum(common::Vec2Array& posi
     for (std::size_t i = 1; i < positions.size(); ++i) {
         Vec2 springForce{0, 0};
         if (i > 0) {
-            Vec2 prev{positions.x[i - 1] + ((i == 1) ? externalForce_.x * timeStep : 0.0f),
-                      positions.y[i - 1] + ((i == 1) ? externalForce_.y * timeStep : 0.0f)};
-            Vec2 diff{positions.x[i] - prev.x, positions.y[i] - prev.y};
+            Vec2 prev{positions.xAt(i - 1) + ((i == 1) ? externalForce_.x * timeStep : 0.0f),
+                      positions.yAt(i - 1) + ((i == 1) ? externalForce_.y * timeStep : 0.0f)};
+            Vec2 diff{positions.xAt(i) - prev.x, positions.yAt(i) - prev.y};
             if (!guardFinite(deformer_, "springPendulum:diffPrev", diff, i)) return;
             float diffLen = std::sqrt(diff.x * diff.x + diff.y * diff.y);
             if (!std::isfinite(diffLen) || diffLen <= lengthEpsilon) {
@@ -412,9 +407,9 @@ void ConnectedSpringPendulumDriver::updateSpringPendulum(common::Vec2Array& posi
             springForce.y += -springConstant * (diff.y * (diffLen - lengths[i - 1]) / diffLen);
         }
         if (i < positions.size() - 1) {
-            Vec2 next{positions.x[i + 1], positions.y[i + 1]};
-            Vec2 cur{positions.x[i] + ((i == 0) ? externalForce_.x * timeStep : 0.0f),
-                     positions.y[i] + ((i == 0) ? externalForce_.y * timeStep : 0.0f)};
+            Vec2 next{positions.xAt(i + 1), positions.yAt(i + 1)};
+            Vec2 cur{positions.xAt(i) + ((i == 0) ? externalForce_.x * timeStep : 0.0f),
+                     positions.yAt(i) + ((i == 0) ? externalForce_.y * timeStep : 0.0f)};
             Vec2 diff{cur.x - next.x, cur.y - next.y};
             if (!guardFinite(deformer_, "springPendulum:diffNext", diff, i)) return;
             float diffLen = std::sqrt(diff.x * diff.x + diff.y * diff.y);
@@ -426,18 +421,18 @@ void ConnectedSpringPendulumDriver::updateSpringPendulum(common::Vec2Array& posi
             springForce.y += -springConstant * (diff.y * (diffLen - lengths[i]) / diffLen);
         }
 
-        Vec2 restorationForce{-restorationConstant * (positions.x[i] - initialPositions.x[i]),
-                              -restorationConstant * (positions.y[i] - initialPositions.y[i])};
-        Vec2 dampingForce{-damping * velocities.x[i], -damping * velocities.y[i]};
+        Vec2 restorationForce{-restorationConstant * (positions.xAt(i) - initialPositions.xAt(i)),
+                              -restorationConstant * (positions.yAt(i) - initialPositions.yAt(i))};
+        Vec2 dampingForce{-damping * velocities.xAt(i), -damping * velocities.yAt(i)};
         Vec2 acceleration{(springForce.x + dampingForce.x + restorationForce.x + gravityVec_.x),
                           (springForce.y + dampingForce.y + restorationForce.y + gravityVec_.y)};
         if (!guardFinite(deformer_, "springPendulum:acceleration", acceleration, i)) return;
-        velocities.x[i] += acceleration.x * timeStep;
-        velocities.y[i] += acceleration.y * timeStep;
-        if (!guardFinite(deformer_, "springPendulum:velocity", Vec2{velocities.x[i], velocities.y[i]}, i)) return;
-        positions.x[i] += velocities.x[i] * timeStep;
-        positions.y[i] += velocities.y[i] * timeStep;
-        if (!guardFinite(deformer_, "springPendulum:positionUpdate", Vec2{positions.x[i], positions.y[i]}, i)) return;
+        velocities.xAt(i) += acceleration.x * timeStep;
+        velocities.yAt(i) += acceleration.y * timeStep;
+        if (!guardFinite(deformer_, "springPendulum:velocity", Vec2{velocities.xAt(i), velocities.yAt(i)}, i)) return;
+        positions.xAt(i) += velocities.xAt(i) * timeStep;
+        positions.yAt(i) += velocities.yAt(i) * timeStep;
+        if (!guardFinite(deformer_, "springPendulum:positionUpdate", Vec2{positions.xAt(i), positions.yAt(i)}, i)) return;
     }
 }
 

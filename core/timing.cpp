@@ -1,4 +1,5 @@
 #include "timing.hpp"
+#include "runtime_state.hpp"
 
 #include <chrono>
 #include <mutex>
@@ -21,6 +22,7 @@ double defaultTimeFunc() {
 
 void inInit(std::function<double()> timeFunc) {
     std::lock_guard<std::mutex> lock(gMutex);
+    initRenderer();
     gTimeFunc = timeFunc ? timeFunc : defaultTimeFunc;
     gCurrentTime = 0.0;
     gLastTime = 0.0;

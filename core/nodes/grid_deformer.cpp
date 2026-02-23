@@ -9,6 +9,10 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
+#include <cstring>
+#include <cstdio>
+#include <unordered_map>
 
 namespace nicxlive::core::nodes {
 
@@ -21,11 +25,23 @@ constexpr float kAxisTolerance = 1e-4f;
 constexpr float kBoundaryTolerance = 1e-4f;
 constexpr int kGridFilterStage = 1;
 
+bool traceDeformerSummaryEnabled() {
+    static int enabled = -1;
+    if (enabled >= 0) return enabled != 0;
+    const char* v = std::getenv("NJCX_TRACE_DEFORMER_SUMMARY");
+    if (!v) {
+        enabled = 0;
+        return false;
+    }
+    enabled = (std::strcmp(v, "1") == 0 || std::strcmp(v, "true") == 0 || std::strcmp(v, "TRUE") == 0) ? 1 : 0;
+    return enabled != 0;
+}
+
 std::vector<Vec2> toVec2List(const Vec2Array& arr) {
     std::vector<Vec2> out;
     out.reserve(arr.size());
     for (std::size_t i = 0; i < arr.size(); ++i) {
-        out.push_back(Vec2{arr.x[i], arr.y[i]});
+        out.push_back(Vec2{arr.xAt(i), arr.yAt(i)});
     }
     return out;
 }
@@ -34,8 +50,8 @@ Vec2Array toVec2Array(const std::vector<Vec2>& in) {
     Vec2Array out;
     out.resize(in.size());
     for (std::size_t i = 0; i < in.size(); ++i) {
-        out.x[i] = in[i].x;
-        out.y[i] = in[i].y;
+        out.xAt(i) = in[i].x;
+        out.yAt(i) = in[i].y;
     }
     return out;
 }
@@ -68,10 +84,9 @@ void GridDeformer::setGridAxes(const std::vector<float>& xs, const std::vector<f
     for (std::size_t y = 0; y < axisY.size(); ++y) {
         for (std::size_t x = 0; x < axisX.size(); ++x) {
             auto idx = y * axisX.size() + x;
-            vertices.x[idx] = axisX[x];
-            vertices.y[idx] = axisY[y];
-            deformation.x[idx] = 0.0f;
-            deformation.y[idx] = 0.0f;
+            vertices.xAt(idx) = axisX[x];
+            vertices.yAt(idx) = axisY[y];
+            deformation.set(idx, Vec2{0.0f, 0.0f});
         }
     }
 }
@@ -176,18 +191,18 @@ void GridDeformer::sampleGridPoints(Vec2Array& dst, const std::vector<GridCellCa
 
         for (std::size_t lane = 0; lane < kSimdWidth; ++lane) {
             if (!valid[lane]) {
-                dst.x[i + lane] = 0;
-                dst.y[i + lane] = 0;
+                dst.xAt(i + lane) = 0;
+                dst.yAt(i + lane) = 0;
                 continue;
             }
-            dst.x[i + lane] = p00x[lane] * w00[lane] + p10x[lane] * w10[lane] + p01x[lane] * w01[lane] + p11x[lane] * w11[lane];
-            dst.y[i + lane] = p00y[lane] * w00[lane] + p10y[lane] * w10[lane] + p01y[lane] * w01[lane] + p11y[lane] * w11[lane];
+            dst.xAt(i + lane) = p00x[lane] * w00[lane] + p10x[lane] * w10[lane] + p01x[lane] * w01[lane] + p11x[lane] * w11[lane];
+            dst.yAt(i + lane) = p00y[lane] * w00[lane] + p10y[lane] * w10[lane] + p01y[lane] * w01[lane] + p11y[lane] * w11[lane];
         }
     }
 
     for (; i < len; ++i) {
         const auto& c = caches[i];
-        if (!c.valid) { dst.x[i] = 0; dst.y[i] = 0; continue; }
+        if (!c.valid) { dst.xAt(i) = 0; dst.yAt(i) = 0; continue; }
         auto idx00 = c.cellY * cols + c.cellX;
         auto idx10 = c.cellY * cols + (c.cellX + 1);
         auto idx01 = (c.cellY + 1) * cols + c.cellX;
@@ -209,8 +224,8 @@ void GridDeformer::sampleGridPoints(Vec2Array& dst, const std::vector<GridCellCa
         float w10 = u * wv0;
         float w01 = wu0 * v;
         float w11 = u * v;
-        dst.x[i] = p00xVal * w00 + p10xVal * w10 + p01xVal * w01 + p11xVal * w11;
-        dst.y[i] = p00yVal * w00 + p10yVal * w10 + p01yVal * w01 + p11yVal * w11;
+        dst.xAt(i) = p00xVal * w00 + p10xVal * w10 + p01xVal * w01 + p11xVal * w11;
+        dst.yAt(i) = p00yVal * w00 + p10yVal * w10 + p01yVal * w01 + p11yVal * w11;
     }
 }
 
@@ -218,6 +233,8 @@ DeformResult GridDeformer::deformChildren(const std::shared_ptr<Node>& target,
                                           const std::vector<Vec2>& origVertices,
                                           const std::vector<Vec2>& origDeformation,
                                           const Mat4* origTransform) {
+    static std::unordered_map<uint32_t, uint64_t> sChangedCount;
+    static uint64_t sSummaryTick = 0;
     DeformResult res;
     res.vertices = origDeformation.empty() ? origVertices : origDeformation;
     res.transform = std::nullopt;
@@ -245,7 +262,7 @@ DeformResult GridDeformer::deformChildren(const std::shared_ptr<Node>& target,
     bool anyChanged = false;
     bool invalidSamples = false;
     for (std::size_t i = 0; i < samplePoints.size(); ++i) {
-        caches[i] = computeCache(samplePoints.x[i], samplePoints.y[i]);
+        caches[i] = computeCache(samplePoints.xAt(i), samplePoints.yAt(i));
         if (!caches[i].valid) {
             invalidSamples = true;
             break;
@@ -259,10 +276,10 @@ DeformResult GridDeformer::deformChildren(const std::shared_ptr<Node>& target,
     sampleGridPoints(targetSample, caches, true);
     Vec2Array offsetLocal = targetSample - originalSample;
     for (std::size_t i = 0; i < offsetLocal.size(); ++i) {
-        if (!caches[i].valid || !std::isfinite(offsetLocal.x[i]) || !std::isfinite(offsetLocal.y[i])) {
-            offsetLocal.x[i] = 0;
-            offsetLocal.y[i] = 0;
-        } else if (offsetLocal.x[i] != 0 || offsetLocal.y[i] != 0) {
+        if (!caches[i].valid || !std::isfinite(offsetLocal.xAt(i)) || !std::isfinite(offsetLocal.yAt(i))) {
+            offsetLocal.xAt(i) = 0;
+            offsetLocal.yAt(i) = 0;
+        } else if (offsetLocal.xAt(i) != 0 || offsetLocal.yAt(i) != 0) {
             anyChanged = true;
         }
     }
@@ -273,14 +290,28 @@ DeformResult GridDeformer::deformChildren(const std::shared_ptr<Node>& target,
     Vec2Array deformOut;
     deformOut.resize(std::max<std::size_t>(origDeformation.size(), offsetLocal.size()));
     for (std::size_t i = 0; i < origDeformation.size() && i < deformOut.size(); ++i) {
-        deformOut.x[i] = origDeformation[i].x;
-        deformOut.y[i] = origDeformation[i].y;
+        deformOut.xAt(i) = origDeformation[i].x;
+        deformOut.yAt(i) = origDeformation[i].y;
     }
     if (deformOut.size() < offsetLocal.size()) deformOut.resize(offsetLocal.size());
     transformAdd(deformOut, offsetLocal, inv, offsetLocal.size());
 
     res.vertices = toVec2List(deformOut);
     res.changed = true;
+    if (traceDeformerSummaryEnabled() && target && res.changed) {
+        sChangedCount[target->uuid] += 1;
+        ++sSummaryTick;
+        if ((sSummaryTick % 240) == 0) {
+            std::fprintf(stderr, "[nicxlive][GridDeformer][Summary] changedTargets=%zu\n", sChangedCount.size());
+            int printed = 0;
+            for (const auto& kv : sChangedCount) {
+                std::fprintf(stderr, "[nicxlive][GridDeformer][Summary] targetUuid=%u hits=%llu\n",
+                             kv.first,
+                             static_cast<unsigned long long>(kv.second));
+                if (++printed >= 8) break;
+            }
+        }
+    }
     return res;
 }
 
@@ -349,14 +380,16 @@ void GridDeformer::setupChildNoRecurse(const std::shared_ptr<Node>& node, bool p
     bool isDeformable = static_cast<bool>(deformable);
     Node::FilterHook hook;
     hook.stage = kGridFilterStage;
+    hook.tag = reinterpret_cast<std::uintptr_t>(this);
     hook.func = [this](auto t, auto v, auto d, auto mat) {
         auto res = deformChildren(t, v, d, mat);
         return std::make_tuple(res.vertices, std::optional<Mat4>{}, res.changed);
     };
     auto& pre = node->preProcessFilters;
     auto& post = node->postProcessFilters;
-    pre.erase(std::remove_if(pre.begin(), pre.end(), [](const auto& h) { return h.stage == kGridFilterStage; }), pre.end());
-    post.erase(std::remove_if(post.begin(), post.end(), [](const auto& h) { return h.stage == kGridFilterStage; }), post.end());
+    const auto tag = reinterpret_cast<std::uintptr_t>(this);
+    pre.erase(std::remove_if(pre.begin(), pre.end(), [&](const auto& h) { return h.stage == kGridFilterStage && h.tag == tag; }), pre.end());
+    post.erase(std::remove_if(post.begin(), post.end(), [&](const auto& h) { return h.stage == kGridFilterStage && h.tag == tag; }), post.end());
     if (isDeformable) {
         if (dynamic) {
             if (prepend) post.insert(post.begin(), hook); else post.push_back(hook);
@@ -374,8 +407,9 @@ void GridDeformer::releaseChildNoRecurse(const std::shared_ptr<Node>& node) {
     if (!node) return;
     auto& pre = node->preProcessFilters;
     auto& post = node->postProcessFilters;
-    pre.erase(std::remove_if(pre.begin(), pre.end(), [](const auto& h) { return h.stage == kGridFilterStage; }), pre.end());
-    post.erase(std::remove_if(post.begin(), post.end(), [](const auto& h) { return h.stage == kGridFilterStage; }), post.end());
+    const auto tag = reinterpret_cast<std::uintptr_t>(this);
+    pre.erase(std::remove_if(pre.begin(), pre.end(), [&](const auto& h) { return h.stage == kGridFilterStage && h.tag == tag; }), pre.end());
+    post.erase(std::remove_if(post.begin(), post.end(), [&](const auto& h) { return h.stage == kGridFilterStage && h.tag == tag; }), post.end());
 }
 
 void GridDeformer::applyDeformToChildren(const std::vector<std::shared_ptr<core::param::Parameter>>& params, bool recursive) {
@@ -387,23 +421,12 @@ void GridDeformer::applyDeformToChildren(const std::vector<std::shared_ptr<core:
                 if (!param) continue;
                 auto binding = std::dynamic_pointer_cast<core::param::DeformationParameterBinding>(param->getBinding(c, "deform"));
                 if (!binding) continue;
-                uint32_t xCount = param->axisPointCount(0);
-                uint32_t yCount = param->axisPointCount(1);
-                if (yCount == 0) yCount = 1;
-                core::param::Vec2u idx{0, 0};
-                bool found = false;
-                for (uint32_t x = 0; x < std::max<uint32_t>(1, xCount); ++x) {
-                    for (uint32_t y = 0; y < std::max<uint32_t>(1, yCount); ++y) {
-                        core::param::Vec2u id{x, y};
-                        if (binding->isSetAt(id)) { idx = id; found = true; break; }
-                    }
-                    if (found) break;
-                }
-                if (found) {
-                    auto slot = binding->valueAt(idx);
-                    if (slot.vertexOffsets.size() == deformable->deformation.size()) {
-                        deformable->deformation = slot.vertexOffsets;
-                    }
+                core::param::Vec2u left{};
+                Vec2 sub{};
+                param->findOffset(param->value, left, sub);
+                auto slot = binding->sample(left, sub);
+                if (slot.vertexOffsets.size() == deformable->deformation.size()) {
+                    deformable->deformation = slot.vertexOffsets;
                 }
             }
             auto m = c->transform().toMat4();
@@ -414,16 +437,20 @@ void GridDeformer::applyDeformToChildren(const std::vector<std::shared_ptr<core:
             }
         } else if (translateChildren) {
             // non-deformable: still propagate positional offset if allowed
-            auto m = c->transform().toMat4();
+            auto parentNode = c->parentPtr();
+            Mat4 m = parentNode ? parentNode->transform().toMat4() : Mat4::identity();
             Vec2Array verts;
             verts.resize(1);
-            verts.x[0] = 0.0f; verts.y[0] = 0.0f;
+            verts.xAt(0) = c->localTransform.translation.x;
+            verts.yAt(0) = c->localTransform.translation.y;
             Vec2Array deform;
             deform.resize(1);
+            deform.xAt(0) = c->offsetTransform.translation.x;
+            deform.yAt(0) = c->offsetTransform.translation.y;
             auto res = deformChildren(c, toVec2List(verts), toVec2List(deform), &m);
             if (res.changed && !res.vertices.empty()) {
-                c->offsetTransform.translation.x += res.vertices[0].x;
-                c->offsetTransform.translation.y += res.vertices[0].y;
+                c->offsetTransform.translation.x = res.vertices[0].x;
+                c->offsetTransform.translation.y = res.vertices[0].y;
                 c->transformChanged();
             }
         }
@@ -524,8 +551,8 @@ bool GridDeformer::deriveAxes(const Vec2Array& points, std::vector<float>& xs, s
 
     std::vector<bool> seen(xs.size() * ys.size(), false);
     for (std::size_t i = 0; i < points.size(); ++i) {
-        int xi = axisIndexOfValue(xs, points.x[i]);
-        int yi = axisIndexOfValue(ys, points.y[i]);
+        int xi = axisIndexOfValue(xs, points.xAt(i));
+        int yi = axisIndexOfValue(ys, points.yAt(i));
         if (xi < 0 || yi < 0) return false;
         auto idx = static_cast<std::size_t>(yi) * xs.size() + static_cast<std::size_t>(xi);
         seen[idx] = true;
@@ -536,28 +563,27 @@ bool GridDeformer::deriveAxes(const Vec2Array& points, std::vector<float>& xs, s
 
 bool GridDeformer::fillDeformationFromPositions(const Vec2Array& positions) {
     if (positions.size() != deformation.size()) {
-        std::fill(deformation.x.begin(), deformation.x.end(), 0.0f);
-        std::fill(deformation.y.begin(), deformation.y.end(), 0.0f);
+        deformation.fill(Vec2{0.0f, 0.0f});
         return false;
     }
     std::vector<bool> seen(deformation.size(), false);
     for (std::size_t i = 0; i < positions.size(); ++i) {
-        int xi = axisIndexOfValue(axisX, positions.x[i]);
-        int yi = axisIndexOfValue(axisY, positions.y[i]);
+        int xi = axisIndexOfValue(axisX, positions.xAt(i));
+        int yi = axisIndexOfValue(axisY, positions.yAt(i));
         if (xi < 0 || yi < 0) {
-            std::fill(deformation.x.begin(), deformation.x.end(), 0.0f);
-            std::fill(deformation.y.begin(), deformation.y.end(), 0.0f);
+            deformation.fill(Vec2{0.0f, 0.0f});
             return false;
         }
         auto idx = gridIndex(static_cast<std::size_t>(xi), static_cast<std::size_t>(yi));
-        deformation.x[idx] = positions.x[i] - vertices.x[idx];
-        deformation.y[idx] = positions.y[i] - vertices.y[idx];
+        deformation.set(idx, Vec2{
+            positions.xAt(i) - vertices.xAt(idx),
+            positions.yAt(i) - vertices.yAt(idx),
+        });
         seen[idx] = true;
     }
     for (bool f : seen) {
         if (!f) {
-            std::fill(deformation.x.begin(), deformation.x.end(), 0.0f);
-            std::fill(deformation.y.begin(), deformation.y.end(), 0.0f);
+            deformation.fill(Vec2{0.0f, 0.0f});
             return false;
         }
     }

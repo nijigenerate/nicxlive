@@ -10,9 +10,12 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
+#include <cstring>
 #include <limits>
 #include <iostream>
 #include <sstream>
+#include <unordered_set>
 #include <unordered_map>
 
 namespace nicxlive::core::nodes {
@@ -23,11 +26,23 @@ using nicxlive::core::common::gatherVec2;
 using nicxlive::core::common::scatterAddVec2;
 
 namespace {
-constexpr int kPathFilterStage = 2;
+constexpr int kPathFilterStage = 1;
 constexpr std::size_t kInvalidDisableThreshold = 10;
 constexpr std::size_t kInvalidLogInterval = 10;
 constexpr std::size_t kInvalidLogFrameInterval = 30;
 constexpr std::size_t kInvalidInitialLogAllowance = 3;
+
+bool traceDeformerSummaryEnabled() {
+    static int enabled = -1;
+    if (enabled >= 0) return enabled != 0;
+    const char* v = std::getenv("NJCX_TRACE_DEFORMER_SUMMARY");
+    if (!v) {
+        enabled = 0;
+        return false;
+    }
+    enabled = (std::strcmp(v, "1") == 0 || std::strcmp(v, "true") == 0 || std::strcmp(v, "TRUE") == 0) ? 1 : 0;
+    return enabled != 0;
+}
 
 template <typename... Args>
 void pathLog(const Args&... args) {
@@ -39,7 +54,7 @@ std::vector<Vec2> toVec2List(const Vec2Array& arr) {
     std::vector<Vec2> out;
     out.reserve(arr.size());
     for (std::size_t i = 0; i < arr.size(); ++i) {
-        out.push_back(Vec2{arr.x[i], arr.y[i]});
+        out.push_back(Vec2{arr.xAt(i), arr.yAt(i)});
     }
     return out;
 }
@@ -48,43 +63,43 @@ Vec2Array toVec2Array(const std::vector<Vec2>& in) {
     Vec2Array out;
     out.resize(in.size());
     for (std::size_t i = 0; i < in.size(); ++i) {
-        out.x[i] = in[i].x;
-        out.y[i] = in[i].y;
+        out.xAt(i) = in[i].x;
+        out.yAt(i) = in[i].y;
     }
     return out;
 }
 
 int firstNonFiniteIndex(const Vec2Array& data) {
     for (std::size_t i = 0; i < data.size(); ++i) {
-        if (!std::isfinite(data.x[i]) || !std::isfinite(data.y[i])) return static_cast<int>(i);
+        if (!std::isfinite(data.xAt(i)) || !std::isfinite(data.yAt(i))) return static_cast<int>(i);
     }
     return -1;
 }
 
 void normalizeVec2Array(Vec2Array& data, float epsilon, const Vec2& fallback) {
     for (std::size_t i = 0; i < data.size(); ++i) {
-        float lenSq = data.x[i] * data.x[i] + data.y[i] * data.y[i];
+        float lenSq = data.xAt(i) * data.xAt(i) + data.yAt(i) * data.yAt(i);
         if (lenSq > epsilon) {
             float invLen = 1.0f / std::sqrt(lenSq);
-            data.x[i] *= invLen;
-            data.y[i] *= invLen;
+            data.xAt(i) *= invLen;
+            data.yAt(i) *= invLen;
         } else {
-            data.x[i] = fallback.x;
-            data.y[i] = fallback.y;
+            data.xAt(i) = fallback.x;
+            data.yAt(i) = fallback.y;
         }
     }
 }
 
 void normalizeVec2Array(Vec2Array& data, float epsilon, const Vec2Array& fallback) {
     for (std::size_t i = 0; i < data.size(); ++i) {
-        float lenSq = data.x[i] * data.x[i] + data.y[i] * data.y[i];
+        float lenSq = data.xAt(i) * data.xAt(i) + data.yAt(i) * data.yAt(i);
         if (lenSq > epsilon) {
             float invLen = 1.0f / std::sqrt(lenSq);
-            data.x[i] *= invLen;
-            data.y[i] *= invLen;
+            data.xAt(i) *= invLen;
+            data.yAt(i) *= invLen;
         } else if (i < fallback.size()) {
-            data.x[i] = fallback.x[i];
-            data.y[i] = fallback.y[i];
+            data.xAt(i) = fallback.xAt(i);
+            data.yAt(i) = fallback.yAt(i);
         }
     }
 }
@@ -92,8 +107,8 @@ void normalizeVec2Array(Vec2Array& data, float epsilon, const Vec2Array& fallbac
 void rotateTangentsToNormals(Vec2Array& dst, const Vec2Array& tangents) {
     dst.resize(tangents.size());
     for (std::size_t i = 0; i < tangents.size(); ++i) {
-        dst.x[i] = -tangents.y[i];
-        dst.y[i] = tangents.x[i];
+        dst.xAt(i) = -tangents.yAt(i);
+        dst.yAt(i) = tangents.xAt(i);
     }
 }
 
@@ -107,10 +122,10 @@ void projectVec2OntoAxes(const Vec2Array& points,
     normalDistances.resize(count);
     tangentialDistances.resize(count);
     for (std::size_t i = 0; i < count; ++i) {
-        float dx = points.x[i] - origins.x[i];
-        float dy = points.y[i] - origins.y[i];
-        normalDistances[i] = dx * normals.x[i] + dy * normals.y[i];
-        tangentialDistances[i] = dx * tangents.x[i] + dy * tangents.y[i];
+        float dx = points.xAt(i) - origins.xAt(i);
+        float dy = points.yAt(i) - origins.yAt(i);
+        normalDistances[i] = dx * normals.xAt(i) + dy * normals.yAt(i);
+        tangentialDistances[i] = dx * tangents.xAt(i) + dy * tangents.yAt(i);
     }
 }
 
@@ -124,20 +139,20 @@ void composeVec2FromAxes(Vec2Array& dst,
                                   normalDistances.size(), tangentialDistances.size()});
     dst.resize(count);
     for (std::size_t i = 0; i < count; ++i) {
-        float nx = normals.x[i] * normalDistances[i];
-        float ny = normals.y[i] * normalDistances[i];
-        float tx = tangents.x[i] * tangentialDistances[i];
-        float ty = tangents.y[i] * tangentialDistances[i];
-        dst.x[i] = origins.x[i] + nx + tx;
-        dst.y[i] = origins.y[i] + ny + ty;
+        float nx = normals.xAt(i) * normalDistances[i];
+        float ny = normals.yAt(i) * normalDistances[i];
+        float tx = tangents.xAt(i) * tangentialDistances[i];
+        float ty = tangents.yAt(i) * tangentialDistances[i];
+        dst.xAt(i) = origins.xAt(i) + nx + tx;
+        dst.yAt(i) = origins.yAt(i) + ny + ty;
     }
 }
 
 float computeCurveScale(const Vec2Array& pts) {
     float scale = 0.0f;
     for (std::size_t i = 0; i < pts.size(); ++i) {
-        float x = pts.x[i];
-        float y = pts.y[i];
+        float x = pts.xAt(i);
+        float y = pts.yAt(i);
         if (!std::isfinite(x) || !std::isfinite(y)) continue;
         float mag = std::sqrt(x * x + y * y);
         if (mag > scale) scale = mag;
@@ -150,7 +165,7 @@ std::string summarizePoints(const Vec2Array& pts, std::size_t maxCount = 4) {
     ss << "len=" << pts.size() << " [";
     std::size_t limit = std::min<std::size_t>(maxCount, pts.size());
     for (std::size_t i = 0; i < limit; ++i) {
-        ss << "(" << pts.x[i] << "," << pts.y[i] << ")";
+        ss << "(" << pts.xAt(i) << "," << pts.yAt(i) << ")";
         if (i + 1 < limit) ss << ", ";
     }
     if (pts.size() > maxCount) ss << ", ...";
@@ -171,6 +186,11 @@ PathDeformer::PathDeformer() {
     originalCurve = createCurve(Vec2Array{}, curveType == CurveType::Bezier);
     deformedCurve = createCurve(Vec2Array{}, curveType == CurveType::Bezier);
     prevCurve = createCurve(Vec2Array{}, curveType == CurveType::Bezier);
+}
+
+void PathDeformer::ConnectedDriverAdapter::setup() {
+    if (!impl_ || !owner_) return;
+    impl_->setup(owner_);
 }
 
 void PathDeformer::ConnectedDriverAdapter::update(Vec2Array& offsets, float strength, uint64_t frame) {
@@ -199,7 +219,7 @@ void PathDeformer::ConnectedDriverAdapter::rotate(float a) {
 }
 
 void PathDeformer::ensureDriver() {
-    if (!physicsEnabled || hasDegenerateBaseline) {
+    if (hasDegenerateBaseline) {
         driver.reset();
         return;
     }
@@ -361,13 +381,14 @@ void PathDeformer::cacheClosestPoints(const std::shared_ptr<Node>& node, const M
     if (!curve) return;
     // sample points are already in deformer local space
     for (std::size_t i = 0; i < sample.size(); ++i) {
-        cache[i] = curve->closestPoint(Vec2{sample.x[i], sample.y[i]}, 100);
+        cache[i] = curve->closestPoint(Vec2{sample.xAt(i), sample.yAt(i)}, 100);
     }
 }
 
 void PathDeformer::recordInvalid(const std::string& ctx, std::size_t idx, const Vec2& value) {
     ensureDiagnosticCapacity(idx + 1);
     invalidThisFrame = true;
+    diagnostics.invalidThisFrame = true;
     if (!diagnosticsEnabled) return;
     invalidIndexThisFrame[idx] = true;
     if (invalidStreakStartFrame[idx] == 0) invalidStreakStartFrame[idx] = frameCounter;
@@ -379,6 +400,16 @@ void PathDeformer::recordInvalid(const std::string& ctx, std::size_t idx, const 
     }
     invalidLastFrame[idx] = frameCounter;
     invalidLastValue[idx] = value;
+    diagnostics.invalidTotalPerIndex[idx] = invalidPerIndex[idx];
+    diagnostics.invalidConsecutivePerIndex[idx] = invalidConsecutive[idx];
+    diagnostics.invalidIndexThisFrame[idx] = invalidIndexThisFrame[idx];
+    diagnostics.invalidStreakStartFrame[idx] = invalidStreakStartFrame[idx];
+    diagnostics.invalidLastLoggedFrame[idx] = invalidLastLoggedFrame[idx];
+    diagnostics.invalidLastLoggedCount[idx] = invalidLastLoggedCount[idx];
+    diagnostics.invalidLastLoggedValueWasNaN[idx] = invalidLastLoggedValueWasNaN[idx];
+    diagnostics.invalidLastLoggedValue[idx] = invalidLastLoggedValue[idx];
+    diagnostics.invalidLastLoggedContext[idx] = invalidLastLoggedContext[idx];
+    diagnostics.totalInvalidCount = totalInvalidCount;
     lastInvalidContext = ctx;
     std::stringstream ss;
     ss << "[PathDeformer][Invalid] frame=" << frameCounter << " idx=" << idx
@@ -409,9 +440,9 @@ void PathDeformer::logDiagnostics() const {
 
 void PathDeformer::sanitizeOffsets(Vec2Array& offsets) {
     for (std::size_t i = 0; i < offsets.size(); ++i) {
-        if (!std::isfinite(offsets.x[i]) || !std::isfinite(offsets.y[i])) {
-            offsets.x[i] = 0.0f;
-            offsets.y[i] = 0.0f;
+        if (!std::isfinite(offsets.xAt(i)) || !std::isfinite(offsets.yAt(i))) {
+            offsets.xAt(i) = 0.0f;
+            offsets.yAt(i) = 0.0f;
             recordInvalid("sanitize", i, Vec2{0, 0});
         }
     }
@@ -444,6 +475,7 @@ void PathDeformer::resetDiagnostics() {
     if (!preserveInvalidLog) invalidLog.clear();
     matrixInvalidThisFrame = false;
     consecutiveInvalidFrames = 0;
+    diagnostics = DiagnosticsState{};
 }
 
 bool beginDiagnosticFrameFlag(bool& flag) {
@@ -459,8 +491,7 @@ void PathDeformer::disablePhysicsDriver(const std::string& reason) {
     driverInitialized = false;
     prevRootSet = false;
     physicsOnly = false;
-    std::fill(deformation.x.begin(), deformation.x.end(), 0.0f);
-    std::fill(deformation.y.begin(), deformation.y.end(), 0.0f);
+    deformation.fill(Vec2{0.0f, 0.0f});
     driver->reset();
 }
 
@@ -525,9 +556,11 @@ bool guardFinite(const Vec2& v) {
 bool PathDeformer::beginDiagnosticFrame() {
     if (diagnosticsFrameActive) return false;
     diagnosticsFrameActive = true;
+    diagnostics.diagnosticsFrameActive = true;
     ++frameCounter;
     ensureDiagnosticCapacity(deformation.size());
     clearInvalidFlags();
+    diagnostics.invalidThisFrame = false;
     return true;
 }
 
@@ -558,6 +591,10 @@ void PathDeformer::endDiagnosticFrame() {
         }
     }
     diagnosticsFrameActive = false;
+    diagnostics.invalidFrameCount = invalidFrameCount;
+    diagnostics.totalInvalidCount = totalInvalidCount;
+    diagnostics.invalidThisFrame = invalidThisFrame;
+    diagnostics.diagnosticsFrameActive = false;
 }
 
 void PathDeformer::logTransformFailure(const std::string& ctx, const Mat4& m) {
@@ -623,6 +660,15 @@ void PathDeformer::ensureDiagnosticCapacity(std::size_t n) {
     if (curveDiagCollapsed.size() < n) curveDiagCollapsed.resize(n, false);
     if (invalidLastLoggedValue.size() < n) invalidLastLoggedValue.resize(n, Vec2{});
     if (invalidLastLoggedContext.size() < n) invalidLastLoggedContext.resize(n, std::string{});
+    if (diagnostics.invalidTotalPerIndex.size() < n) diagnostics.invalidTotalPerIndex.resize(n, 0);
+    if (diagnostics.invalidConsecutivePerIndex.size() < n) diagnostics.invalidConsecutivePerIndex.resize(n, 0);
+    if (diagnostics.invalidIndexThisFrame.size() < n) diagnostics.invalidIndexThisFrame.resize(n, false);
+    if (diagnostics.invalidStreakStartFrame.size() < n) diagnostics.invalidStreakStartFrame.resize(n, 0);
+    if (diagnostics.invalidLastLoggedFrame.size() < n) diagnostics.invalidLastLoggedFrame.resize(n, 0);
+    if (diagnostics.invalidLastLoggedCount.size() < n) diagnostics.invalidLastLoggedCount.resize(n, 0);
+    if (diagnostics.invalidLastLoggedValueWasNaN.size() < n) diagnostics.invalidLastLoggedValueWasNaN.resize(n, false);
+    if (diagnostics.invalidLastLoggedValue.size() < n) diagnostics.invalidLastLoggedValue.resize(n, Vec2{});
+    if (diagnostics.invalidLastLoggedContext.size() < n) diagnostics.invalidLastLoggedContext.resize(n, std::string{});
 }
 
 void PathDeformer::checkBaselineDegeneracy(const std::vector<Vec2>& pts) {
@@ -708,6 +754,8 @@ DeformResult PathDeformer::deformChildren(const std::shared_ptr<Node>& target,
                                           const std::vector<Vec2>& origVertices,
                                           const std::vector<Vec2>& origDeformation,
                                           const Mat4* origTransform) {
+    static std::unordered_map<uint32_t, uint64_t> sChangedCount;
+    static uint64_t sSummaryTick = 0;
     DeformResult res;
     res.vertices = origDeformation.empty() ? origVertices : origDeformation;
     res.transform = std::nullopt;
@@ -715,7 +763,6 @@ DeformResult PathDeformer::deformChildren(const std::shared_ptr<Node>& target,
 
     bool diagStarted = beginDiagnosticFrame();
 
-    if (!physicsEnabled) { if (diagStarted) endDiagnosticFrame(); return res; }
     if (!origTransform) { if (diagStarted) endDiagnosticFrame(); return res; }
     if (!originalCurve || !deformedCurve) { if (diagStarted) endDiagnosticFrame(); return res; }
     if (controlPoints.size() < 2) { if (diagStarted) endDiagnosticFrame(); return res; }
@@ -738,15 +785,15 @@ DeformResult PathDeformer::deformChildren(const std::shared_ptr<Node>& target,
     Vec2Array verts;
     verts.resize(origVertices.size());
     for (std::size_t i = 0; i < origVertices.size(); ++i) {
-        verts.x[i] = origVertices[i].x;
-        verts.y[i] = origVertices[i].y;
+        verts.xAt(i) = origVertices[i].x;
+        verts.yAt(i) = origVertices[i].y;
     }
 
     Vec2Array deformInput;
     deformInput.resize(origDeformation.size());
     for (std::size_t i = 0; i < origDeformation.size(); ++i) {
-        deformInput.x[i] = origDeformation[i].x;
-        deformInput.y[i] = origDeformation[i].y;
+        deformInput.xAt(i) = origDeformation[i].x;
+        deformInput.yAt(i) = origDeformation[i].y;
     }
     sanitizeOffsets(deformInput);
 
@@ -815,14 +862,14 @@ DeformResult PathDeformer::deformChildren(const std::shared_ptr<Node>& target,
     bool anyChanged = false;
     float sumOffset = 0.0f;
     for (std::size_t i = 0; i < offsetLocal.size(); ++i) {
-        if (!std::isfinite(offsetLocal.x[i]) || !std::isfinite(offsetLocal.y[i])) {
-            offsetLocal.x[i] = 0;
-            offsetLocal.y[i] = 0;
+        if (!std::isfinite(offsetLocal.xAt(i)) || !std::isfinite(offsetLocal.yAt(i))) {
+            offsetLocal.xAt(i) = 0;
+            offsetLocal.yAt(i) = 0;
             recordInvalid("offsetNaN", i, Vec2{0, 0});
-        } else if (offsetLocal.x[i] != 0 || offsetLocal.y[i] != 0) {
+        } else if (offsetLocal.xAt(i) != 0 || offsetLocal.yAt(i) != 0) {
             anyChanged = true;
         }
-        float mag = std::sqrt(offsetLocal.x[i] * offsetLocal.x[i] + offsetLocal.y[i] * offsetLocal.y[i]);
+        float mag = std::sqrt(offsetLocal.xAt(i) * offsetLocal.xAt(i) + offsetLocal.yAt(i) * offsetLocal.yAt(i));
         sumOffset += mag;
         lastMaxOffset = std::max(lastMaxOffset, mag);
     }
@@ -840,14 +887,14 @@ DeformResult PathDeformer::deformChildren(const std::shared_ptr<Node>& target,
     Vec2Array deformOut;
     deformOut.resize(std::max<std::size_t>(deformInput.size(), offsetLocal.size()));
     for (std::size_t i = 0; i < deformInput.size() && i < deformOut.size(); ++i) {
-        deformOut.x[i] = deformInput.x[i];
-        deformOut.y[i] = deformInput.y[i];
+        deformOut.xAt(i) = deformInput.xAt(i);
+        deformOut.yAt(i) = deformInput.yAt(i);
     }
     transformAdd(deformOut, offsetLocal, inv, offsetLocal.size());
 
     res.vertices.resize(deformOut.size());
     for (std::size_t i = 0; i < deformOut.size(); ++i) {
-        res.vertices[i] = Vec2{deformOut.x[i], deformOut.y[i]};
+        res.vertices[i] = Vec2{deformOut.xAt(i), deformOut.yAt(i)};
         if (!std::isfinite(res.vertices[i].x) || !std::isfinite(res.vertices[i].y)) {
             recordInvalid("resultNaN", i, res.vertices[i]);
             res.vertices[i] = Vec2{0, 0};
@@ -867,6 +914,19 @@ DeformResult PathDeformer::deformChildren(const std::shared_ptr<Node>& target,
         disablePhysicsDriver("consecutiveInvalid");
     }
     if (diagStarted) endDiagnosticFrame();
+    if (traceDeformerSummaryEnabled() && target && res.changed) {
+        sChangedCount[target->uuid] += 1;
+        ++sSummaryTick;
+        if ((sSummaryTick % 240) == 0) {
+            pathLog("[PathDeformer][Summary] frame=", frameCounter,
+                    " changedTargets=", sChangedCount.size());
+            int printed = 0;
+            for (const auto& kv : sChangedCount) {
+                pathLog("[PathDeformer][Summary] targetUuid=", kv.first, " hits=", kv.second);
+                if (++printed >= 8) break;
+            }
+        }
+    }
     return res;
 }
 
@@ -906,14 +966,14 @@ void PathDeformer::applyPathDeform(const Vec2Array& origDeform) {
         Vec2Array baseline = (origDeform.size() == deformation.size()) ? origDeform : deformation;
         sanitizeOffsets(baseline);
         if (!driverInitialized) {
-            driver->updateDefaultShape();
+            driver->setup();
             driverInitialized = true;
         }
         Vec2Array diffDeform = deformation;
         if (diffDeform.size() == baseline.size()) {
             for (std::size_t i = 0; i < diffDeform.size(); ++i) {
-                diffDeform.x[i] -= baseline.x[i];
-                diffDeform.y[i] -= baseline.y[i];
+                diffDeform.xAt(i) -= baseline.xAt(i);
+                diffDeform.yAt(i) -= baseline.yAt(i);
             }
         }
         sanitizeOffsets(diffDeform);
@@ -928,7 +988,7 @@ void PathDeformer::applyPathDeform(const Vec2Array& origDeform) {
             Vec2 root{};
             Mat4 transformMatrix = transform().toMat4();
             if (deformation.size() > 0) {
-                auto tp = transformMatrix.transformPoint(Vec3{vertices[0].x + deformation.x[0], vertices[0].y + deformation.y[0], 0.0f});
+                auto tp = transformMatrix.transformPoint(Vec3{vertices[0].x + deformation.xAt(0), vertices[0].y + deformation.yAt(0), 0.0f});
                 root = sanitizeVec2(Vec2{tp.x, tp.y});
             }
             if (prevRootSet) {
@@ -943,8 +1003,10 @@ void PathDeformer::applyPathDeform(const Vec2Array& origDeform) {
                     logCurveHealth("applyPathDeform:physicsPrev", originalCurve, prevCurve, deformation);
                     if (prevDeform.size() == deformation.size()) {
                         for (std::size_t i = 0; i < deformation.size(); ++i) {
-                            deformation.x[i] -= prevDeform.x[i];
-                            deformation.y[i] -= prevDeform.y[i];
+                            deformation.set(i, Vec2{
+                                deformation.xAt(i) - prevDeform.xAt(i),
+                                deformation.yAt(i) - prevDeform.yAt(i),
+                            });
                         }
                     }
                     sanitizeOffsets(deformation);
@@ -958,6 +1020,7 @@ void PathDeformer::applyPathDeform(const Vec2Array& origDeform) {
             auto candidate = vertices;
             candidate += deformation;
             sanitizeOffsets(candidate);
+            deform(candidate);
             logCurveState("applyPathDeform");
         }
         refreshInverseMatrix("applyPathDeform:postDriver");
@@ -966,8 +1029,10 @@ void PathDeformer::applyPathDeform(const Vec2Array& origDeform) {
             auto candidate = vertices;
             candidate += deformation;
             sanitizeOffsets(candidate);
+            deform(candidate);
             logCurveState("applyPathDeform");
         }
+        refreshInverseMatrix("applyPathDeform:postNoDriver");
     }
     if (diagnosticsEnabled) {
         logCurveDiag("applyPathDeform", origDeform, deformation);
@@ -976,24 +1041,21 @@ void PathDeformer::applyPathDeform(const Vec2Array& origDeform) {
     updateDeform();
 }
 
+void PathDeformer::deform(const Vec2Array& deformedControlPoints) {
+    deformedCurve = createCurve(deformedControlPoints, curveType == CurveType::Bezier);
+}
+
 void PathDeformer::runRenderTask(core::RenderContext&) {
     // no GPU commands
 }
 
 void PathDeformer::switchDynamic(bool enablePhysics) {
-    physicsEnabled = enablePhysics;
-    ensureDriver();
+    dynamicDeformation = enablePhysics;
     clearCache();
-    if (!physicsEnabled) {
-        deformation.resize(vertices.size());
-        std::fill(deformation.x.begin(), deformation.x.end(), 0.0f);
-        std::fill(deformation.y.begin(), deformation.y.end(), 0.0f);
-    }
+    ensureDriver();
     resetDiagnostics();
     driverInitialized = false;
     prevRootSet = false;
-    physicsOnly = !physicsEnabled;
-    dynamicDeformation = !physicsEnabled;
 }
 
 void PathDeformer::notifyChange(const std::shared_ptr<Node>& target, NotifyReason reason) {
@@ -1005,17 +1067,19 @@ void PathDeformer::notifyChange(const std::shared_ptr<Node>& target, NotifyReaso
 
 bool PathDeformer::setupChild(const std::shared_ptr<Node>& child) {
     Deformable::setupChild(child);
-    if (!child || !physicsEnabled) return false;
+    if (!child) return false;
     Node::FilterHook hook;
     hook.stage = kPathFilterStage;
+    hook.tag = reinterpret_cast<std::uintptr_t>(this);
     hook.func = [this](auto t, auto v, auto d, auto mat) {
         auto res = deformChildren(t, v, d, mat);
         return std::make_tuple(res.vertices, std::optional<Mat4>{}, res.changed);
     };
     auto& pre = child->preProcessFilters;
     auto& post = child->postProcessFilters;
-    pre.erase(std::remove_if(pre.begin(), pre.end(), [](const auto& h) { return h.stage == kPathFilterStage; }), pre.end());
-    post.erase(std::remove_if(post.begin(), post.end(), [](const auto& h) { return h.stage == kPathFilterStage; }), post.end());
+    const auto tag = reinterpret_cast<std::uintptr_t>(this);
+    pre.erase(std::remove_if(pre.begin(), pre.end(), [&](const auto& h) { return h.stage == kPathFilterStage && h.tag == tag; }), pre.end());
+    post.erase(std::remove_if(post.begin(), post.end(), [&](const auto& h) { return h.stage == kPathFilterStage && h.tag == tag; }), post.end());
     auto deformable = std::dynamic_pointer_cast<Deformable>(child);
     if (deformable) {
         if (dynamicDeformation) {
@@ -1033,8 +1097,8 @@ bool PathDeformer::setupChild(const std::shared_ptr<Node>& child) {
         Vec2Array verts;
         verts.resize(deformable->vertices.size());
         for (std::size_t i = 0; i < deformable->vertices.size(); ++i) {
-            verts.x[i] = deformable->vertices[i].x;
-            verts.y[i] = deformable->vertices[i].y;
+            verts.xAt(i) = deformable->vertices[i].x;
+            verts.yAt(i) = deformable->vertices[i].y;
         }
         Vec2Array sample;
         transformAssign(sample, verts, center);
@@ -1050,8 +1114,9 @@ bool PathDeformer::releaseChild(const std::shared_ptr<Node>& child) {
     if (child) {
         auto& pre = child->preProcessFilters;
         auto& post = child->postProcessFilters;
-        pre.erase(std::remove_if(pre.begin(), pre.end(), [](const auto& h) { return h.stage == kPathFilterStage; }), pre.end());
-        post.erase(std::remove_if(post.begin(), post.end(), [](const auto& h) { return h.stage == kPathFilterStage; }), post.end());
+        const auto tag = reinterpret_cast<std::uintptr_t>(this);
+        pre.erase(std::remove_if(pre.begin(), pre.end(), [&](const auto& h) { return h.stage == kPathFilterStage && h.tag == tag; }), pre.end());
+        post.erase(std::remove_if(post.begin(), post.end(), [&](const auto& h) { return h.stage == kPathFilterStage && h.tag == tag; }), post.end());
         meshCaches.erase(child->uuid);
         if (child->mustPropagate()) {
             for (auto& c : child->childrenRef()) releaseChild(c);
@@ -1091,7 +1156,6 @@ void PathDeformer::applyDeformToChildren(const std::vector<std::shared_ptr<core:
         physicsOnly = true;
         return;
     }
-    if (!physicsEnabled) return;
     if (dynamicDeformation) return;
     bool diagStarted = beginDiagnosticFrame();
     std::function<void(const std::shared_ptr<Node>&)> apply;
@@ -1101,23 +1165,12 @@ void PathDeformer::applyDeformToChildren(const std::vector<std::shared_ptr<core:
                 if (!param) continue;
                 auto binding = std::dynamic_pointer_cast<core::param::DeformationParameterBinding>(param->getBinding(c, "deform"));
                 if (!binding) continue;
-                uint32_t xCount = param->axisPointCount(0);
-                uint32_t yCount = param->axisPointCount(1);
-                if (yCount == 0) yCount = 1;
-                core::param::Vec2u idx{0, 0};
-                bool found = false;
-                for (uint32_t x = 0; x < std::max<uint32_t>(1, xCount); ++x) {
-                    for (uint32_t y = 0; y < std::max<uint32_t>(1, yCount); ++y) {
-                        core::param::Vec2u id{x, y};
-                        if (binding->isSetAt(id)) { idx = id; found = true; break; }
-                    }
-                    if (found) break;
-                }
-                if (found) {
-                    auto slot = binding->valueAt(idx);
-                    if (slot.vertexOffsets.size() == deformable->deformation.size()) {
-                        deformable->deformation = slot.vertexOffsets;
-                    }
+                core::param::Vec2u left{};
+                Vec2 sub{};
+                param->findOffset(param->value, left, sub);
+                auto slot = binding->sample(left, sub);
+                if (slot.vertexOffsets.size() == deformable->deformation.size()) {
+                    deformable->deformation = slot.vertexOffsets;
                 }
             }
             auto m = c->transform().toMat4();
@@ -1128,16 +1181,20 @@ void PathDeformer::applyDeformToChildren(const std::vector<std::shared_ptr<core:
             }
         } else {
             if (translateChildren) {
-                auto m = c->transform().toMat4();
+                auto parentNode = c->parentPtr();
+                Mat4 m = parentNode ? parentNode->transform().toMat4() : Mat4::identity();
                 Vec2Array verts;
                 verts.resize(1);
-                verts.x[0] = 0.0f; verts.y[0] = 0.0f;
+                verts.xAt(0) = c->localTransform.translation.x;
+                verts.yAt(0) = c->localTransform.translation.y;
                 Vec2Array deform;
                 deform.resize(1);
+                deform.xAt(0) = c->offsetTransform.translation.x;
+                deform.yAt(0) = c->offsetTransform.translation.y;
                 auto res = deformChildren(c, toVec2List(verts), toVec2List(deform), &m);
                 if (res.changed && !res.vertices.empty()) {
-                    c->offsetTransform.translation.x += res.vertices[0].x;
-                    c->offsetTransform.translation.y += res.vertices[0].y;
+                    c->offsetTransform.translation.x = res.vertices[0].x;
+                    c->offsetTransform.translation.y = res.vertices[0].y;
                     c->transformChanged();
                 }
             }
@@ -1154,6 +1211,7 @@ void PathDeformer::applyDeformToChildren(const std::vector<std::shared_ptr<core:
                 " totalInvalid=", totalInvalidCount, " lastCtx=", lastInvalidContext);
     }
     physicsOnly = true;
+    rebuffer(std::vector<Vec2>{});
     if (diagStarted) endDiagnosticFrame();
 }
 
@@ -1163,7 +1221,6 @@ void PathDeformer::copyFrom(const Node& src, bool clone, bool deepCopy) {
         controlPoints = p->controlPoints;
         inverseMatrix = p->inverseMatrix;
         strength = p->strength;
-        physicsEnabled = p->physicsEnabled;
         translateChildren = p->translateChildren;
         maxSegmentLength = p->maxSegmentLength;
         totalLength = p->totalLength;
@@ -1178,12 +1235,11 @@ void PathDeformer::rebuffer(const std::vector<Vec2>& points) {
     controlPoints = points;
     vertices.resize(points.size());
     for (std::size_t i = 0; i < points.size(); ++i) {
-        vertices.x[i] = points[i].x;
-        vertices.y[i] = points[i].y;
+        vertices.xAt(i) = points[i].x;
+        vertices.yAt(i) = points[i].y;
     }
     deformation.resize(points.size());
-    std::fill(deformation.x.begin(), deformation.x.end(), 0.0f);
-    std::fill(deformation.y.begin(), deformation.y.end(), 0.0f);
+    deformation.fill(Vec2{0.0f, 0.0f});
     originalCurve = createCurve(vertices, curveType == CurveType::Bezier);
     deformedCurve = createCurve(vertices, curveType == CurveType::Bezier);
     prevCurve = originalCurve ? createCurve(vertices, curveType == CurveType::Bezier) : nullptr;
@@ -1199,8 +1255,6 @@ void PathDeformer::rebuffer(const std::vector<Vec2>& points) {
 void PathDeformer::serializeSelfImpl(::nicxlive::core::serde::InochiSerializer& serializer, bool recursive, SerializeNodeFlags flags) const {
     Deformable::serializeSelfImpl(serializer, recursive, flags);
     if (has_flag(flags, SerializeNodeFlags::State)) {
-        serializer.putKey("physicsEnabled");
-        serializer.putValue(physicsEnabled);
         serializer.putKey("physics_only");
         serializer.putValue(physicsOnly);
         serializer.putKey("dynamic_deformation");
@@ -1264,9 +1318,7 @@ void PathDeformer::serializeSelfImpl(::nicxlive::core::serde::InochiSerializer& 
 
 ::nicxlive::core::serde::SerdeException PathDeformer::deserializeFromFghj(const ::nicxlive::core::serde::Fghj& data) {
     if (auto err = Deformable::deserializeFromFghj(data)) return err;
-    if (auto phy = data.get_child_optional("physicsEnabled")) {
-        physicsEnabled = phy->get_value<bool>();
-    }
+    physicsEnabled = true;
     if (auto st = data.get_child_optional("strength")) {
         strength = st->get_value<float>();
     }
@@ -1342,8 +1394,8 @@ void PathDeformer::serializeSelfImpl(::nicxlive::core::serde::InochiSerializer& 
 void PathDeformer::PendulumDriver::update(Vec2Array& offsets, float strength, uint64_t frame) {
     float phase = static_cast<float>(frame) * 0.05f;
     for (std::size_t i = 0; i < offsets.size(); ++i) {
-        offsets.x[i] = std::sin(phase + i * 0.1f) * strength * 0.1f;
-        offsets.y[i] = std::cos(phase + i * 0.1f) * strength * 0.1f;
+        offsets.xAt(i) = std::sin(phase + i * 0.1f) * strength * 0.1f;
+        offsets.yAt(i) = std::cos(phase + i * 0.1f) * strength * 0.1f;
     }
 }
 
@@ -1351,8 +1403,8 @@ void PathDeformer::SpringPendulumDriver::update(Vec2Array& offsets, float streng
     float phase = static_cast<float>(frame) * 0.08f;
     velocity = velocity * 0.9f + std::sin(phase) * 0.05f;
     for (std::size_t i = 0; i < offsets.size(); ++i) {
-        offsets.x[i] = velocity * strength * 0.2f;
-        offsets.y[i] = velocity * strength * 0.2f;
+        offsets.xAt(i) = velocity * strength * 0.2f;
+        offsets.yAt(i) = velocity * strength * 0.2f;
     }
 }
 

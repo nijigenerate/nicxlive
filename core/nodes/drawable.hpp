@@ -66,8 +66,6 @@ struct WeldingLink {
 class Drawable : public Deformable {
 public:
     std::shared_ptr<MeshData> mesh{std::make_shared<MeshData>()};
-    // Shared buffer mirrors for atlas registration
-    Vec2Array sharedVertices{};
     Vec2Array sharedUvs{};
     std::vector<Vec2> deformationOffsets{};
     std::size_t vertexOffset{0};
@@ -156,7 +154,6 @@ public:
 private:
     void registerWeldFilter(const std::shared_ptr<Drawable>& target);
     void unregisterWeldFilter(const std::shared_ptr<Drawable>& target);
-    void writeSharedBuffers();
 };
 
 } // namespace nicxlive::core::nodes

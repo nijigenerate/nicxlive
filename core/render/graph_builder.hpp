@@ -36,6 +36,8 @@ public:
     void beginFrame();
     void clear();
     bool empty() const;
+    std::size_t rootItemCount() const;
+    std::size_t passDepth() const;
     void enqueueItem(float zSort, RenderCommandBuilder builder);
     void enqueueItem(float zSort, const RenderScopeHint& hint, RenderCommandBuilder builder);
     std::size_t pushDynamicComposite(const std::shared_ptr<nodes::Projectable>& composite,

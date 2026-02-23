@@ -1,4 +1,6 @@
-# Projectable 実装互換性チェック (D ↔ C++)
+﻿# Projectable 実装互換性チェック (D ↔ C++)
+
+判定基準: D実装を正とし、Dに存在してC++にない項目は `✗（未実装）`、Dに存在せずC++のみにある項目は `✗（削除候補）` とする。
 
 | 項目 | D 実装 | C++ 現状 | 互換性評価 | 差分メモ(概算行) |
 | --- | --- | --- | --- | --- |
@@ -23,6 +25,7 @@
 | method `enableMaxChildrenBounds()` | max bounds を更新し保持 | maxBoundsStartFrame更新済み | ◯ | - |
 | method `invalidateChildrenBounds()` | max bounds キャッシュ無効化 | 同等 | ◯ | - |
 | method `createSimpleMesh()` | 子 bounds から自動リサイズメッシュ | D同等のサイズ調整・offset更新 | ◯ | - |
+| method `rebuffer(ref MeshData)` | auto_resized 判定更新＋`initialized=false`＋`notifyChange(this)` | `Part::rebuffer` 直呼びのみで再初期化契約が欠落していたため追加修正済み | ◯ | - |
 | method `updateAutoResizedMeshOnce()` | 1フレーム自動サイズ更新 | 同等 | ◯ | - |
 | method `updatePartMeshOnce()` | 1回だけメッシュ更新 | 同等 | ◯ | - |
 | method `autoResizeMeshOnce()` | 1回だけ自動リサイズ | 同等 | ◯ | - |
@@ -47,10 +50,13 @@
 | field `maskParts` | Maskコレクション | 同等 | ◯ | - |
 | field `autoResizedMesh` | 自動リサイズ有効 | 追加済み | ◯ | - |
 | field `textureOffset` | テクスチャオフセット | 追加済み | ◯ | - |
-| field `texWidth/texHeight` | テクスチャ寸法 | 追加済み | ◯ | - |
+| field 	exWidth | テクスチャ寸法 | 追加済み | ◯ | - |
+| field 	exHeight | テクスチャ寸法 | 追加済み | ◯ | - |
 | field `autoResizedSize` | 自動リサイズ寸法 | 追加済み | ◯ | - |
 | field `deferred` | 遅延フラグ | 追加済み | ◯ | - |
-| field `prevTranslation/Rotation/Scale` | 前回TRS記録 | 追加済み | ◯ | - |
+| field prevTranslation | 前回TRS記録 | 追加済み | ◯ | - |
+| field prevRotation | 前回TRS記録 | 追加済み | ◯ | - |
+| field prevScale | 前回TRS記録 | 追加済み | ◯ | - |
 | field `deferredChanged` | 遅延変化フラグ | 追加済み | ◯ | - |
 | field `ancestorChangeQueued` | 祖先変化キュー | 追加済み | ◯ | - |
 | field `maxChildrenBounds` | 最大子bounds | 追加済み | ◯ | - |

@@ -20,6 +20,7 @@ public:
     class PhysicsDriver {
     public:
         virtual ~PhysicsDriver() = default;
+        virtual void setup() {}
         virtual void update(Vec2Array& offsets, float strength, uint64_t frame) = 0;
         virtual void updateDefaultShape() {}
         virtual void reset() {}
@@ -31,6 +32,7 @@ public:
     public:
         explicit ConnectedDriverAdapter(std::unique_ptr<ConnectedPhysicsDriver> impl, PathDeformer* owner)
             : impl_(std::move(impl)), owner_(owner) {}
+        void setup() override;
         void update(Vec2Array& offsets, float strength, uint64_t frame) override;
         void updateDefaultShape() override;
         void reset() override;
@@ -93,6 +95,21 @@ public:
     std::vector<float> curveDiagReferenceScale{};
     std::vector<bool> curveDiagHasNaN{};
     std::vector<bool> curveDiagCollapsed{};
+    struct DiagnosticsState {
+        uint64_t invalidFrameCount{0};
+        uint64_t totalInvalidCount{0};
+        bool invalidThisFrame{false};
+        bool diagnosticsFrameActive{false};
+        std::vector<uint64_t> invalidTotalPerIndex{};
+        std::vector<uint64_t> invalidConsecutivePerIndex{};
+        std::vector<bool> invalidIndexThisFrame{};
+        std::vector<std::size_t> invalidStreakStartFrame{};
+        std::vector<uint64_t> invalidLastLoggedFrame{};
+        std::vector<uint64_t> invalidLastLoggedCount{};
+        std::vector<bool> invalidLastLoggedValueWasNaN{};
+        std::vector<Vec2> invalidLastLoggedValue{};
+        std::vector<std::string> invalidLastLoggedContext{};
+    } diagnostics{};
     // diagnostics (簡易)
     uint64_t invalidFrameCount{0};
     uint64_t totalInvalidCount{0};
@@ -142,7 +159,7 @@ public:
     void rebuffer(const std::vector<Vec2>& points);
     std::unique_ptr<PhysicsDriver> createPhysicsDriver();
     void setStrength(float s) { strength = s; }
-    void setPhysicsEnabled(bool v) { physicsEnabled = v; }
+    void setPhysicsEnabled(bool) { physicsEnabled = true; }
     void setTranslateChildren(bool v) { translateChildren = v; }
     void setCurveType(CurveType t) { curveType = t; clearCache(); }
     void setPhysicsType(PhysicsType t) { physicsType = t; }
@@ -171,6 +188,7 @@ private:
     void disablePhysicsDriver(const std::string& reason);
     Vec2 sanitizeVec2(const Vec2& v) const;
     void applyPathDeform(const Vec2Array& origDeform);
+    void deform(const Vec2Array& deformedControlPoints);
     void logCurveState(const std::string& ctx);
     void logCurveHealth(const std::string& ctx, const std::unique_ptr<Curve>& a, const std::unique_ptr<Curve>& b, const Vec2Array& def);
     bool shouldEmitInvalidIndexLog(std::size_t index, const std::string& context, const Vec2& value, std::size_t consecutive);

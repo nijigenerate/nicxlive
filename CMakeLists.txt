@@ -18,6 +18,7 @@ endif()
 
 # Toggle for shared library build
 option(NICXLIVE_BUILD_SHARED "Build nicxlive as a shared library" ON)
+option(NICXLIVE_BUILD_TESTS "Build nicxlive tests" ON)
 
 # WASM (Emscripten) build toggle
 option(BUILD_WASM "Build nicxlive for WebAssembly via Emscripten" OFF)
@@ -89,6 +90,7 @@ set(NICXLIVE_SOURCES
     core/nodes/deformable.cpp
     core/nodes/filter.cpp
     core/nodes/deformer/drivers/phys.cpp
+    core/param/binding_deformation.cpp
     core/math/triangle.cpp
     core/math/mat3.cpp
     # math/transform.hpp is header-only
@@ -129,4 +131,12 @@ if(NICXLIVE_BUILD_SHARED)
           ${NICXLIVE_BOOST_HEADERS_TARGET}
   )
   target_compile_features(nicxlive_shared PUBLIC cxx_std_20)
+endif()
+
+if(NICXLIVE_BUILD_TESTS)
+  enable_testing()
+  add_executable(nicxlive_vec2array_test tests/vec2array_test.cpp)
+  target_link_libraries(nicxlive_vec2array_test PRIVATE nicxlive::nicxlive)
+  target_compile_features(nicxlive_vec2array_test PRIVATE cxx_std_20)
+  add_test(NAME nicxlive_vec2array_test COMMAND nicxlive_vec2array_test)
 endif()

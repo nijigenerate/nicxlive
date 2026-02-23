@@ -50,8 +50,8 @@ struct DeformSlot {
 inline DeformSlot scaleValue(const DeformSlot& in, float scale) {
     DeformSlot out = in;
     for (std::size_t i = 0; i < out.vertexOffsets.size(); ++i) {
-        out.vertexOffsets.x[i] *= scale;
-        out.vertexOffsets.y[i] *= scale;
+        out.vertexOffsets.xAt(i) *= scale;
+        out.vertexOffsets.yAt(i) *= scale;
     }
     return out;
 }
@@ -63,8 +63,8 @@ inline DeformSlot lerpValue(const DeformSlot& a, const DeformSlot& b, float t) {
     DeformSlot out;
     out.vertexOffsets = Vec2Array(a.vertexOffsets.size());
     for (std::size_t i = 0; i < a.vertexOffsets.size(); ++i) {
-        out.vertexOffsets.x[i] = lerpValue(a.vertexOffsets.x[i], b.vertexOffsets.x[i], t);
-        out.vertexOffsets.y[i] = lerpValue(a.vertexOffsets.y[i], b.vertexOffsets.y[i], t);
+        out.vertexOffsets.xAt(i) = lerpValue(a.vertexOffsets.xAt(i), b.vertexOffsets.xAt(i), t);
+        out.vertexOffsets.yAt(i) = lerpValue(a.vertexOffsets.yAt(i), b.vertexOffsets.yAt(i), t);
     }
     return out;
 }
@@ -89,8 +89,8 @@ inline DeformSlot operator+(const DeformSlot& a, const DeformSlot& b) {
     auto n = std::min(a.vertexOffsets.size(), b.vertexOffsets.size());
     out.vertexOffsets.resize(n);
     for (std::size_t i = 0; i < n; ++i) {
-        out.vertexOffsets.x[i] = a.vertexOffsets.x[i] + b.vertexOffsets.x[i];
-        out.vertexOffsets.y[i] = a.vertexOffsets.y[i] + b.vertexOffsets.y[i];
+        out.vertexOffsets.xAt(i) = a.vertexOffsets.xAt(i) + b.vertexOffsets.xAt(i);
+        out.vertexOffsets.yAt(i) = a.vertexOffsets.yAt(i) + b.vertexOffsets.yAt(i);
     }
     return out;
 }
@@ -100,8 +100,8 @@ inline DeformSlot operator-(const DeformSlot& a, const DeformSlot& b) {
     auto n = std::min(a.vertexOffsets.size(), b.vertexOffsets.size());
     out.vertexOffsets.resize(n);
     for (std::size_t i = 0; i < n; ++i) {
-        out.vertexOffsets.x[i] = a.vertexOffsets.x[i] - b.vertexOffsets.x[i];
-        out.vertexOffsets.y[i] = a.vertexOffsets.y[i] - b.vertexOffsets.y[i];
+        out.vertexOffsets.xAt(i) = a.vertexOffsets.xAt(i) - b.vertexOffsets.xAt(i);
+        out.vertexOffsets.yAt(i) = a.vertexOffsets.yAt(i) - b.vertexOffsets.yAt(i);
     }
     return out;
 }
@@ -111,6 +111,58 @@ inline DeformSlot operator*(const DeformSlot& a, float s) {
 }
 
 class Parameter : public Resource, public std::enable_shared_from_this<Parameter> {
+public:
+    struct Combinator {
+        Vec2Array ivalues{};
+        std::vector<float> iweights{};
+        int isum{0};
+
+        void clear() { isum = 0; }
+
+        void resize(int reqLength) {
+            ivalues.resize(static_cast<std::size_t>(reqLength));
+            iweights.resize(static_cast<std::size_t>(reqLength));
+        }
+
+        void add(const Vec2& value, float weight) {
+            if (isum >= static_cast<int>(ivalues.size())) resize(isum + 8);
+            ivalues.set(isum, value);
+            iweights[isum] = weight;
+            ++isum;
+        }
+
+        void add(int axis, float value, float weight) {
+            if (isum >= static_cast<int>(ivalues.size())) resize(isum + 8);
+            ivalues.set(isum, Vec2{(axis == 0) ? value : 1.0f, (axis == 1) ? value : 1.0f});
+            iweights[isum] = weight;
+            ++isum;
+        }
+
+        Vec2 csum() const {
+            Vec2 val{0.0f, 0.0f};
+            for (int i = 0; i < isum; ++i) {
+                val.x += ivalues.xAt(i);
+                val.y += ivalues.yAt(i);
+            }
+            return val;
+        }
+
+        Vec2 avg() const {
+            if (isum == 0) return Vec2{1.0f, 1.0f};
+            Vec2 val{0.0f, 0.0f};
+            for (int i = 0; i < isum; ++i) {
+                val.x += ivalues.xAt(i) * iweights[i];
+                val.y += ivalues.yAt(i) * iweights[i];
+            }
+            float denom = static_cast<float>(isum);
+            return Vec2{val.x / denom, val.y / denom};
+        }
+    };
+
+private:
+    Combinator iadd{};
+    Combinator imul{};
+
 public:
     uint32_t uuid{0};
     std::string name{};
@@ -197,6 +249,49 @@ public:
     void removeBinding(const std::shared_ptr<ParameterBinding>& binding);
     void makeIndexable();
     void update();
+    bool valueChanged() const { return latestInternal.x != previousInternal.x || latestInternal.y != previousInternal.y; }
+    void pushIOffset(const Vec2& offset, ParamMergeMode mode = ParamMergeMode::Passthrough, float weight = 1.0f) {
+        if (mode == ParamMergeMode::Passthrough) mode = mergeMode;
+        switch (mode) {
+        case ParamMergeMode::Forced:
+            value = offset;
+            break;
+        case ParamMergeMode::Additive:
+            iadd.add(offset, 1.0f);
+            break;
+        case ParamMergeMode::Multiplicative:
+            imul.add(offset, 1.0f);
+            break;
+        case ParamMergeMode::Weighted:
+            imul.add(offset, weight);
+            break;
+        default:
+            break;
+        }
+    }
+    void pushIOffsetAxis(int axis, float offset, ParamMergeMode mode = ParamMergeMode::Passthrough, float weight = 1.0f) {
+        if (mode == ParamMergeMode::Passthrough) mode = mergeMode;
+        switch (mode) {
+        case ParamMergeMode::Forced:
+            if (axis == 0) value.x = offset;
+            else value.y = offset;
+            break;
+        case ParamMergeMode::Additive:
+            iadd.add(axis, offset, 1.0f);
+            break;
+        case ParamMergeMode::Multiplicative:
+            imul.add(axis, offset, 1.0f);
+            break;
+        case ParamMergeMode::Weighted:
+            imul.add(axis, offset, weight);
+            break;
+        default:
+            break;
+        }
+    }
+    ::nicxlive::core::serde::SerdeException deserializeFromFghj(const ::nicxlive::core::serde::Fghj& data);
+    void reconstruct(const std::shared_ptr<::nicxlive::core::Puppet>& puppet);
+    void finalize(const std::shared_ptr<::nicxlive::core::Puppet>& puppet);
 };
 
 

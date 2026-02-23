@@ -3,12 +3,17 @@
 #include "types.hpp"
 
 #include <cassert>
+#include <array>
 #include <cstddef>
 #include <functional>
 #include <initializer_list>
 #include <memory>
 #include <utility>
 #include <vector>
+
+#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
+#include <immintrin.h>
+#endif
 
 namespace nicxlive::core::math {
 
@@ -21,6 +26,7 @@ struct RawStorage {
 };
 
 struct Vec2Array {
+    static constexpr std::size_t kSimdAlignment = 16;
     // lanes (shared to allow views)
     std::vector<float> x{};
     std::vector<float> y{};
@@ -31,9 +37,36 @@ struct Vec2Array {
     std::size_t laneBase_{0};
     std::size_t viewCapacity_{0};
     bool ownsStorage_{true};
-    mutable std::vector<float> rawCache_{};
+    std::size_t alignment_{kSimdAlignment};
+    mutable std::vector<float> backing_{};
 
     Vec2Array() = default;
+    Vec2Array(const Vec2Array& rhs) { copyFrom(rhs); }
+    Vec2Array& operator=(const Vec2Array& rhs) {
+        if (this == &rhs) return *this;
+        copyFrom(rhs);
+        return *this;
+    }
+    Vec2Array(Vec2Array&&) noexcept = default;
+    Vec2Array& operator=(Vec2Array&& rhs) noexcept {
+        if (this == &rhs) return *this;
+        if (!ownsStorage_) {
+            copyFrom(rhs);
+            return *this;
+        }
+        x = std::move(rhs.x);
+        y = std::move(rhs.y);
+        xPtr_ = rhs.xPtr_;
+        yPtr_ = rhs.yPtr_;
+        logicalLength_ = rhs.logicalLength_;
+        laneStride_ = rhs.laneStride_;
+        laneBase_ = rhs.laneBase_;
+        viewCapacity_ = rhs.viewCapacity_;
+        ownsStorage_ = rhs.ownsStorage_;
+        alignment_ = rhs.alignment_;
+        backing_ = std::move(rhs.backing_);
+        return *this;
+    }
     explicit Vec2Array(std::size_t n) { ensureLength(n); }
     Vec2Array(std::initializer_list<Vec2> init) { assign(std::vector<Vec2>(init)); }
     explicit Vec2Array(const Vec2& v) { ensureLength(1); xPtr_[0] = v.x; yPtr_[0] = v.y; }
@@ -50,8 +83,8 @@ struct Vec2Array {
     void ensureLength(std::size_t len) {
         if (logicalLength_ == len) return;
         if (!ownsStorage_) {
-            assert(len <= viewCapacity_);
             logicalLength_ = len;
+            viewCapacity_ = len;
             return;
         }
         x.resize(len);
@@ -132,8 +165,27 @@ struct Vec2Array {
             yPtr_[i] = source[i].y;
         }
     }
-    void operator=(const Vec2Array& rhs) { copyFrom(rhs); }
     void copyFrom(const Vec2Array& rhs) {
+        if (!ownsStorage_) {
+            const auto dstLen = logicalLength_;
+            const auto copyLen = std::min(dstLen, rhs.size());
+            for (std::size_t i = 0; i < copyLen; ++i) {
+                xPtr_[laneBase_ + i] = rhs.xAt(i);
+                yPtr_[laneBase_ + i] = rhs.yAt(i);
+            }
+            for (std::size_t i = copyLen; i < dstLen; ++i) {
+                xPtr_[laneBase_ + i] = 0.0f;
+                yPtr_[laneBase_ + i] = 0.0f;
+            }
+            return;
+        }
+        ownsStorage_ = true;
+        xPtr_ = nullptr;
+        yPtr_ = nullptr;
+        logicalLength_ = 0;
+        laneStride_ = 0;
+        laneBase_ = 0;
+        viewCapacity_ = 0;
         ensureLength(rhs.size());
         if (rhs.size() == 0) return;
         for (std::size_t i = 0; i < rhs.size(); ++i) {
@@ -142,25 +194,60 @@ struct Vec2Array {
         }
     }
     Vec2Array& operator+=(const Vec2Array& rhs) {
-        auto n = std::min(size(), rhs.size());
+        auto n = size();
+        if (n != rhs.size()) {
+            return *this;
+        }
+        if (n == 0) return *this;
+        float* dstX = xPtr_ + laneBase_;
+        float* dstY = yPtr_ + laneBase_;
+        const float* srcX = rhs.xPtr_ + rhs.laneBase_;
+        const float* srcY = rhs.yPtr_ + rhs.laneBase_;
+        if (canApplySIMD(dstX, srcX, n) && canApplySIMD(dstY, srcY, n)) {
+            applySIMD<'+'>(dstX, srcX, n);
+            applySIMD<'+'>(dstY, srcY, n);
+            return *this;
+        }
         for (std::size_t i = 0; i < n; ++i) {
-            xPtr_[laneBase_ + i] += rhs.at(i).x;
-            yPtr_[laneBase_ + i] += rhs.at(i).y;
+            dstX[i] += srcX[i];
+            dstY[i] += srcY[i];
         }
         return *this;
     }
     Vec2Array& operator-=(const Vec2Array& rhs) {
-        auto n = std::min(size(), rhs.size());
+        auto n = size();
+        if (n != rhs.size()) {
+            return *this;
+        }
+        if (n == 0) return *this;
+        float* dstX = xPtr_ + laneBase_;
+        float* dstY = yPtr_ + laneBase_;
+        const float* srcX = rhs.xPtr_ + rhs.laneBase_;
+        const float* srcY = rhs.yPtr_ + rhs.laneBase_;
+        if (canApplySIMD(dstX, srcX, n) && canApplySIMD(dstY, srcY, n)) {
+            applySIMD<'-'>(dstX, srcX, n);
+            applySIMD<'-'>(dstY, srcY, n);
+            return *this;
+        }
         for (std::size_t i = 0; i < n; ++i) {
-            xPtr_[laneBase_ + i] -= rhs.at(i).x;
-            yPtr_[laneBase_ + i] -= rhs.at(i).y;
+            dstX[i] -= srcX[i];
+            dstY[i] -= srcY[i];
         }
         return *this;
     }
     Vec2Array& operator*=(float s) {
-        for (std::size_t i = 0; i < size(); ++i) {
-            xPtr_[laneBase_ + i] *= s;
-            yPtr_[laneBase_ + i] *= s;
+        auto n = size();
+        if (n == 0) return *this;
+        float* dstX = xPtr_ + laneBase_;
+        float* dstY = yPtr_ + laneBase_;
+        if (canApplySIMD(dstX, dstX, n) && canApplySIMD(dstY, dstY, n)) {
+            applySIMDScalarMul(dstX, s, n);
+            applySIMDScalarMul(dstY, s, n);
+            return *this;
+        }
+        for (std::size_t i = 0; i < n; ++i) {
+            dstX[i] *= s;
+            dstY[i] *= s;
         }
         return *this;
     }
@@ -183,6 +270,30 @@ struct Vec2Array {
 
     const float* dataX() const { return xPtr_ ? xPtr_ + laneBase_ : nullptr; }
     const float* dataY() const { return yPtr_ ? yPtr_ + laneBase_ : nullptr; }
+    float* dataXMutable() { return xPtr_ ? xPtr_ + laneBase_ : nullptr; }
+    float* dataYMutable() { return yPtr_ ? yPtr_ + laneBase_ : nullptr; }
+    float& xAt(std::size_t i) {
+        assert(i < logicalLength_);
+        return xPtr_[laneBase_ + i];
+    }
+    float& yAt(std::size_t i) {
+        assert(i < logicalLength_);
+        return yPtr_[laneBase_ + i];
+    }
+    float xAt(std::size_t i) const {
+        assert(i < logicalLength_);
+        return xPtr_[laneBase_ + i];
+    }
+    float yAt(std::size_t i) const {
+        assert(i < logicalLength_);
+        return yPtr_[laneBase_ + i];
+    }
+    void fill(const Vec2& v) {
+        for (std::size_t i = 0; i < logicalLength_; ++i) {
+            xPtr_[laneBase_ + i] = v.x;
+            yPtr_[laneBase_ + i] = v.y;
+        }
+    }
     std::size_t length() const { return logicalLength_; }
 
     std::vector<Vec2> toArray() const {
@@ -210,16 +321,19 @@ struct Vec2Array {
 
     RawStorage rawStorage() const {
         auto n = size();
-        rawCache_.resize(n * 2);
+        backing_.resize(n * 2);
         if (n == 0 || !xPtr_ || !yPtr_) {
-            return {rawCache_.data(), rawCache_.size()};
+            return {backing_.data(), backing_.size()};
         }
         for (std::size_t i = 0; i < n; ++i) {
-            rawCache_[i] = xPtr_[laneBase_ + i];
-            rawCache_[n + i] = yPtr_[laneBase_ + i];
+            backing_[i] = xPtr_[laneBase_ + i];
+            backing_[n + i] = yPtr_[laneBase_ + i];
         }
-        return {rawCache_.data(), rawCache_.size()};
+        return {backing_.data(), backing_.size()};
     }
+
+    std::size_t alignment() const { return alignment_; }
+    const std::vector<float>& backing() const { return backing_; }
 
     // lane view (only for owned contiguous)
     std::vector<float>& lane(std::size_t component) {
@@ -233,6 +347,14 @@ struct Vec2Array {
         if (component == 0) return x;
         assert(component == 1);
         return y;
+    }
+    std::array<std::vector<float>*, 2> lanes() {
+        assert(ownsStorage_ && laneBase_ == 0 && (laneStride_ == logicalLength_ || laneStride_ == 0));
+        return {&x, &y};
+    }
+    std::array<const std::vector<float>*, 2> lanes() const {
+        assert(ownsStorage_ && laneBase_ == 0 && (laneStride_ == logicalLength_ || laneStride_ == 0));
+        return {&x, &y};
     }
 
     // bind external storage (view, non-owning)
@@ -264,6 +386,49 @@ struct Vec2Array {
     int forEach(const std::function<int(std::size_t, Vec2ViewConst)>& dg) const;
 
 private:
+    static bool canApplySIMD(const float* dst, const float* src, std::size_t len) {
+        return dst != nullptr && src != nullptr && len >= 4;
+    }
+
+    template <char Op>
+    static void applySIMD(float* dst, const float* src, std::size_t len) {
+        std::size_t i = 0;
+#if defined(__SSE__) || defined(_M_X64) || (defined(_M_IX86_FP) && _M_IX86_FP >= 1)
+        for (; i + 4 <= len; i += 4) {
+            __m128 a = _mm_loadu_ps(dst + i);
+            __m128 b = _mm_loadu_ps(src + i);
+            if constexpr (Op == '+') {
+                a = _mm_add_ps(a, b);
+            } else if constexpr (Op == '-') {
+                a = _mm_sub_ps(a, b);
+            }
+            _mm_storeu_ps(dst + i, a);
+        }
+#endif
+        for (; i < len; ++i) {
+            if constexpr (Op == '+') {
+                dst[i] += src[i];
+            } else if constexpr (Op == '-') {
+                dst[i] -= src[i];
+            }
+        }
+    }
+
+    static void applySIMDScalarMul(float* dst, float scalar, std::size_t len) {
+        std::size_t i = 0;
+#if defined(__SSE__) || defined(_M_X64) || (defined(_M_IX86_FP) && _M_IX86_FP >= 1)
+        const __m128 s = _mm_set1_ps(scalar);
+        for (; i + 4 <= len; i += 4) {
+            __m128 a = _mm_loadu_ps(dst + i);
+            a = _mm_mul_ps(a, s);
+            _mm_storeu_ps(dst + i, a);
+        }
+#endif
+        for (; i < len; ++i) {
+            dst[i] *= scalar;
+        }
+    }
+
     friend struct Vec2View;
     friend struct Vec2ViewConst;
 };
@@ -370,6 +535,14 @@ struct Vec3Array {
     mutable std::vector<float> rawCache_{};
 
     Vec3Array() = default;
+    Vec3Array(const Vec3Array& rhs) { copyFrom(rhs); }
+    Vec3Array& operator=(const Vec3Array& rhs) {
+        if (this == &rhs) return *this;
+        copyFrom(rhs);
+        return *this;
+    }
+    Vec3Array(Vec3Array&&) noexcept = default;
+    Vec3Array& operator=(Vec3Array&&) noexcept = default;
     explicit Vec3Array(std::size_t n) { ensureLength(n); }
     Vec3Array(std::initializer_list<Vec3> init) { assign(std::vector<Vec3>(init)); }
 
@@ -385,8 +558,8 @@ struct Vec3Array {
     void ensureLength(std::size_t len) {
         if (logicalLength_ == len) return;
         if (!ownsStorage_) {
-            assert(len <= viewCapacity_);
             logicalLength_ = len;
+            viewCapacity_ = len;
             return;
         }
         x.resize(len);
@@ -475,8 +648,15 @@ struct Vec3Array {
             zPtr_[i] = source[i].z;
         }
     }
-    void operator=(const Vec3Array& rhs) { copyFrom(rhs); }
     void copyFrom(const Vec3Array& rhs) {
+        ownsStorage_ = true;
+        xPtr_ = nullptr;
+        yPtr_ = nullptr;
+        zPtr_ = nullptr;
+        logicalLength_ = 0;
+        laneStride_ = 0;
+        laneBase_ = 0;
+        viewCapacity_ = 0;
         ensureLength(rhs.size());
         if (rhs.size() == 0) return;
         for (std::size_t i = 0; i < rhs.size(); ++i) {
@@ -620,6 +800,14 @@ struct Vec4Array {
     bool ownsStorage_{true};
 
     Vec4Array() = default;
+    Vec4Array(const Vec4Array& rhs) { copyFrom(rhs); }
+    Vec4Array& operator=(const Vec4Array& rhs) {
+        if (this == &rhs) return *this;
+        copyFrom(rhs);
+        return *this;
+    }
+    Vec4Array(Vec4Array&&) noexcept = default;
+    Vec4Array& operator=(Vec4Array&&) noexcept = default;
     explicit Vec4Array(std::size_t n) { ensureLength(n); }
     Vec4Array(std::initializer_list<Vec4> init) { assign(std::vector<Vec4>(init)); }
 
@@ -636,8 +824,8 @@ struct Vec4Array {
     void ensureLength(std::size_t len) {
         if (logicalLength_ == len) return;
         if (!ownsStorage_) {
-            assert(len <= viewCapacity_);
             logicalLength_ = len;
+            viewCapacity_ = len;
             return;
         }
         x.resize(len);
@@ -732,8 +920,16 @@ struct Vec4Array {
             wPtr_[i] = source[i].w;
         }
     }
-    void operator=(const Vec4Array& rhs) { copyFrom(rhs); }
     void copyFrom(const Vec4Array& rhs) {
+        ownsStorage_ = true;
+        xPtr_ = nullptr;
+        yPtr_ = nullptr;
+        zPtr_ = nullptr;
+        wPtr_ = nullptr;
+        logicalLength_ = 0;
+        laneStride_ = 0;
+        laneBase_ = 0;
+        viewCapacity_ = 0;
         ensureLength(rhs.size());
         if (rhs.size() == 0) return;
         for (std::size_t i = 0; i < rhs.size(); ++i) {

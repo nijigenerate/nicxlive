@@ -76,6 +76,7 @@ private:
     std::vector<uint8_t> data_{};
     bool locked_{false};
     bool modified_{false};
+    std::vector<uint8_t> lockedData_{};
     uint32_t runtimeUUID_{0};
     uint32_t backendId_{0};
 };

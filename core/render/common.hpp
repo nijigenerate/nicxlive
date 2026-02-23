@@ -8,6 +8,8 @@
 #include "part_draw_packet.hpp"
 
 #include <array>
+#include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <vector>
@@ -106,6 +108,25 @@ public:
     virtual void destroyDynamicComposite(const std::shared_ptr<DynamicCompositeSurface>& /*surface*/) {}
     virtual void drawPartPacket(const nodes::PartDrawPacket& /*packet*/) {}
     virtual void initializeRenderer() {}
+    virtual void resizeViewportTargets(int /*width*/, int /*height*/) {}
+    virtual void dumpViewport(std::vector<uint8_t>& dumpTo, int width, int height) {
+        const auto required = static_cast<std::size_t>(std::max(0, width)) * static_cast<std::size_t>(std::max(0, height)) * 4;
+        if (dumpTo.size() < required) return;
+        std::fill_n(dumpTo.begin(), static_cast<std::ptrdiff_t>(required), static_cast<uint8_t>(0));
+    }
+    virtual RenderResourceHandle renderImageHandle() { return 0; }
+    virtual RenderResourceHandle framebufferHandle() { return 0; }
+    virtual RenderResourceHandle mainAlbedoHandle() { return 0; }
+    virtual RenderResourceHandle mainEmissiveHandle() { return 0; }
+    virtual RenderResourceHandle mainBumpHandle() { return 0; }
+    virtual RenderResourceHandle blendFramebufferHandle() { return 0; }
+    virtual RenderResourceHandle blendAlbedoHandle() { return 0; }
+    virtual RenderResourceHandle blendEmissiveHandle() { return 0; }
+    virtual RenderResourceHandle blendBumpHandle() { return 0; }
+    virtual void beginScene() {}
+    virtual void endScene() {}
+    virtual void postProcessScene() {}
+    virtual void addBasicLightingPostProcess() {}
     // Immediate テクスチャ描画
     virtual void drawTextureAtPart(const Texture& /*tex*/, const std::shared_ptr<nodes::Part>& /*part*/) {}
     virtual void drawTextureAtPosition(const Texture& /*tex*/, const nodes::Vec2& /*pos*/, float /*opacity*/,
@@ -141,7 +162,6 @@ class RenderCommandEmitter {
 public:
     virtual ~RenderCommandEmitter() = default;
     virtual void beginFrame(RenderBackend*, RenderGpuState&) {}
-    virtual void playback(RenderBackend*) {}
     virtual void endFrame(RenderBackend*, RenderGpuState&) {}
     virtual void beginMask(bool /*useStencil*/) {}
     virtual void applyMask(const std::shared_ptr<nodes::Drawable>& /*mask*/, bool /*dodge*/) {}

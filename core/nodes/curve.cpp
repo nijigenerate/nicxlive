@@ -33,8 +33,8 @@ void BezierCurve::recomputeDerivatives() {
     if (n == 0) return;
     int order = static_cast<int>(n) - 1;
     for (int i = 0; i < order; ++i) {
-        derivatives_.x[i] = (controlPoints_.x[i + 1] - controlPoints_.x[i]) * order;
-        derivatives_.y[i] = (controlPoints_.y[i + 1] - controlPoints_.y[i]) * order;
+        derivatives_.xAt(i) = (controlPoints_.xAt(i + 1) - controlPoints_.xAt(i)) * order;
+        derivatives_.yAt(i) = (controlPoints_.yAt(i + 1) - controlPoints_.yAt(i)) * order;
     }
 }
 
@@ -43,7 +43,7 @@ Vec2 BezierCurve::point(float t) const {
     Vec2Array dst;
     evaluatePoints(ts, dst);
     if (dst.size() == 0) return {};
-    return Vec2{dst.x[0], dst.y[0]};
+    return Vec2{dst.xAt(0), dst.yAt(0)};
 }
 
 Vec2 BezierCurve::derivative(float t) const {
@@ -51,7 +51,7 @@ Vec2 BezierCurve::derivative(float t) const {
     Vec2Array dst;
     evaluateDerivatives(ts, dst);
     if (dst.size() == 0) return {};
-    return Vec2{dst.x[0], dst.y[0]};
+    return Vec2{dst.xAt(0), dst.yAt(0)};
 }
 
 void BezierCurve::evaluatePoints(const std::vector<float>& tSamples, Vec2Array& dst) const {
@@ -71,11 +71,11 @@ void BezierCurve::evaluatePoints(const std::vector<float>& tSamples, Vec2Array& 
         }
         for (int i = 0; i <= order; ++i) {
             float coeff = binomial(order, i) * onePow[order - i] * tPow[i];
-            resX += coeff * controlPoints_.x[i];
-            resY += coeff * controlPoints_.y[i];
+            resX += coeff * controlPoints_.xAt(i);
+            resY += coeff * controlPoints_.yAt(i);
         }
-        dst.x[idx] = resX;
-        dst.y[idx] = resY;
+        dst.xAt(idx) = resX;
+        dst.yAt(idx) = resY;
     }
 }
 
@@ -96,11 +96,11 @@ void BezierCurve::evaluateDerivatives(const std::vector<float>& tSamples, Vec2Ar
         }
         for (int i = 0; i <= order; ++i) {
             float coeff = binomial(order, i) * onePow[order - i] * tPow[i];
-            resX += coeff * derivatives_.x[i];
-            resY += coeff * derivatives_.y[i];
+            resX += coeff * derivatives_.xAt(i);
+            resY += coeff * derivatives_.yAt(i);
         }
-        dst.x[idx] = resX;
-        dst.y[idx] = resY;
+        dst.xAt(idx) = resX;
+        dst.yAt(idx) = resY;
     }
 }
 
@@ -129,7 +129,7 @@ Vec2 SplineCurve::point(float t) const {
     Vec2Array dst;
     evaluatePoints(ts, dst);
     if (dst.size() == 0) return {};
-    return Vec2{dst.x[0], dst.y[0]};
+    return Vec2{dst.xAt(0), dst.yAt(0)};
 }
 
 Vec2 SplineCurve::derivative(float t) const {
@@ -137,15 +137,14 @@ Vec2 SplineCurve::derivative(float t) const {
     Vec2Array dst;
     evaluateDerivatives(ts, dst);
     if (dst.size() == 0) return {};
-    return Vec2{dst.x[0], dst.y[0]};
+    return Vec2{dst.xAt(0), dst.yAt(0)};
 }
 
 void SplineCurve::evaluatePoints(const std::vector<float>& tSamples, Vec2Array& dst) const {
     dst.resize(tSamples.size());
     std::size_t len = controlPoints_.size();
     if (tSamples.empty() || len < 2) {
-        std::fill(dst.x.begin(), dst.x.end(), 0.0f);
-        std::fill(dst.y.begin(), dst.y.end(), 0.0f);
+        dst.fill(Vec2{0.0f, 0.0f});
         return;
     }
     for (std::size_t idx = 0; idx < tSamples.size(); ++idx) {
@@ -159,16 +158,16 @@ void SplineCurve::evaluatePoints(const std::vector<float>& tSamples, Vec2Array& 
         float lt = segment - static_cast<float>(segmentIndex);
         float lt2 = lt * lt;
         float lt3 = lt2 * lt;
-        float ax = 2.0f * controlPoints_.x[p1];
-        float ay = 2.0f * controlPoints_.y[p1];
-        float bx = controlPoints_.x[p2] - controlPoints_.x[p0];
-        float by = controlPoints_.y[p2] - controlPoints_.y[p0];
-        float cx = 2.0f * controlPoints_.x[p0] - 5.0f * controlPoints_.x[p1] + 4.0f * controlPoints_.x[p2] - controlPoints_.x[p3];
-        float cy = 2.0f * controlPoints_.y[p0] - 5.0f * controlPoints_.y[p1] + 4.0f * controlPoints_.y[p2] - controlPoints_.y[p3];
-        float dx = -controlPoints_.x[p0] + 3.0f * controlPoints_.x[p1] - 3.0f * controlPoints_.x[p2] + controlPoints_.x[p3];
-        float dy = -controlPoints_.y[p0] + 3.0f * controlPoints_.y[p1] - 3.0f * controlPoints_.y[p2] + controlPoints_.y[p3];
-        dst.x[idx] = 0.5f * (ax + bx * lt + cx * lt2 + dx * lt3);
-        dst.y[idx] = 0.5f * (ay + by * lt + cy * lt2 + dy * lt3);
+        float ax = 2.0f * controlPoints_.xAt(p1);
+        float ay = 2.0f * controlPoints_.yAt(p1);
+        float bx = controlPoints_.xAt(p2) - controlPoints_.xAt(p0);
+        float by = controlPoints_.yAt(p2) - controlPoints_.yAt(p0);
+        float cx = 2.0f * controlPoints_.xAt(p0) - 5.0f * controlPoints_.xAt(p1) + 4.0f * controlPoints_.xAt(p2) - controlPoints_.xAt(p3);
+        float cy = 2.0f * controlPoints_.yAt(p0) - 5.0f * controlPoints_.yAt(p1) + 4.0f * controlPoints_.yAt(p2) - controlPoints_.yAt(p3);
+        float dx = -controlPoints_.xAt(p0) + 3.0f * controlPoints_.xAt(p1) - 3.0f * controlPoints_.xAt(p2) + controlPoints_.xAt(p3);
+        float dy = -controlPoints_.yAt(p0) + 3.0f * controlPoints_.yAt(p1) - 3.0f * controlPoints_.yAt(p2) + controlPoints_.yAt(p3);
+        dst.xAt(idx) = 0.5f * (ax + bx * lt + cx * lt2 + dx * lt3);
+        dst.yAt(idx) = 0.5f * (ay + by * lt + cy * lt2 + dy * lt3);
     }
 }
 
@@ -176,8 +175,7 @@ void SplineCurve::evaluateDerivatives(const std::vector<float>& tSamples, Vec2Ar
     dst.resize(tSamples.size());
     std::size_t len = controlPoints_.size();
     if (tSamples.empty() || len < 2) {
-        std::fill(dst.x.begin(), dst.x.end(), 0.0f);
-        std::fill(dst.y.begin(), dst.y.end(), 0.0f);
+        dst.fill(Vec2{0.0f, 0.0f});
         return;
     }
     for (std::size_t idx = 0; idx < tSamples.size(); ++idx) {
@@ -190,16 +188,16 @@ void SplineCurve::evaluateDerivatives(const std::vector<float>& tSamples, Vec2Ar
         int p3 = std::min(static_cast<int>(len) - 1, p2 + 1);
         float lt = segment - static_cast<float>(segmentIndex);
         float lt2 = lt * lt;
-        float ax = 2.0f * controlPoints_.x[p1];
-        float ay = 2.0f * controlPoints_.y[p1];
-        float bx = controlPoints_.x[p2] - controlPoints_.x[p0];
-        float by = controlPoints_.y[p2] - controlPoints_.y[p0];
-        float cx = 2.0f * controlPoints_.x[p0] - 5.0f * controlPoints_.x[p1] + 4.0f * controlPoints_.x[p2] - controlPoints_.x[p3];
-        float cy = 2.0f * controlPoints_.y[p0] - 5.0f * controlPoints_.y[p1] + 4.0f * controlPoints_.y[p2] - controlPoints_.y[p3];
-        float dx = -controlPoints_.x[p0] + 3.0f * controlPoints_.x[p1] - 3.0f * controlPoints_.x[p2] + controlPoints_.x[p3];
-        float dy = -controlPoints_.y[p0] + 3.0f * controlPoints_.y[p1] - 3.0f * controlPoints_.y[p2] + controlPoints_.y[p3];
-        dst.x[idx] = 0.5f * (bx + 2.0f * cx * lt + 3.0f * dx * lt2);
-        dst.y[idx] = 0.5f * (by + 2.0f * cy * lt + 3.0f * dy * lt2);
+        float ax = 2.0f * controlPoints_.xAt(p1);
+        float ay = 2.0f * controlPoints_.yAt(p1);
+        float bx = controlPoints_.xAt(p2) - controlPoints_.xAt(p0);
+        float by = controlPoints_.yAt(p2) - controlPoints_.yAt(p0);
+        float cx = 2.0f * controlPoints_.xAt(p0) - 5.0f * controlPoints_.xAt(p1) + 4.0f * controlPoints_.xAt(p2) - controlPoints_.xAt(p3);
+        float cy = 2.0f * controlPoints_.yAt(p0) - 5.0f * controlPoints_.yAt(p1) + 4.0f * controlPoints_.yAt(p2) - controlPoints_.yAt(p3);
+        float dx = -controlPoints_.xAt(p0) + 3.0f * controlPoints_.xAt(p1) - 3.0f * controlPoints_.xAt(p2) + controlPoints_.xAt(p3);
+        float dy = -controlPoints_.yAt(p0) + 3.0f * controlPoints_.yAt(p1) - 3.0f * controlPoints_.yAt(p2) + controlPoints_.yAt(p3);
+        dst.xAt(idx) = 0.5f * (bx + 2.0f * cx * lt + 3.0f * dx * lt2);
+        dst.yAt(idx) = 0.5f * (by + 2.0f * cy * lt + 3.0f * dy * lt2);
     }
 }
 

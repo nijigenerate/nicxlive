@@ -43,8 +43,8 @@ void NodeFilterMixin<Derived>::applyDeformToChildren(const std::vector<std::shar
                 auto applySlot = [&](const std::shared_ptr<Node>& node, auto&& applySlotRef) -> void {
                     if (!node) return;
                     if (slot.vertexOffsets.size() > 0) {
-                        node->setValue("transform.t.x", slot.vertexOffsets.x[0]);
-                        node->setValue("transform.t.y", slot.vertexOffsets.y[0]);
+                        node->setValue("transform.t.x", slot.vertexOffsets.xAt(0));
+                        node->setValue("transform.t.y", slot.vertexOffsets.yAt(0));
                     }
                     if (recursive) {
                         for (auto& c : node->childrenRef()) {

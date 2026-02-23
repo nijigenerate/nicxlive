@@ -73,6 +73,11 @@ public:
     void runPostTaskImpl(std::size_t priority, core::RenderContext& ctx) override;
     void serializeSelfImpl(::nicxlive::core::serde::InochiSerializer& serializer, bool recursive, SerializeNodeFlags flags) const override;
     ::nicxlive::core::serde::SerdeException deserializeFromFghj(const ::nicxlive::core::serde::Fghj& data) override;
+    bool hasParam(const std::string& key) const override;
+    float getDefaultValue(const std::string& key) const override;
+    bool setValue(const std::string& key, float value) override;
+    float getValue(const std::string& key) const override;
+    void finalize() override;
     void drawDebug() override;
 
     void updateDriver() override;

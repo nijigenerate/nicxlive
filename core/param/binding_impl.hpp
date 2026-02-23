@@ -4,12 +4,39 @@
 #include "../nodes/common.hpp"
 #include "../serde.hpp"
 #include <algorithm>
+#include <cstdlib>
+#include <cstring>
+#include <cstdio>
 #include <limits>
 #include <memory>
 #include <vector>
 #include <string>
 
+namespace nicxlive::core {
+class Puppet;
+std::shared_ptr<nodes::Node> resolvePuppetNodeById(const std::shared_ptr<Puppet>& puppet, uint32_t uuid);
+std::shared_ptr<::nicxlive::core::param::Parameter> resolvePuppetParameterById(const std::shared_ptr<Puppet>& puppet, uint32_t uuid);
+}
+namespace nicxlive::core::nodes {
+bool areDeformationNodesCompatible(const std::shared_ptr<Node>& lhs, const std::shared_ptr<Node>& rhs);
+}
+
 namespace nicxlive::core::param {
+
+bool pushDeformationToNode(const std::shared_ptr<Node>& node, const DeformSlot& value);
+bool getDeformationNodeVertexCount(const std::shared_ptr<Node>& node, std::size_t& outVertexCount);
+
+inline bool traceParamBindingEnabled() {
+    static int enabled = -1;
+    if (enabled >= 0) return enabled != 0;
+    const char* v = std::getenv("NJCX_TRACE_PARAM_BIND");
+    if (!v) {
+        enabled = 0;
+        return false;
+    }
+    enabled = (std::strcmp(v, "1") == 0 || std::strcmp(v, "true") == 0 || std::strcmp(v, "TRUE") == 0) ? 1 : 0;
+    return enabled != 0;
+}
 
 template <typename T>
 class ParameterBindingImpl : public ParameterBinding {
@@ -26,9 +53,9 @@ public:
     }
 
     BindTarget getTarget() const override { return target; }
-    std::shared_ptr<Node> getNode() const override { return target.node.lock(); }
+    std::shared_ptr<Node> getNode() const override { return target.target.lock(); }
     void setTarget(const std::shared_ptr<Node>& node, const std::string& paramName) override {
-        target.node = node;
+        target.target = node;
         target.name = paramName;
         target.uuid = node ? node->uuid : 0;
         nodeUuid_ = target.uuid;
@@ -42,15 +69,16 @@ public:
         applyToTarget(interpolate(leftKeypoint, offset));
     }
 
-    void reconstruct(const std::shared_ptr<::nicxlive::core::Puppet>& /*puppet*/) override {
-        if (auto locked = target.node.lock()) {
-            target.uuid = locked->uuid;
-            nodeUuid_ = target.uuid;
-        }
-    }
+    void reconstruct(const std::shared_ptr<::nicxlive::core::Puppet>& /*puppet*/) override {}
 
     void finalize(const std::shared_ptr<::nicxlive::core::Puppet>& puppet) override {
-        reconstruct(puppet);
+        if (!puppet) return;
+        auto uuid = nodeUuid_ != 0 ? nodeUuid_ : target.uuid;
+        if (uuid == 0) return;
+        auto resolved = ::nicxlive::core::resolvePuppetNodeById(puppet, uuid);
+        target.target = resolved;
+        target.uuid = uuid;
+        nodeUuid_ = uuid;
     }
 
     void clear() override {
@@ -285,11 +313,6 @@ public:
             if (!commitPoints.empty()) continue;
             break;
         }
-        for (auto x = 0u; x < xCount; ++x) {
-            for (auto y = 0u; y < yCount; ++y) {
-                isSetFlags[x][y] = true;
-            }
-        }
     }
 
     std::vector<std::vector<bool>>& getIsSet() override { return isSetFlags; }
@@ -413,9 +436,6 @@ public:
     }
 
     uint32_t getNodeUUID() const override {
-        if (auto node = target.node.lock()) {
-            return node->uuid;
-        }
         return nodeUuid_;
     }
 
@@ -496,14 +516,25 @@ public:
     explicit ValueParameterBinding(Parameter* parameter)
         : ParameterBindingImpl<float>(parameter) {}
 
+    float valueAt(const Vec2u& idx) const {
+        if (idx.x < values.size() && idx.y < values[idx.x].size()) {
+            return values[idx.x][idx.y];
+        }
+        return 0.0f;
+    }
+
+    void update(const Vec2u& point, float value) {
+        setValue(point, value);
+    }
+
     void applyToTarget(const float& value) override {
-        if (auto n = target.node.lock()) {
+        if (auto n = target.target.lock()) {
             n->setValue(target.name, value);
         }
     }
 
     void clearValue(float& v) override {
-        if (auto n = target.node.lock()) {
+        if (auto n = target.target.lock()) {
             v = n->getDefaultValue(target.name);
         } else {
             v = 0.0f;
@@ -511,7 +542,7 @@ public:
     }
 
     void scaleValueAt(const Vec2u& index, int axis, float scale) override {
-        if (auto n = target.node.lock()) {
+        if (auto n = target.target.lock()) {
             auto cur = getValue(index);
             setValue(index, n->scaleValue(target.name, cur, axis, scale));
         } else {
@@ -533,15 +564,17 @@ public:
         : ParameterBindingImpl<DeformSlot>(parameter) {}
 
     void applyToTarget(const DeformSlot& value) override {
-        if (auto n = target.node.lock()) {
-            if (value.vertexOffsets.size() > 0) {
-                n->setValue("transform.t.x", value.vertexOffsets.x[0]);
-                n->setValue("transform.t.y", value.vertexOffsets.y[0]);
-            }
-        }
+        if (target.name != "deform") return;
+        pushDeformationToNode(target.target.lock(), value);
     }
 
     void clearValue(DeformSlot& v) override {
+        std::size_t vertexCount = 0;
+        if (getDeformationNodeVertexCount(target.target.lock(), vertexCount)) {
+            v.vertexOffsets.resize(vertexCount);
+            v.vertexOffsets.fill(Vec2{0.0f, 0.0f});
+            return;
+        }
         v.vertexOffsets.clear();
     }
 
@@ -560,29 +593,35 @@ public:
         return this->interpolate(leftKey, offset);
     }
 
+    void update(const Vec2u& point, const Vec2Array& offsets) {
+        if (point.x >= values.size() || point.y >= values[point.x].size()) return;
+        values[point.x][point.y].vertexOffsets = offsets;
+        isSetFlags[point.x][point.y] = true;
+        reInterpolate();
+    }
+
     void scaleValueAt(const Vec2u& index, int axis, float scale) override {
         if (index.x >= values.size() || index.y >= values[index.x].size()) return;
         DeformSlot cur = values[index.x][index.y];
         if (axis == -1) {
             for (std::size_t i = 0; i < cur.vertexOffsets.size(); ++i) {
-                cur.vertexOffsets.x[i] *= scale;
-                cur.vertexOffsets.y[i] *= scale;
+                cur.vertexOffsets.xAt(i) *= scale;
+                cur.vertexOffsets.yAt(i) *= scale;
             }
         } else if (axis == 0) {
             for (std::size_t i = 0; i < cur.vertexOffsets.size(); ++i) {
-                cur.vertexOffsets.x[i] *= scale;
+                cur.vertexOffsets.xAt(i) *= scale;
             }
         } else if (axis == 1) {
             for (std::size_t i = 0; i < cur.vertexOffsets.size(); ++i) {
-                cur.vertexOffsets.y[i] *= scale;
+                cur.vertexOffsets.yAt(i) *= scale;
             }
         }
         setValue(index, cur);
     }
 
     bool isCompatibleWithNode(const std::shared_ptr<Node>& other) const override {
-        (void)other;
-        return true;
+        return ::nicxlive::core::nodes::areDeformationNodesCompatible(target.target.lock(), other);
     }
 
     void remapOffsets(const std::vector<std::size_t>& remap, const ::nicxlive::core::common::Vec2Array& replacement, std::size_t newLength) {
@@ -595,8 +634,7 @@ public:
                     for (std::size_t oldIdx = 0; oldIdx < remap.size(); ++oldIdx) {
                         auto newIdx = remap[oldIdx];
                         if (newIdx < reordered.size()) {
-                            reordered.x[newIdx] = offsets.x[oldIdx];
-                            reordered.y[newIdx] = offsets.y[oldIdx];
+                            reordered.set(newIdx, Vec2{offsets.xAt(oldIdx), offsets.yAt(oldIdx)});
                         }
                     }
                     offsets = reordered;
@@ -606,8 +644,7 @@ public:
                     if (x < isSetFlags.size() && y < isSetFlags[x].size()) isSetFlags[x][y] = true;
                 } else {
                     offsets.resize(newLength);
-                    std::fill(offsets.x.begin(), offsets.x.end(), 0.0f);
-                    std::fill(offsets.y.begin(), offsets.y.end(), 0.0f);
+                    offsets.fill(Vec2{0.0f, 0.0f});
                     if (x < isSetFlags.size() && y < isSetFlags[x].size()) isSetFlags[x][y] = false;
                 }
             }
@@ -616,22 +653,41 @@ public:
     }
 };
 
-inline std::shared_ptr<ParameterBinding> Parameter::getBinding(const std::shared_ptr<Node>& /*self*/, const std::string& key) const {
-    auto it = bindingMap.find(key);
-    if (it != bindingMap.end()) return it->second;
+class ParameterParameterBinding;
+std::shared_ptr<ParameterBinding> makeParameterParameterBinding(Parameter* parameter);
+
+inline std::shared_ptr<ParameterBinding> Parameter::getBinding(const std::shared_ptr<Node>& self, const std::string& key) const {
+    const auto selfUuid = self ? self->uuid : 0u;
+    for (const auto& kv : bindingMap) {
+        const auto& b = kv.second;
+        if (!b) continue;
+        if (b->getName() != key) continue;
+        auto bt = b->getTarget();
+        if (selfUuid != 0 && bt.uuid != selfUuid) continue;
+        return b;
+    }
     return nullptr;
 }
 
 inline std::shared_ptr<ParameterBinding> Parameter::getOrAddBinding(const std::shared_ptr<Node>& target, const std::string& key) {
-    auto it = bindingMap.find(key);
-    if (it != bindingMap.end()) return it->second;
+    const auto targetUuid = target ? target->uuid : 0u;
+    for (const auto& kv : bindingMap) {
+        const auto& b = kv.second;
+        if (!b) continue;
+        auto bt = b->getTarget();
+        if (bt.uuid == targetUuid && bt.name == key) return b;
+    }
+
+    auto makeMapKey = [&](const std::string& name) {
+        return std::to_string(targetUuid) + ":" + name + ":" + std::to_string(bindingMap.size());
+    };
     if (key == "deform") {
         auto b = std::make_shared<DeformationParameterBinding>(this, target, key);
-        bindingMap[key] = b;
+        bindingMap[makeMapKey(key)] = b;
         return b;
     } else {
         auto b = std::make_shared<ValueParameterBinding>(this, target, key);
-        bindingMap[key] = b;
+        bindingMap[makeMapKey(key)] = b;
         return b;
     }
 }
@@ -649,37 +705,150 @@ inline void Parameter::makeIndexable() {
     indexableName = name;
 }
 
+inline ::nicxlive::core::serde::SerdeException Parameter::deserializeFromFghj(const ::nicxlive::core::serde::Fghj& data) {
+    auto readVec2 = [](const ::nicxlive::core::serde::Fghj& node, Vec2& out) {
+        if (node.empty()) return;
+        std::size_t i = 0;
+        for (const auto& elem : node) {
+            float v = elem.second.get_value<float>();
+            if (i == 0) out.x = v;
+            else if (i == 1) out.y = v;
+            ++i;
+            if (i >= 2) break;
+        }
+    };
+
+    try {
+        if (auto u = data.get_optional<uint32_t>("uuid")) uuid = *u;
+        if (auto n = data.get_optional<std::string>("name")) name = *n;
+        if (auto vec2 = data.get_optional<bool>("is_vec2")) isVec2 = *vec2;
+        if (auto d = data.get_child_optional("defaults")) readVec2(*d, defaults);
+        if (auto mn = data.get_child_optional("min")) readVec2(*mn, min);
+        if (auto mx = data.get_child_optional("max")) readVec2(*mx, max);
+
+        if (auto mode = data.get_optional<std::string>("merge_mode")) {
+            if (*mode == "Additive") mergeMode = ParamMergeMode::Additive;
+            else if (*mode == "Weighted") mergeMode = ParamMergeMode::Weighted;
+            else if (*mode == "Multiplicative") mergeMode = ParamMergeMode::Multiplicative;
+            else if (*mode == "Forced") mergeMode = ParamMergeMode::Forced;
+            else mergeMode = ParamMergeMode::Passthrough;
+        }
+
+        if (auto points = data.get_child_optional("axis_points")) {
+            axisPoints[0].clear();
+            axisPoints[1].clear();
+            std::size_t axis = 0;
+            for (const auto& axisNode : *points) {
+                if (axis > 1) break;
+                for (const auto& valNode : axisNode.second) {
+                    axisPoints[axis].push_back(valNode.second.get_value<float>());
+                }
+                ++axis;
+            }
+            if (axisPoints[0].empty()) axisPoints[0] = {0.0f, 1.0f};
+            if (!isVec2 || axisPoints[1].empty()) axisPoints[1] = {0.0f};
+        }
+
+        bindingMap.clear();
+        if (auto bindings = data.get_child_optional("bindings")) {
+            for (const auto& bindingNode : *bindings) {
+                const auto& child = bindingNode.second;
+                auto paramName = child.get<std::string>("param_name", "");
+                if (paramName.empty()) continue;
+                int paramId = child.get<int>("param_name", -1);
+
+                std::shared_ptr<ParameterBinding> binding;
+                if (paramName == "deform") {
+                    binding = std::make_shared<DeformationParameterBinding>(this);
+                } else if (paramName == "X" || paramName == "Y" || paramId == 0 || paramId == 1) {
+                    binding = makeParameterParameterBinding(this);
+                } else {
+                    binding = std::make_shared<ValueParameterBinding>(this);
+                }
+                if (!binding) continue;
+                if (auto err = binding->deserializeFromFghj(child)) return err;
+                auto t = binding->getTarget();
+                auto mapKey = std::to_string(t.uuid) + ":" + binding->getName() + ":" + std::to_string(bindingMap.size());
+                bindingMap[mapKey] = binding;
+            }
+        }
+    } catch (const std::exception& ex) {
+        return std::string(ex.what());
+    }
+    return std::nullopt;
+}
+
+inline void Parameter::reconstruct(const std::shared_ptr<::nicxlive::core::Puppet>& puppet) {
+    for (auto& kv : bindingMap) {
+        if (kv.second) kv.second->reconstruct(puppet);
+    }
+}
+
+inline void Parameter::finalize(const std::shared_ptr<::nicxlive::core::Puppet>& puppet) {
+    makeIndexable();
+    value = defaults;
+
+    std::map<std::string, std::shared_ptr<ParameterBinding>> valid;
+    for (auto& kv : bindingMap) {
+        auto& b = kv.second;
+        if (!b) continue;
+        auto targetUuid = b->getNodeUUID();
+        if (targetUuid == 0) continue;
+        // D parity: keep binding when either Node or Parameter UUID resolves.
+        bool validTarget = false;
+        if (::nicxlive::core::resolvePuppetNodeById(puppet, targetUuid)) {
+            validTarget = true;
+        } else if (::nicxlive::core::resolvePuppetParameterById(puppet, targetUuid)) {
+            validTarget = true;
+        }
+        if (validTarget) {
+            b->finalize(puppet);
+            valid.emplace(kv.first, b);
+        }
+    }
+    bindingMap.swap(valid);
+}
+
 inline void Parameter::update() {
     if (!active) return;
     previousInternal = latestInternal;
-    switch (mergeMode) {
-    case ParamMergeMode::Additive:
-        latestInternal.x += value.x;
-        latestInternal.y += value.y;
-        break;
-    case ParamMergeMode::Weighted:
-        latestInternal.x = (latestInternal.x + value.x) * 0.5f;
-        latestInternal.y = (latestInternal.y + value.y) * 0.5f;
-        break;
-    case ParamMergeMode::Multiplicative:
-        latestInternal.x *= value.x;
-        latestInternal.y *= value.y;
-        break;
-    case ParamMergeMode::Forced:
-        latestInternal = value;
-        break;
-    case ParamMergeMode::Passthrough:
-    default:
-        latestInternal = value;
-        break;
+    auto sum = iadd.csum();
+    auto mul = imul.avg();
+    latestInternal = Vec2{
+        (value.x + sum.x) * mul.x,
+        (value.y + sum.y) * mul.y,
+    };
+    if (bindingMap.empty() && traceParamBindingEnabled()) {
+        std::fprintf(stderr,
+                     "[nicxlive][Param] no-binding uuid=%u name=%s value=(%.6f,%.6f) latest=(%.6f,%.6f)\n",
+                     uuid, name.c_str(), value.x, value.y, latestInternal.x, latestInternal.y);
     }
+
+    auto mapInternalValue = [&](const Vec2& in) {
+        const float rx = (max.x - min.x);
+        const float ry = (max.y - min.y);
+        float ox = (rx == 0.0f) ? 0.0f : (in.x - min.x) / rx;
+        float oy = (ry == 0.0f) ? 0.0f : (in.y - min.y) / ry;
+        ox = std::clamp(ox, 0.0f, 1.0f);
+        oy = std::clamp(oy, 0.0f, 1.0f);
+        return Vec2{ox, oy};
+    };
 
     Vec2u left{};
     Vec2 sub{};
-    findOffset(normalizedValue(), left, sub);
+    auto mapped = mapInternalValue(latestInternal);
+    findOffset(mapped, left, sub);
     for (auto& [_, b] : bindingMap) {
-        if (b) b->apply(left, sub);
+        if (!b) continue;
+        b->apply(left, sub);
+        if (auto node = b->getTarget().target.lock()) {
+            if (valueChanged()) {
+                node->notifyChange(node);
+            }
+        }
     }
+    iadd.clear();
+    imul.clear();
 }
 
 class ParameterParameterBinding : public ParameterBindingImpl<float> {
@@ -690,6 +859,8 @@ public:
     std::shared_ptr<Parameter> targetParameter() const;
     int paramAxis() const;
 
+    ::nicxlive::core::serde::SerdeException deserializeFromFghj(const ::nicxlive::core::serde::Fghj& data) override;
+    void finalize(const std::shared_ptr<::nicxlive::core::Puppet>& puppet) override;
     void applyToTarget(const float& value) override;
     void clearValue(float& v) override;
     bool isCompatibleWithNode(const std::shared_ptr<Node>& /*other*/) const override;
@@ -708,10 +879,36 @@ inline ParameterParameterBinding::ParameterParameterBinding(Parameter* parameter
 inline std::shared_ptr<Parameter> ParameterParameterBinding::targetParameter() const { return targetParam.lock(); }
 inline int ParameterParameterBinding::paramAxis() const { return axisId; }
 
+inline ::nicxlive::core::serde::SerdeException ParameterParameterBinding::deserializeFromFghj(const ::nicxlive::core::serde::Fghj& data) {
+    if (auto axis = data.get_optional<int>("param_name")) {
+        axisId = (*axis == 0) ? 0 : 1;
+        target.name = (axisId == 0) ? "X" : "Y";
+    } else {
+        target.name = data.get<std::string>("param_name", "X");
+        axisId = (target.name == "Y") ? 1 : 0;
+    }
+    return ParameterBindingImpl<float>::deserializeFromFghj(data);
+}
+
+inline void ParameterParameterBinding::finalize(const std::shared_ptr<::nicxlive::core::Puppet>& puppet) {
+    targetParam = ::nicxlive::core::resolvePuppetParameterById(puppet, nodeUuid_);
+}
+
 inline void ParameterParameterBinding::applyToTarget(const float& value) {
     if (auto tp = targetParam.lock()) {
-        if (axisId == 0) tp->value.x = value;
-        else tp->value.y = value;
+        bool prevChanged = tp->valueChanged();
+        Vec2 paramVal = tp->latestInternal;
+        if (axisId == 0) {
+            paramVal.x = value;
+            tp->pushIOffsetAxis(axisId, paramVal.x, ParamMergeMode::Forced);
+        } else {
+            paramVal.y = value;
+            tp->pushIOffsetAxis(axisId, paramVal.y, ParamMergeMode::Forced);
+        }
+        bool changed = tp->valueChanged();
+        if (!prevChanged && changed) {
+            tp->update();
+        }
     }
 }
 
@@ -725,6 +922,10 @@ inline void ParameterParameterBinding::clearValue(float& v) {
 
 inline bool ParameterParameterBinding::isCompatibleWithNode(const std::shared_ptr<Node>& /*other*/) const {
     return false;
+}
+
+inline std::shared_ptr<ParameterBinding> makeParameterParameterBinding(Parameter* parameter) {
+    return std::make_shared<ParameterParameterBinding>(parameter);
 }
 
 // --- Serialization helpers (template) ---
@@ -741,10 +942,10 @@ inline boost::property_tree::ptree serializeValueNode(const DeformSlot& v) {
     boost::property_tree::ptree ys;
     for (std::size_t i = 0; i < v.vertexOffsets.size(); ++i) {
         boost::property_tree::ptree xv;
-        xv.put("", v.vertexOffsets.x[i]);
+        xv.put("", v.vertexOffsets.xAt(i));
         xs.push_back({"", xv});
         boost::property_tree::ptree yv;
-        yv.put("", v.vertexOffsets.y[i]);
+        yv.put("", v.vertexOffsets.yAt(i));
         ys.push_back({"", yv});
     }
     node.add_child("x", xs);
@@ -758,19 +959,61 @@ inline void deserializeValueNode(const boost::property_tree::ptree& node, float&
 
 inline void deserializeValueNode(const boost::property_tree::ptree& node, DeformSlot& out) {
     static const boost::property_tree::ptree empty{};
+    if (const auto voIt = node.find("vertexOffsets"); voIt != node.not_found()) {
+        deserializeValueNode(voIt->second, out);
+        return;
+    }
     const auto xsIt = node.find("x");
     const auto ysIt = node.find("y");
-    const auto& xs = xsIt != node.not_found() ? xsIt->second : empty;
-    const auto& ys = ysIt != node.not_found() ? ysIt->second : empty;
-    std::size_t n = std::min(xs.size(), ys.size());
-    out.vertexOffsets.resize(n);
-    std::size_t idx = 0;
-    for (auto it = xs.begin(); it != xs.end() && idx < n; ++it, ++idx) {
-        out.vertexOffsets.x[idx] = it->second.get_value<float>();
+    if (xsIt != node.not_found() && ysIt != node.not_found()) {
+        const auto& xs = xsIt->second;
+        const auto& ys = ysIt->second;
+        std::size_t n = std::min(xs.size(), ys.size());
+        out.vertexOffsets.resize(n);
+        std::size_t idx = 0;
+        for (auto it = xs.begin(); it != xs.end() && idx < n; ++it, ++idx) {
+            out.vertexOffsets.xAt(idx) = it->second.get_value<float>();
+        }
+        idx = 0;
+        for (auto it = ys.begin(); it != ys.end() && idx < n; ++it, ++idx) {
+            out.vertexOffsets.yAt(idx) = it->second.get_value<float>();
+        }
+        return;
     }
-    idx = 0;
-    for (auto it = ys.begin(); it != ys.end() && idx < n; ++it, ++idx) {
-        out.vertexOffsets.y[idx] = it->second.get_value<float>();
+
+    // D nijilive format: deform slot is a list of vec2 entries (each vec2 serialized as [x, y]).
+    std::vector<float> xs;
+    std::vector<float> ys;
+    xs.reserve(node.size());
+    ys.reserve(node.size());
+    for (const auto& elem : node) {
+        const auto& v = elem.second;
+        float x = 0.0f;
+        float y = 0.0f;
+        bool parsed = false;
+
+        if (auto ox = v.get_optional<float>("x")) {
+            x = *ox;
+            y = v.get<float>("y", 0.0f);
+            parsed = true;
+        } else {
+            auto it = v.begin();
+            if (it != v.end()) {
+                x = it->second.get_value<float>();
+                ++it;
+                if (it != v.end()) y = it->second.get_value<float>();
+                parsed = true;
+            }
+        }
+
+        if (parsed) {
+            xs.push_back(x);
+            ys.push_back(y);
+        }
+    }
+    out.vertexOffsets.resize(xs.size());
+    for (std::size_t i = 0; i < xs.size(); ++i) {
+        out.vertexOffsets.set(i, Vec2{xs[i], ys[i]});
     }
 }
 } // namespace detail
@@ -851,6 +1094,19 @@ template <typename T>
             yi++;
         }
         xi++;
+    }
+
+    if (parameter) {
+        const auto xCount = parameter->axisPointCount(0);
+        const auto yCount = parameter->axisPointCount(1);
+        if (values.size() != xCount) return std::string("Mismatched X value count");
+        for (const auto& row : values) {
+            if (row.size() != yCount) return std::string("Mismatched Y value count");
+        }
+        if (isSetFlags.size() != xCount) return std::string("Mismatched X isSet count");
+        for (const auto& row : isSetFlags) {
+            if (row.size() != yCount) return std::string("Mismatched Y isSet count");
+        }
     }
 
     return std::nullopt;

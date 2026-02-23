@@ -30,6 +30,12 @@ struct MaskBinding {
     MaskingMode mode{MaskingMode::Mask};
 };
 
+struct RenderSpace {
+    Mat4 matrix{Mat4::identity()};
+    Vec2 scale{1.0f, 1.0f};
+    float rotation{0.0f};
+};
+
 inline bool useMultistageBlend(BlendMode mode) {
     switch (mode) {
     case BlendMode::Screen:
@@ -71,8 +77,10 @@ public:
 
     bool hasOffscreenModelMatrix{false};
     Mat4 offscreenModelMatrix{Mat4::identity()};
+    bool hasOffscreenRenderMatrix{false};
+    Mat4 offscreenRenderMatrix{Mat4::identity()};
 
-    Part() = default;
+    Part();
     Part(const MeshData& data, const std::array<std::shared_ptr<::nicxlive::core::Texture>, 3>& tex = {}, uint32_t uuidVal = 0);
     Part(const MeshData& data, const std::vector<std::shared_ptr<::nicxlive::core::Texture>>& tex, uint32_t uuidVal = 0);
 
@@ -114,7 +122,7 @@ public:
 
     void runBeginTask(core::RenderContext& ctx) override;
 
-    void rebuffer(const MeshData& data);
+    virtual void rebuffer(const MeshData& data);
     void setTexture(std::size_t slot, const std::shared_ptr<::nicxlive::core::Texture>& tex);
     std::shared_ptr<::nicxlive::core::Texture> getTexture(std::size_t slot) const;
     void markTextureDirty(std::size_t slot);
@@ -126,10 +134,13 @@ public:
     void drawOneDirect(bool forMasking);
     void drawOneImmediate();
     void enqueueRenderCommands(core::RenderContext& ctx, const std::function<void(::nicxlive::core::RenderCommandEmitter&)>& post = {});
+    RenderSpace currentRenderSpace(bool forceIgnorePuppet = false) const;
     void fillDrawPacket(const Node& header, PartDrawPacket& packet, bool isMask = false) const override;
     Mat4 immediateModelMatrix() const;
     void setOffscreenModelMatrix(const Mat4& m);
+    void setOffscreenRenderMatrix(const Mat4& m);
     void clearOffscreenModelMatrix();
+    void clearOffscreenRenderMatrix();
     bool backendRenderable() const;
     std::size_t backendMaskCount() const;
     std::vector<MaskBinding> backendMasks() const;

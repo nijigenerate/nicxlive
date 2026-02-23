@@ -1,4 +1,6 @@
-# GridDeformer 実装互換性チェック (D ↔ C++)
+﻿# GridDeformer 実装互換性チェック (D ↔ C++)
+
+判定基準: D実装を正とし、Dに存在してC++にない項目は `✗（未実装）`、Dに存在せずC++のみにある項目は `✗（削除候補）` とする。
 
 | 項目 | D 実装 | C++ 現状 | 互換性評価 |
 | --- | --- | --- | --- |
@@ -34,6 +36,7 @@
 | メソッド sampleGridPoints | バイリニア補間（SIMD/スカラ両方） | バイリニア補間（4レーンバッチ＋スカラ） | ◯ |
 | メソッド setupChildNoRecurse | dynamic/translateChildren に応じ pre/post hook 設定。Composite が propagateMeshGroup のときは hook を外す | 同等（Composite propagateMeshGroup では hook を外す） | ◯ |
 | メソッド releaseChildNoRecurse | hook 解除 | 同等 | ◯ |
+| hook 同一性管理 | `(stage, func)` 単位で登録/解除 | `stage + tag` 単位で登録/解除を一致化 | ◯ |
 | メソッド adoptGridFromAxes | 軸採用 | 同等 | ◯ |
 | メソッド adoptFromVertices | 頂点から軸採用（形状保持可） | 同等 | ◯ |
 | メソッド deriveAxes | 頂点から軸推定 | 同等 | ◯ |
@@ -42,3 +45,4 @@
 | メソッド gridIndex | x,y から一次元 index | 同等 | ◯ |
 | メソッド serializeSelfImpl | 軸/formation/dynamic を保存 | 実装済 | ◯ |
 | メソッド deserializeFromFghj | 軸/formation/dynamic 復元＋軸設定 | 実装済 | ◯ |
+

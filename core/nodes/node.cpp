@@ -52,20 +52,6 @@ void registerDefaultNodes() {
     Node::inRegisterNodeType("SimplePhysics", [] { return std::make_shared<SimplePhysicsDriver>(); });
 }
 
-Transform combine(const Transform& a, const Transform& b) {
-    Transform out = a;
-    out.translation.x += b.translation.x;
-    out.translation.y += b.translation.y;
-    out.translation.z += b.translation.z;
-    out.rotation.x += b.rotation.x;
-    out.rotation.y += b.rotation.y;
-    out.rotation.z += b.rotation.z;
-    out.scale.x *= b.scale.x;
-    out.scale.y *= b.scale.y;
-    out.scale.z *= b.scale.z;
-    return out;
-}
-
 } // namespace
 
 // Debug line storage (for drawOrientation / drawBounds parity)
@@ -285,36 +271,28 @@ Transform Node::transform() {
         localTransform.update();
         offsetTransform.update();
         Transform combined = localTransform.calcOffset(offsetTransform);
-        if (!lockToRoot) {
-            if (auto p = parent.lock()) {
-                combined = combine(combined, p->transform());
-            }
-        } else {
+        if (lockToRoot) {
+            Transform trans{Vec3{0.0f, 0.0f, 0.0f}};
             if (auto pup = puppetRef()) {
                 if (auto root = pup->root) {
-                    combined = combine(combined, root->localTransform);
-                } else {
-                    combined = combine(combined, pup->transform);
+                    trans = root->localTransform;
                 }
             }
+            combined = combined * trans;
+        } else if (auto p = parent.lock()) {
+            combined = combined * p->transform();
         }
-        // overrideTransformMatrix を優先
+        globalTransform = combined;
+        // Prefer explicit override matrix for dynamic matrix consumers.
         if (overrideTransformMatrix) {
             cachedWorld = *overrideTransformMatrix;
-            globalTransform.translation.x = cachedWorld[0][3];
-            globalTransform.translation.y = cachedWorld[1][3];
-            globalTransform.translation.z = cachedWorld[2][3];
         } else {
-            // one-time transformを適用
+            // Apply one-time transform only to cached world matrix.
             Mat4 mat = combined.toMat4();
             if (oneTimeTransformPtr) {
                 mat = Mat4::multiply(mat, *oneTimeTransformPtr);
             }
             cachedWorld = mat;
-            globalTransform = combined;
-            globalTransform.translation.x = cachedWorld[0][3];
-            globalTransform.translation.y = cachedWorld[1][3];
-            globalTransform.translation.z = cachedWorld[2][3];
         }
         recalcTransform = false;
     }
@@ -336,11 +314,10 @@ Transform Node::transformLocal() const {
 
 Transform Node::transformNoLock() {
     localTransform.update();
-    Transform combined = localTransform;
     if (auto p = parent.lock()) {
-        combined = combine(combined, p->transform());
+        return localTransform * p->transform();
     }
-    return combined;
+    return localTransform;
 }
 
 Transform Node::transformNoLock() const {
@@ -655,7 +632,7 @@ void Node::runPreProcessTask(core::RenderContext&) {
 }
 
 void Node::runDynamicTask(core::RenderContext&) {
-    // base: no-op (D 同様)
+    // base: no-op (D 同槁E
 }
 
 void Node::runPostTaskImpl(std::size_t priority, core::RenderContext&) {
@@ -676,7 +653,6 @@ void Node::runRenderBeginTask(core::RenderContext&) {}
 void Node::runRenderEndTask(core::RenderContext&) {}
 
 void Node::registerRenderTasks(core::TaskScheduler& scheduler) {
-    if (!allowRenderTasks) return;
     scheduler.addTask(core::TaskOrder::Init, core::TaskKind::Init, [this](core::RenderContext& ctx) { runBeginTask(ctx); });
 
     auto hasFlag = [&](NodeTaskFlag flag) { return has_flag(taskFlags, flag); };
@@ -709,8 +685,10 @@ void Node::registerRenderTasks(core::TaskScheduler& scheduler) {
     scheduler.addTask(core::TaskOrder::Final, core::TaskKind::Finalize, [this](core::RenderContext& ctx) { runFinalTask(ctx); });
 
     auto orderedChildren = children;
-    std::stable_sort(orderedChildren.begin(), orderedChildren.end(), [](const std::shared_ptr<Node>& a, const std::shared_ptr<Node>& b) {
-        if (!a || !b) return false;
+    std::sort(orderedChildren.begin(), orderedChildren.end(), [](const std::shared_ptr<Node>& a, const std::shared_ptr<Node>& b) {
+        if (!a && !b) return false;
+        if (!a) return false;
+        if (!b) return true;
         return a->zSort() > b->zSort();
     });
     for (auto& child : orderedChildren) {
@@ -758,7 +736,7 @@ std::array<float, 4> Node::getCombinedBounds(bool reupdate, bool countPuppet) {
         combined[2] = std::max(combined[2], cb[2]);
         combined[3] = std::max(combined[3], cb[3]);
     }
-    // Puppet transformを適用する場合
+    // Puppet transformを適用する場吁E
     if (countPuppet) {
         if (auto pup = puppetRef()) {
             auto mat = pup->transform.toMat4();
@@ -784,7 +762,7 @@ Rect Node::getCombinedBoundsRect(bool reupdate, bool countPuppet) {
 }
 
 void Node::drawOrientation() {
-    // D 版同様にデバッグラインをバッファへ記録（描画は呼び出し側/バックエンドで処理）
+    // D 版同様にチE��チE��ラインをバチE��ァへ記録�E�描画は呼び出し�E/バックエンドで処琁E��E
     DebugLine lines[3]{
         {Vec3{0, 0, 0}, Vec3{32, 0, 0}, Vec4{1, 0, 0, 0.7f}},
         {Vec3{0, 0, 0}, Vec3{0, -32, 0}, Vec4{0, 1, 0, 0.7f}},
@@ -964,21 +942,21 @@ std::shared_ptr<Node> Node::dup() {
 }
 
 bool Node::setupChild(const std::shared_ptr<Node>&) {
-    // D 実装同様デフォルトで処理を止める
+    // D 実裁E��様デフォルトで処琁E��止める
     return false;
 }
 
 bool Node::releaseChild(const std::shared_ptr<Node>&) {
-    // D 実装同様デフォルトで処理を止める
+    // D 実裁E��様デフォルトで処琁E��止める
     return false;
 }
 
 void Node::setupSelf() {
-    // デフォルトは何もしない（D と同様）
+    // チE��ォルト�E何もしなぁE��E と同様！E
 }
 
 void Node::releaseSelf() {
-    // デフォルトは何もしない（D と同様）
+    // チE��ォルト�E何もしなぁE��E と同様！E
 }
 
 Mat4 Node::getDynamicMatrix() const {
@@ -1044,31 +1022,7 @@ bool Node::canReparent(const std::shared_ptr<Node>& to) const {
 }
 
 ::nicxlive::core::serde::SerdeException Node::deserializeTransform(const ::nicxlive::core::serde::Fghj& data) {
-    try {
-        if (auto tx = data.get_optional<float>("x")) localTransform.translation.x = *tx;
-        if (auto ty = data.get_optional<float>("y")) localTransform.translation.y = *ty;
-        if (auto tz = data.get_optional<float>("z")) localTransform.translation.z = *tz;
-        if (auto rx = data.get_optional<float>("rx")) localTransform.rotation.x = *rx;
-        if (auto ry = data.get_optional<float>("ry")) localTransform.rotation.y = *ry;
-        if (auto rz = data.get_optional<float>("rz")) localTransform.rotation.z = *rz;
-        if (auto sx = data.get_optional<float>("sx")) localTransform.scale.x = *sx;
-        if (auto sy = data.get_optional<float>("sy")) localTransform.scale.y = *sy;
-        if (auto sz = data.get_optional<float>("sz")) localTransform.scale.z = *sz;
-        if (auto ot = data.get_child_optional("offsetTransform")) {
-            if (auto tx = ot->get_optional<float>("x")) offsetTransform.translation.x = *tx;
-            if (auto ty = ot->get_optional<float>("y")) offsetTransform.translation.y = *ty;
-            if (auto tz = ot->get_optional<float>("z")) offsetTransform.translation.z = *tz;
-            if (auto rx = ot->get_optional<float>("rx")) offsetTransform.rotation.x = *rx;
-            if (auto ry = ot->get_optional<float>("ry")) offsetTransform.rotation.y = *ry;
-            if (auto rz = ot->get_optional<float>("rz")) offsetTransform.rotation.z = *rz;
-            if (auto sx = ot->get_optional<float>("sx")) offsetTransform.scale.x = *sx;
-            if (auto sy = ot->get_optional<float>("sy")) offsetTransform.scale.y = *sy;
-            if (auto sz = ot->get_optional<float>("sz")) offsetTransform.scale.z = *sz;
-        }
-    } catch (const std::exception& e) {
-        return std::string(e.what());
-    }
-    return std::nullopt;
+    return localTransform.deserializeFromFghj(data);
 }
 
 void Node::serializeSelfImpl(::nicxlive::core::serde::InochiSerializer& serializer, bool recursive, SerializeNodeFlags flags) const {
@@ -1088,27 +1042,8 @@ void Node::serializeSelfImpl(::nicxlive::core::serde::InochiSerializer& serializ
         serializer.putKey("offsetSort");
         serializer.putValue(offsetSort);
         ::nicxlive::core::serde::InochiSerializer tser;
-        tser.putKey("x"); tser.putValue(localTransform.translation.x);
-        tser.putKey("y"); tser.putValue(localTransform.translation.y);
-        tser.putKey("z"); tser.putValue(localTransform.translation.z);
-        tser.putKey("rx"); tser.putValue(localTransform.rotation.x);
-        tser.putKey("ry"); tser.putValue(localTransform.rotation.y);
-        tser.putKey("rz"); tser.putValue(localTransform.rotation.z);
-        tser.putKey("sx"); tser.putValue(localTransform.scale.x);
-        tser.putKey("sy"); tser.putValue(localTransform.scale.y);
-        tser.putKey("sz"); tser.putValue(localTransform.scale.z);
+        localTransform.serialize(tser);
         serializer.root.add_child("transform", tser.root);
-        ::nicxlive::core::serde::InochiSerializer ot;
-        ot.putKey("x"); ot.putValue(offsetTransform.translation.x);
-        ot.putKey("y"); ot.putValue(offsetTransform.translation.y);
-        ot.putKey("z"); ot.putValue(offsetTransform.translation.z);
-        ot.putKey("rx"); ot.putValue(offsetTransform.rotation.x);
-        ot.putKey("ry"); ot.putValue(offsetTransform.rotation.y);
-        ot.putKey("rz"); ot.putValue(offsetTransform.rotation.z);
-        ot.putKey("sx"); ot.putValue(offsetTransform.scale.x);
-        ot.putKey("sy"); ot.putValue(offsetTransform.scale.y);
-        ot.putKey("sz"); ot.putValue(offsetTransform.scale.z);
-        serializer.root.add_child("offsetTransform", ot.root);
         serializer.putKey("lockToRoot");
         serializer.putValue(lockToRoot);
         serializer.putKey("pinToMesh");
@@ -1148,27 +1083,18 @@ void Node::serializePartial(::nicxlive::core::serde::InochiSerializer& serialize
         if (auto os = data.get_optional<float>("offsetSort")) offsetSort = *os;
         if (auto ltr = data.get_optional<bool>("lockToRoot")) lockToRoot = *ltr;
         if (auto ptm = data.get_optional<bool>("pinToMesh")) pinToMesh = *ptm;
+        localTransform.clear();
+        offsetTransform.clear();
         if (auto t = data.get_child_optional("transform")) {
             deserializeTransform(*t);
-        }
-        if (auto ot = data.get_child_optional("offsetTransform")) {
-            if (auto tx = ot->get_optional<float>("x")) offsetTransform.translation.x = *tx;
-            if (auto ty = ot->get_optional<float>("y")) offsetTransform.translation.y = *ty;
-            if (auto tz = ot->get_optional<float>("z")) offsetTransform.translation.z = *tz;
-            if (auto rx = ot->get_optional<float>("rx")) offsetTransform.rotation.x = *rx;
-            if (auto ry = ot->get_optional<float>("ry")) offsetTransform.rotation.y = *ry;
-            if (auto rz = ot->get_optional<float>("rz")) offsetTransform.rotation.z = *rz;
-            if (auto sx = ot->get_optional<float>("sx")) offsetTransform.scale.x = *sx;
-            if (auto sy = ot->get_optional<float>("sy")) offsetTransform.scale.y = *sy;
-            if (auto sz = ot->get_optional<float>("sz")) offsetTransform.scale.z = *sz;
         }
         if (auto childrenTree = data.get_child_optional("children")) {
             for (const auto& childNode : *childrenTree) {
                 std::string type = childNode.second.get<std::string>("type", "Node");
                 if (!Node::inHasNodeType(type)) continue;
-                auto child = Node::inInstantiateNode(type);
+                auto child = Node::inInstantiateNode(type, shared_from_this());
+                if (!child) continue;
                 child->deserializeFromFghj(childNode.second);
-                addChild(child);
             }
         }
     } catch (const std::exception& e) {
@@ -1178,3 +1104,4 @@ void Node::serializePartial(::nicxlive::core::serde::InochiSerializer& serialize
 }
 
 } // namespace nicxlive::core::nodes
+

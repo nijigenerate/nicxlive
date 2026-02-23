@@ -1,6 +1,7 @@
 #include "projectable.hpp"
 
 #include <algorithm>
+#include <cstdio>
 #include <set>
 
 #include "../puppet.hpp"
@@ -9,6 +10,8 @@ namespace nicxlive::core::nodes {
 
 namespace {
 std::size_t gProjectableFrameCounter = 0;
+int gProjectablePushLogs = 0;
+int gProjectableFailLogs = 0;
 }
 
 std::size_t advanceProjectableFrame() {
@@ -76,6 +79,9 @@ void Projectable::scanPartsRecurse(const std::shared_ptr<Node>& node) {
     auto mask = std::dynamic_pointer_cast<Mask>(node);
     if (part && node.get() != this) {
         subParts.push_back(part);
+        if (mask) {
+            maskParts.push_back(mask);
+        }
         if (!proj) {
             for (auto& c : part->childrenRef()) scanPartsRecurse(c);
         } else {
@@ -105,9 +111,8 @@ Transform Projectable::fullTransform() const {
         if (auto pup = puppetRef()) {
             if (auto root = pup->root) {
                 return base.calcOffset(root->localTransform);
-            } else {
-                return base.calcOffset(pup->transform);
             }
+            return base.calcOffset(Transform{Vec3{0.0f, 0.0f, 0.0f}});
         }
         return base;
     }
@@ -120,18 +125,39 @@ Transform Projectable::fullTransform() const {
     return base;
 }
 
+Transform Projectable::transform() {
+    auto trans = Part::transform();
+    if (autoResizedMesh) {
+        trans.rotation = Vec3{0, 0, 0};
+        trans.scale = Vec2{1, 1};
+        trans.update();
+    }
+    return trans;
+}
+
+Transform Projectable::transform() const {
+    auto trans = Part::transform();
+    if (autoResizedMesh) {
+        trans.rotation = Vec3{0, 0, 0};
+        trans.scale = Vec2{1, 1};
+        trans.update();
+    }
+    return trans;
+}
+
 Mat4 Projectable::fullTransformMatrix() const { return fullTransform().toMat4(); }
 
 Vec4 Projectable::boundsFromMatrix(const std::shared_ptr<Part>& child, const Mat4& matrix) const {
     float tx = matrix[0][3];
     float ty = matrix[1][3];
     Vec4 bounds{tx, ty, tx, ty};
-    if (!child || child->mesh->vertices.empty()) return bounds;
-    for (std::size_t i = 0; i < child->mesh->vertices.size(); ++i) {
-        Vec2 local = child->mesh->vertices[i];
+    if (!child || child->vertices.size() == 0) return bounds;
+    for (std::size_t i = 0; i < child->vertices.size(); ++i) {
+        Vec2 local = child->vertices[i];
         if (i < child->deformation.size()) {
-            local.x += child->deformation.x[i];
-            local.y += child->deformation.y[i];
+            auto d = child->deformation[i];
+            local.x += d.x;
+            local.y += d.y;
         }
         Vec3 res = matrix.transformPoint(Vec3{local.x, local.y, 0});
         bounds.x = std::min(bounds.x, res.x);
@@ -140,6 +166,37 @@ Vec4 Projectable::boundsFromMatrix(const std::shared_ptr<Part>& child, const Mat
         bounds.w = std::max(bounds.w, res.y);
     }
     return bounds;
+}
+
+bool Projectable::detectAncestorTransformChange(std::size_t frameId) {
+    if (lastAncestorTransformCheckFrame == frameId) {
+        return false;
+    }
+    lastAncestorTransformCheckFrame = frameId;
+    auto full = fullTransform();
+    if (!hasCachedAncestorTransform) {
+        prevTranslation = full.translation;
+        prevRotation = full.rotation;
+        prevScale = full.scale;
+        hasCachedAncestorTransform = true;
+        return false;
+    }
+    constexpr float TransformEpsilon = 0.0001f;
+    const bool changed =
+        std::abs(full.translation.x - prevTranslation.x) > TransformEpsilon ||
+        std::abs(full.translation.y - prevTranslation.y) > TransformEpsilon ||
+        std::abs(full.translation.z - prevTranslation.z) > TransformEpsilon ||
+        std::abs(full.rotation.x - prevRotation.x) > TransformEpsilon ||
+        std::abs(full.rotation.y - prevRotation.y) > TransformEpsilon ||
+        std::abs(full.rotation.z - prevRotation.z) > TransformEpsilon ||
+        std::abs(full.scale.x - prevScale.x) > TransformEpsilon ||
+        std::abs(full.scale.y - prevScale.y) > TransformEpsilon;
+    if (changed) {
+        prevTranslation = full.translation;
+        prevRotation = full.rotation;
+        prevScale = full.scale;
+    }
+    return changed;
 }
 
 Vec4 Projectable::getChildrenBounds(bool forceUpdate) {
@@ -159,9 +216,12 @@ Vec4 Projectable::getChildrenBounds(bool forceUpdate) {
     Vec4 bounds{0,0,0,0};
     bool hasBounds = false;
     Mat4 correction = Mat4::multiply(fullTransformMatrix(), Mat4::inverse(transform().toMat4()));
+    auto boundsFinite = [](const Vec4& b) {
+        return std::isfinite(b.x) && std::isfinite(b.y) && std::isfinite(b.z) && std::isfinite(b.w);
+    };
     for (auto& p : subParts) {
         if (!p) continue;
-        if (auto b = p->bounds) {
+        if (auto b = p->bounds; b && boundsFinite(Vec4{(*b)[0], (*b)[1], (*b)[2], (*b)[3]})) {
             Vec4 pb{(*b)[0], (*b)[1], (*b)[2], (*b)[3]};
             if (!hasBounds) { bounds = pb; hasBounds = true; }
             else {
@@ -206,10 +266,11 @@ Vec4 Projectable::mergeBounds(const std::vector<Vec4>& bounds, const Vec4& origi
 
 Vec2 Projectable::deformationTranslationOffset() const {
     if (deformation.size() == 0) return Vec2{0,0};
-    Vec2 base{deformation.x[0], deformation.y[0]};
+    Vec2 base = deformation[0];
     const float eps = 0.0001f;
     for (std::size_t i = 0; i < deformation.size(); ++i) {
-        if (std::abs(deformation.x[i] - base.x) > eps || std::abs(deformation.y[i] - base.y) > eps) {
+        auto d = deformation[i];
+        if (std::abs(d.x - base.x) > eps || std::abs(d.y - base.y) > eps) {
             return Vec2{0,0};
         }
     }
@@ -217,16 +278,44 @@ Vec2 Projectable::deformationTranslationOffset() const {
 }
 
 void Projectable::enableMaxChildrenBounds(const std::shared_ptr<Node>& target) {
+    auto targetDrawable = std::dynamic_pointer_cast<Drawable>(target);
+    if (targetDrawable) {
+        targetDrawable->updateBounds();
+    }
+
+    auto frameId = currentProjectableFrame();
+    maxChildrenBounds = getChildrenBounds(false);
     useMaxChildrenBounds = true;
-    maxChildrenBounds = getChildrenBounds(true);
-    maxBoundsStartFrame = currentProjectableFrame();
-    if (auto d = std::dynamic_pointer_cast<Drawable>(target)) {
-        if (d->bounds) {
-            maxChildrenBounds.x = std::min(maxChildrenBounds.x, (*d->bounds)[0]);
-            maxChildrenBounds.y = std::min(maxChildrenBounds.y, (*d->bounds)[1]);
-            maxChildrenBounds.z = std::max(maxChildrenBounds.z, (*d->bounds)[2]);
-            maxChildrenBounds.w = std::max(maxChildrenBounds.w, (*d->bounds)[3]);
+    maxBoundsStartFrame = frameId;
+
+    if (targetDrawable) {
+        bool hasFiniteBounds = false;
+        Vec4 b{};
+        if (targetDrawable->bounds) {
+            b = Vec4{
+                (*targetDrawable->bounds)[0],
+                (*targetDrawable->bounds)[1],
+                (*targetDrawable->bounds)[2],
+                (*targetDrawable->bounds)[3]
+            };
+            hasFiniteBounds = std::isfinite(b.x) && std::isfinite(b.y) &&
+                std::isfinite(b.z) && std::isfinite(b.w);
         }
+
+        if (!hasFiniteBounds) {
+            if (auto targetPart = std::dynamic_pointer_cast<Part>(targetDrawable)) {
+                auto correction = Mat4::multiply(fullTransformMatrix(), Mat4::inverse(transform().toMat4()));
+                b = boundsFromMatrix(targetPart, Mat4::multiply(correction, targetPart->transform().toMat4()));
+                hasFiniteBounds = true;
+            } else {
+                return;
+            }
+        }
+
+        maxChildrenBounds.x = std::min(maxChildrenBounds.x, b.x);
+        maxChildrenBounds.y = std::min(maxChildrenBounds.y, b.y);
+        maxChildrenBounds.z = std::max(maxChildrenBounds.z, b.z);
+        maxChildrenBounds.w = std::max(maxChildrenBounds.w, b.w);
     }
 }
 
@@ -280,7 +369,7 @@ bool Projectable::createSimpleMesh() {
         data.indices = {0, 1, 2, 2, 1, 3};
         data.origin = Vec2{0, 0};
         data.gridAxes.clear();
-        rebuffer(data);
+        Part::rebuffer(data);
         shouldUpdateVertices = true;
         autoResizedSize = Vec2{bounds.z - bounds.x, bounds.w - bounds.y};
         textureOffset = Vec2{(bounds.x + bounds.z) / 2.0f + deformOffset.x - originOffset.x,
@@ -355,20 +444,114 @@ bool Projectable::autoResizeMeshOnce(bool& ran) {
 }
 
 bool Projectable::initTarget() {
+    auto prevTexture = textures[0];
+    auto prevStencil = stencil;
+
     updateBounds();
-    if (!bounds) return false;
-    auto b = *bounds;
-    Vec2 size{b[2]-b[0], b[3]-b[1]};
-    if (size.x <= 0 || size.y <= 0) return false;
+    std::array<float, 4> b{};
+    bool hasBounds = false;
+    if (bounds) {
+        b = *bounds;
+        hasBounds = std::isfinite(b[0]) && std::isfinite(b[1]) && std::isfinite(b[2]) && std::isfinite(b[3]);
+    }
+    if (!hasBounds) {
+        auto t = transform();
+        float minX = t.translation.x;
+        float minY = t.translation.y;
+        float maxX = t.translation.x;
+        float maxY = t.translation.y;
+        bool seeded = false;
+        Mat4 matrix = getDynamicMatrix();
+        for (std::size_t i = 0; i < mesh->vertices.size(); ++i) {
+            Vec2 pos = mesh->vertices[i];
+            if (i < deformation.size()) {
+                auto d = deformation[i];
+                pos.x += d.x;
+                pos.y += d.y;
+            }
+            Vec3 v = matrix.transformPoint(Vec3{pos.x, pos.y, 0.0f});
+            if (!seeded) {
+                minX = maxX = v.x;
+                minY = maxY = v.y;
+                seeded = true;
+            } else {
+                minX = std::min(minX, v.x);
+                minY = std::min(minY, v.y);
+                maxX = std::max(maxX, v.x);
+                maxY = std::max(maxY, v.y);
+            }
+        }
+        if (seeded) {
+            b = {minX, minY, maxX, maxY};
+            bounds = b;
+            hasBounds = true;
+        }
+    }
+    if (!hasBounds) {
+        if (gProjectableFailLogs < 32) {
+            std::fprintf(stderr, "[nicxlive] projectable initTarget fail: no bounds uuid=%u\n", uuid);
+            ++gProjectableFailLogs;
+        }
+        return false;
+    }
+
+    Vec2 minPos{};
+    Vec2 maxPos{};
+    bool first = true;
+    const std::size_t count = vertices.size();
+    for (std::size_t i = 0; i < count; ++i) {
+        Vec2 pos = vertices[i];
+        if (i < deformation.size()) {
+            auto d = deformation[i];
+            pos.x += d.x;
+            pos.y += d.y;
+        }
+        if (first) {
+            minPos = pos;
+            maxPos = pos;
+            first = false;
+        } else {
+            minPos.x = std::min(minPos.x, pos.x);
+            minPos.y = std::min(minPos.y, pos.y);
+            maxPos.x = std::max(maxPos.x, pos.x);
+            maxPos.y = std::max(maxPos.y, pos.y);
+        }
+    }
+
+    Vec2 size{maxPos.x - minPos.x, maxPos.y - minPos.y};
+    if (!std::isfinite(size.x) || !std::isfinite(size.y) || size.x <= 0 || size.y <= 0) {
+        if (gProjectableFailLogs < 32) {
+            std::fprintf(stderr, "[nicxlive] projectable initTarget fail: invalid size uuid=%u size=(%.3f,%.3f)\n",
+                         uuid, size.x, size.y);
+            ++gProjectableFailLogs;
+        }
+        return false;
+    }
     texWidth = static_cast<uint32_t>(std::ceil(size.x)) + 1;
     texHeight = static_cast<uint32_t>(std::ceil(size.y)) + 1;
+    static int gInitTargetLogCount = 0;
+    if (gInitTargetLogCount < 128) {
+        std::fprintf(stderr,
+                     "[nicxlive] initTarget type=%s uuid=%u name=%s auto=%d size=(%.6f,%.6f) tex=(%u,%u) bounds=(%.6f,%.6f,%.6f,%.6f)\n",
+                     typeId().c_str(),
+                     uuid,
+                     name.c_str(),
+                     autoResizedMesh ? 1 : 0,
+                     size.x,
+                     size.y,
+                     texWidth,
+                     texHeight,
+                     b[0],
+                     b[1],
+                     b[2],
+                     b[3]);
+        ++gInitTargetLogCount;
+    }
     Vec2 deformOffset = deformationTranslationOffset();
     auto t = transform();
     textureOffset = Vec2{(b[0]+b[2])/2.0f, (b[1]+b[3])/2.0f};
     textureOffset.x += deformOffset.x - t.translation.x;
     textureOffset.y += deformOffset.y - t.translation.y;
-    auto prevTexture = textures[0];
-    auto prevStencil = stencil;
     textures = {};
     textures[0] = std::make_shared<Texture>(static_cast<int>(texWidth), static_cast<int>(texHeight));
     stencil = std::make_shared<Texture>(static_cast<int>(texWidth), static_cast<int>(texHeight), 1, true);
@@ -389,19 +572,16 @@ bool Projectable::initTarget() {
 }
 
 bool Projectable::updateDynamicRenderStateFlags() {
+    bool resized = false;
     auto frameId = currentProjectableFrame();
+    if (autoResizedMesh && detectAncestorTransformChange(frameId)) {
+        deferredChanged = true;
+        useMaxChildrenBounds = false;
+    }
     if (deferredChanged) {
         if (autoResizedMesh) {
             bool ran = false;
-            bool resized = updateAutoResizedMeshOnce(ran);
-            pendingAncestorChangeFrame = static_cast<std::size_t>(-1);
-            if (ancestorChangeQueued) {
-                auto full = fullTransform();
-                prevTranslation = full.translation;
-                prevRotation = full.rotation;
-                prevScale = Vec2{full.scale.x, full.scale.y};
-                ancestorChangeQueued = false;
-            }
+            resized = updateAutoResizedMeshOnce(ran);
             if (ran && resized) {
                 initialized = false;
             }
@@ -426,18 +606,6 @@ bool Projectable::updateDynamicRenderStateFlags() {
             initialized = false;
         }
     }
-    if (autoResizedMesh && pendingAncestorChangeFrame == frameId) {
-        auto full = fullTransform();
-        if (full.translation.x != prevTranslation.x || full.translation.y != prevTranslation.y ||
-            full.rotation.z != prevRotation.z || full.scale.x != prevScale.x || full.scale.y != prevScale.y) {
-            textureInvalidated = true;
-            initialized = false;
-        }
-        prevTranslation = full.translation;
-        prevRotation = full.rotation;
-        prevScale = Vec2{full.scale.x, full.scale.y};
-        pendingAncestorChangeFrame = static_cast<std::size_t>(-1);
-    }
     if (!initialized) {
         if (lastInitAttemptFrame == frameId) return false;
         lastInitAttemptFrame = frameId;
@@ -450,6 +618,12 @@ bool Projectable::updateDynamicRenderStateFlags() {
 }
 
 void Projectable::dynamicRenderBegin(core::RenderContext& ctx) {
+    static int gProjBeginLogCount = 0;
+    if (gProjBeginLogCount < 64) {
+        std::fprintf(stderr, "[nicxlive] proj begin type=%s uuid=%u name=%s auto=%d\n",
+                     typeId().c_str(), uuid, name.c_str(), autoResizedMesh ? 1 : 0);
+        ++gProjBeginLogCount;
+    }
     dynamicScopeActive = false;
     dynamicScopeToken = static_cast<std::size_t>(-1);
     reuseCachedTextureThisFrame = false;
@@ -458,7 +632,7 @@ void Projectable::dynamicRenderBegin(core::RenderContext& ctx) {
     }
     queuedOffscreenParts.clear();
     if (!renderEnabled() || !ctx.renderGraph) return;
-    if (!updateDynamicRenderStateFlags()) return;
+    updateDynamicRenderStateFlags();
     bool needsRedraw = textureInvalidated || deferred > 0;
     if (!needsRedraw) {
         reuseCachedTextureThisFrame = true;
@@ -469,12 +643,52 @@ void Projectable::dynamicRenderBegin(core::RenderContext& ctx) {
     selfSort();
     auto pass = prepareDynamicCompositePass();
     if (!pass.surface) {
+        if (gProjectableFailLogs < 32) {
+            std::fprintf(stderr, "[nicxlive] projectable skip dynamic: no surface uuid=%u tex0=%d texCount=%zu\n",
+                         uuid,
+                         (textures.size() > 0 && textures[0]) ? 1 : 0,
+                         textures.size());
+            ++gProjectableFailLogs;
+        }
         reuseCachedTextureThisFrame = true;
         loggedFirstRenderAttempt = true;
         return;
     }
+    dynamicScopeToken = ctx.renderGraph->pushDynamicComposite(std::dynamic_pointer_cast<Projectable>(shared_from_this()), pass, zSort());
+    if (gProjectablePushLogs < 32) {
+        auto p = parentPtr();
+        std::fprintf(stderr, "[nicxlive] push dyn uuid=%u parent=%u z=%.6f base=%.6f rel=%.6f off=%.6f token=%zu\n",
+                     uuid, p ? p->uuid : 0u, zSort(), zSortBase(), relZSort(), offsetSort, dynamicScopeToken);
+        ++gProjectablePushLogs;
+    }
+    dynamicScopeActive = true;
 
-    enqueueRenderCommands(ctx);
+    Mat4 translate = Mat4::translation(Vec3{-textureOffset.x, -textureOffset.y, 0});
+    Mat4 correction = Mat4::multiply(fullTransformMatrix(), Mat4::inverse(transform().toMat4()));
+    Mat4 childBasis = Mat4::multiply(translate, Mat4::inverse(transform().toMat4()));
+    queuedOffscreenParts.clear();
+
+    for (auto& p : subParts) {
+        if (!p) continue;
+        if (std::dynamic_pointer_cast<Mask>(p)) continue;
+        Mat4 childMatrix = Mat4::multiply(correction, p->transform().toMat4());
+        Mat4 finalMatrix = Mat4::multiply(childBasis, childMatrix);
+        p->setOffscreenModelMatrix(finalMatrix);
+        if (auto dynChild = std::dynamic_pointer_cast<Projectable>(p)) {
+            dynChild->renderNestedOffscreen(ctx);
+        } else {
+            p->enqueueRenderCommands(ctx);
+        }
+        queuedOffscreenParts.push_back(p);
+    }
+    for (auto& m : maskParts) {
+        if (!m) continue;
+        Mat4 maskMatrix = Mat4::multiply(correction, m->transform().toMat4());
+        Mat4 finalMatrix = Mat4::multiply(translate, maskMatrix);
+        m->setOffscreenModelMatrix(finalMatrix);
+        m->enqueueRenderCommands(ctx);
+        queuedOffscreenParts.push_back(m);
+    }
 }
 
 void Projectable::dynamicRenderEnd(core::RenderContext& ctx) {
@@ -520,16 +734,28 @@ void Projectable::dynamicRenderEnd(core::RenderContext& ctx) {
             }
 
             for (auto part : queuedForCleanup) {
-                if (auto p = std::dynamic_pointer_cast<Part>(part)) p->clearOffscreenModelMatrix();
-                else if (auto m = std::dynamic_pointer_cast<Mask>(part)) m->clearOffscreenModelMatrix();
+                if (auto p = std::dynamic_pointer_cast<Part>(part)) {
+                    p->clearOffscreenModelMatrix();
+                    p->clearOffscreenRenderMatrix();
+                } else if (auto m = std::dynamic_pointer_cast<Mask>(part)) {
+                    m->clearOffscreenModelMatrix();
+                    m->clearOffscreenRenderMatrix();
+                }
             }
         });
     } else {
         auto cleanupParts = queuedOffscreenParts;
-        for (auto& part : cleanupParts) {
-            if (auto p = std::dynamic_pointer_cast<Part>(part)) p->clearOffscreenModelMatrix();
-            else if (auto m = std::dynamic_pointer_cast<Mask>(part)) m->clearOffscreenModelMatrix();
-        }
+        Part::enqueueRenderCommands(ctx, [cleanupParts](core::RenderCommandEmitter&) {
+            for (auto& part : cleanupParts) {
+                if (auto p = std::dynamic_pointer_cast<Part>(part)) {
+                    p->clearOffscreenModelMatrix();
+                    p->clearOffscreenRenderMatrix();
+                } else if (auto m = std::dynamic_pointer_cast<Mask>(part)) {
+                    m->clearOffscreenModelMatrix();
+                    m->clearOffscreenRenderMatrix();
+                }
+            }
+        });
     }
 
     reuseCachedTextureThisFrame = false;
@@ -565,7 +791,7 @@ void Projectable::registerRenderTasks(core::TaskScheduler& scheduler) {
     scheduler.addTask(core::TaskOrder::Final, core::TaskKind::Finalize, [this](core::RenderContext& ctx) { runFinalTask(ctx); });
 
     auto orderedChildren = childrenRef();
-    std::stable_sort(orderedChildren.begin(), orderedChildren.end(), [](const std::shared_ptr<Node>& a, const std::shared_ptr<Node>& b) {
+    std::sort(orderedChildren.begin(), orderedChildren.end(), [](const std::shared_ptr<Node>& a, const std::shared_ptr<Node>& b) {
         if (!a || !b) return false;
         return a->zSort() > b->zSort();
     });
@@ -596,41 +822,24 @@ void Projectable::renderMask(bool dodge) {
 }
 
 void Projectable::enqueueRenderCommands(core::RenderContext& ctx) {
-    selfSort();
-    if (!ctx.renderGraph) return;
-
-    auto passData = prepareDynamicCompositePass();
-    dynamicScopeToken = ctx.renderGraph->pushDynamicComposite(std::dynamic_pointer_cast<Projectable>(shared_from_this()), passData, zSort());
-    dynamicScopeActive = true;
-
-    Mat4 translate = Mat4::translation(Vec3{-textureOffset.x, -textureOffset.y, 0});
-    Mat4 correction = Mat4::multiply(fullTransformMatrix(), Mat4::inverse(transform().toMat4()));
-    Mat4 childBasis = Mat4::multiply(translate, Mat4::inverse(transform().toMat4()));
-    queuedOffscreenParts.clear();
-
-    for (auto& p : subParts) {
-        if (!p) continue;
-        Mat4 childMatrix = Mat4::multiply(correction, p->transform().toMat4());
-        Mat4 finalMatrix = Mat4::multiply(childBasis, childMatrix);
-        p->setOffscreenModelMatrix(finalMatrix);
-        if (auto dynChild = std::dynamic_pointer_cast<Projectable>(p)) {
-            dynChild->renderNestedOffscreen(ctx);
-        } else {
-            p->enqueueRenderCommands(ctx);
-        }
-        queuedOffscreenParts.push_back(p);
-    }
-    for (auto& m : maskParts) {
-        if (!m) continue;
-        Mat4 maskMatrix = Mat4::multiply(correction, m->transform().toMat4());
-        Mat4 finalMatrix = Mat4::multiply(translate, maskMatrix);
-        m->setOffscreenModelMatrix(finalMatrix);
-        m->enqueueRenderCommands(ctx);
-        queuedOffscreenParts.push_back(m);
-    }
+    Part::enqueueRenderCommands(ctx);
 }
 
 void Projectable::runRenderTask(core::RenderContext&) {}
+
+void Projectable::runDynamicTask(core::RenderContext& ctx) {
+    if (autoResizedMesh) {
+        if (shouldUpdateVertices) {
+            shouldUpdateVertices = false;
+        }
+        bool ran = false;
+        if (updateAutoResizedMeshOnce(ran) && ran) {
+            initialized = false;
+        }
+    } else {
+        Part::runDynamicTask(ctx);
+    }
+}
 
 void Projectable::runRenderBeginTask(core::RenderContext& ctx) {
     dynamicRenderBegin(ctx);
@@ -642,24 +851,10 @@ void Projectable::runRenderEndTask(core::RenderContext& ctx) {
 
 void Projectable::runBeginTask(core::RenderContext& ctx) {
     Part::runBeginTask(ctx);
-    useMaxChildrenBounds = false;
-    ancestorChangeQueued = false;
-    pendingAncestorChangeFrame = static_cast<std::size_t>(-1);
-    dynamicScopeActive = false;
-    reuseCachedTextureThisFrame = false;
-    subParts.clear();
-    maskParts.clear();
-    scanPartsRecurse(shared_from_this());
 }
 
 void Projectable::runPostTaskImpl(std::size_t priority, core::RenderContext& ctx) {
     Part::runPostTaskImpl(priority, ctx);
-    if (priority == 0) {
-        useMaxChildrenBounds = false;
-    }
-    if (priority == 1 && ancestorChangeQueued) {
-        boundsDirty = true;
-    }
 }
 
 void Projectable::notifyChange(const std::shared_ptr<Node>& target, NotifyReason reason) {
@@ -692,16 +887,6 @@ void Projectable::notifyChange(const std::shared_ptr<Node>& target, NotifyReason
         boundsDirty = true;
     }
 
-    if (autoResizedMesh && reason == NotifyReason::Transformed) {
-        auto frameId = currentProjectableFrame();
-        if (pendingAncestorChangeFrame != frameId) {
-            pendingAncestorChangeFrame = frameId;
-            deferredChanged = true;
-            ancestorChangeQueued = true;
-            useMaxChildrenBounds = false;
-        }
-    }
-
     if (autoResizedMesh && reason == NotifyReason::AttributeChanged) {
         bool ran = false;
         if (updateAutoResizedMeshOnce(ran) && ran) {
@@ -710,6 +895,14 @@ void Projectable::notifyChange(const std::shared_ptr<Node>& target, NotifyReason
     }
 
     Part::notifyChange(target, reason);
+}
+
+void Projectable::rebuffer(const MeshData& data) {
+    autoResizedMesh = data.vertices.empty();
+    Part::rebuffer(data);
+    initialized = false;
+    setIgnorePuppet(false);
+    notifyChange(shared_from_this(), NotifyReason::Transformed);
 }
 
 bool Projectable::setupChild(const std::shared_ptr<Node>& child) {
@@ -738,17 +931,13 @@ void Projectable::setupSelf() {
     }
     textureInvalidated = true;
     boundsDirty = false;
-    auto selfNode = std::dynamic_pointer_cast<Node>(shared_from_this());
-    for (auto c = shared_from_this(); c; c = c->parentPtr()) {
-        c->addNotifyListener(selfNode);
-    }
+    hasCachedAncestorTransform = false;
+    lastAncestorTransformCheckFrame = static_cast<std::size_t>(-1);
 }
 
 void Projectable::releaseSelf() {
-    auto selfNode = std::dynamic_pointer_cast<Node>(shared_from_this());
-    for (auto c = shared_from_this(); c; c = c->parentPtr()) {
-        c->removeNotifyListener(selfNode);
-    }
+    hasCachedAncestorTransform = false;
+    lastAncestorTransformCheckFrame = static_cast<std::size_t>(-1);
 }
 
 void Projectable::onAncestorChanged(const std::shared_ptr<Node>&, NotifyReason reason) {
