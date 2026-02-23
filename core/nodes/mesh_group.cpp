@@ -266,7 +266,7 @@ std::tuple<Vec2Array, std::optional<Mat4>, bool> MeshGroup::filterChildren(const
     if (auto deformer = std::dynamic_pointer_cast<Deformer>(target)) {
         if (std::dynamic_pointer_cast<PathDeformer>(deformer)) {
             auto pd = std::dynamic_pointer_cast<PathDeformer>(deformer);
-            if (pd && !pd->physicsEnabled) return {Vec2Array{}, std::nullopt, false};
+            if (pd && !pd->physicsEnabled()) return {Vec2Array{}, std::nullopt, false};
         } else if (!std::dynamic_pointer_cast<GridDeformer>(deformer)) {
             return {Vec2Array{}, std::nullopt, false};
         }
@@ -608,6 +608,11 @@ void MeshGroup::serializeSelfImpl(::nicxlive::core::serde::InochiSerializer& ser
 
 void MeshGroup::setupChildNoRecurse(const std::shared_ptr<Node>& node, bool prepend) {
     if (!node) return;
+    if (auto comp = std::dynamic_pointer_cast<Composite>(node)) {
+        if (comp->propagateMeshGroupEnabled()) {
+            return;
+        }
+    }
     auto deformable = std::dynamic_pointer_cast<Deformable>(node);
     bool isDeformable = static_cast<bool>(deformable);
     Node::FilterHook hook{};

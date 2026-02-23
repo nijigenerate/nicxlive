@@ -243,7 +243,7 @@ DeformResult GridDeformer::deformChildren(const std::shared_ptr<Node>& target,
     if (!hasValidGrid() || !origTransform) return res;
     if (origDeformation.size() && origDeformation.size() < origVertices.size()) return res;
     if (auto path = std::dynamic_pointer_cast<PathDeformer>(target)) {
-        if (!path->physicsEnabled) return res;
+        if (!path->physicsEnabled()) return res;
     }
     if (!matrixIsFinite(inverseMatrix) || !matrixIsFinite(*origTransform)) return res;
 

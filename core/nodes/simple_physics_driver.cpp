@@ -808,15 +808,6 @@ void SimplePhysicsDriver::updateOutputs() {
         logPhysicsState("updateOutputs:paramOffsetNonFinite");
         return;
     }
-    static int sTraceCount = 0;
-    if (sTraceCount < 80) {
-        std::fprintf(stderr,
-                     "[nicxlive][SimplePhysics] push driver=%u name=%s param=%u offset=(%.6f,%.6f) out=(%.6f,%.6f) anchor=(%.6f,%.6f)\n",
-                     uuid, name.c_str(), paramPtr->uuid,
-                     paramOffset.x, paramOffset.y, output.x, output.y, anchor.x, anchor.y);
-        ++sTraceCount;
-    }
-
     paramPtr->pushIOffset(paramOffset, core::param::ParamMergeMode::Forced);
     paramPtr->update();
 }
@@ -831,15 +822,6 @@ void SimplePhysicsDriver::finalize() {
     }
     Driver::finalize();
     reset();
-    static int sCfgLog = 0;
-    if (sCfgLog < 40) {
-        std::fprintf(stderr,
-                     "[nicxlive][SimplePhysics][cfg] uuid=%u name=%s paramRef=%u model=%d map=%d len=%.6f out=(%.6f,%.6f) localOnly=%d\n",
-                     uuid, name.c_str(), paramRef,
-                     static_cast<int>(modelType), static_cast<int>(mapMode),
-                     length, outputScale[0], outputScale[1], localOnly ? 1 : 0);
-        ++sCfgLog;
-    }
 }
 
 void SimplePhysicsDriver::logPhysicsState(const std::string& context, const std::string& extra) {

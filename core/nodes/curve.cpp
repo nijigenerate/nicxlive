@@ -2,10 +2,71 @@
 
 #include <algorithm>
 #include <cmath>
+#include <functional>
 
 namespace nicxlive::core::nodes {
 
 using ::nicxlive::core::common::Vec2Array;
+
+namespace {
+float findLocalMin01(const std::function<float(float)>& f) {
+    // D std.numeric.findLocalMin parity intent:
+    // detect local basins on a coarse scan, refine each with golden-section,
+    // then choose the best refined minimum.
+    constexpr int kSamples = 128;
+    constexpr int kRefineIters = 32;
+    constexpr float kInvPhi = 0.6180339887498948f; // (sqrt(5)-1)/2
+
+    std::array<float, kSamples + 1> ts{};
+    std::array<float, kSamples + 1> vs{};
+    for (int i = 0; i <= kSamples; ++i) {
+        ts[i] = static_cast<float>(i) / static_cast<float>(kSamples);
+        vs[i] = f(ts[i]);
+    }
+    const float span = 1.0f / static_cast<float>(kSamples);
+    float bestT = ts[0];
+    float bestV = vs[0];
+
+    auto refine = [&](float centerT) {
+        float a = std::max(0.0f, centerT - span);
+        float b = std::min(1.0f, centerT + span);
+        float c = b - (b - a) * kInvPhi;
+        float d = a + (b - a) * kInvPhi;
+        float fc = f(c);
+        float fd = f(d);
+        for (int it = 0; it < kRefineIters; ++it) {
+            if (fc < fd) {
+                b = d;
+                d = c;
+                fd = fc;
+                c = b - (b - a) * kInvPhi;
+                fc = f(c);
+            } else {
+                a = c;
+                c = d;
+                fc = fd;
+                d = a + (b - a) * kInvPhi;
+                fd = f(d);
+            }
+        }
+        const float t = std::clamp((a + b) * 0.5f, 0.0f, 1.0f);
+        const float v = f(t);
+        if (v < bestV) {
+            bestV = v;
+            bestT = t;
+        }
+    };
+
+    refine(0.0f);
+    for (int i = 1; i < kSamples; ++i) {
+        if (vs[i] <= vs[i - 1] && vs[i] <= vs[i + 1]) {
+            refine(ts[i]);
+        }
+    }
+    refine(1.0f);
+    return bestT;
+}
+} // namespace
 
 float BezierCurve::binomial(int n, int k) {
     if (k > n) return 0.0f;
@@ -105,17 +166,13 @@ void BezierCurve::evaluateDerivatives(const std::vector<float>& tSamples, Vec2Ar
 }
 
 float BezierCurve::closestPoint(const Vec2& p, int samples) const {
-    float bestT = 0.0f;
-    float bestDist = std::numeric_limits<float>::max();
-    for (int i = 0; i <= samples; ++i) {
-        float t = static_cast<float>(i) / static_cast<float>(std::max(1, samples));
-        Vec2 pt = point(t);
-        float dx = pt.x - p.x;
-        float dy = pt.y - p.y;
-        float d = dx * dx + dy * dy;
-        if (d < bestDist) { bestDist = d; bestT = t; }
-    }
-    return bestT;
+    (void)samples;
+    return findLocalMin01([&](float t) {
+        const Vec2 pt = point(t);
+        const float dx = pt.x - p.x;
+        const float dy = pt.y - p.y;
+        return dx * dx + dy * dy;
+    });
 }
 
 SplineCurve::SplineCurve(const Vec2Array& pts) : controlPoints_(pts) {}
@@ -145,6 +202,18 @@ void SplineCurve::evaluatePoints(const std::vector<float>& tSamples, Vec2Array& 
     std::size_t len = controlPoints_.size();
     if (tSamples.empty() || len < 2) {
         dst.fill(Vec2{0.0f, 0.0f});
+        return;
+    }
+    if (len == 2) {
+        const float ax = controlPoints_.xAt(0);
+        const float ay = controlPoints_.yAt(0);
+        const float bx = controlPoints_.xAt(1);
+        const float by = controlPoints_.yAt(1);
+        for (std::size_t idx = 0; idx < tSamples.size(); ++idx) {
+            const float t = std::clamp(tSamples[idx], 0.0f, 1.0f);
+            dst.xAt(idx) = ax * (1.0f - t) + bx * t;
+            dst.yAt(idx) = ay * (1.0f - t) + by * t;
+        }
         return;
     }
     for (std::size_t idx = 0; idx < tSamples.size(); ++idx) {
@@ -178,6 +247,15 @@ void SplineCurve::evaluateDerivatives(const std::vector<float>& tSamples, Vec2Ar
         dst.fill(Vec2{0.0f, 0.0f});
         return;
     }
+    if (len == 2) {
+        const float dx = controlPoints_.xAt(1) - controlPoints_.xAt(0);
+        const float dy = controlPoints_.yAt(1) - controlPoints_.yAt(0);
+        for (std::size_t idx = 0; idx < tSamples.size(); ++idx) {
+            dst.xAt(idx) = dx;
+            dst.yAt(idx) = dy;
+        }
+        return;
+    }
     for (std::size_t idx = 0; idx < tSamples.size(); ++idx) {
         float t = std::clamp(tSamples[idx], 0.0f, 1.0f);
         float segment = t * static_cast<float>(len - 1);
@@ -202,17 +280,13 @@ void SplineCurve::evaluateDerivatives(const std::vector<float>& tSamples, Vec2Ar
 }
 
 float SplineCurve::closestPoint(const Vec2& p, int samples) const {
-    float bestT = 0.0f;
-    float bestDist = std::numeric_limits<float>::max();
-    for (int i = 0; i <= samples; ++i) {
-        float t = static_cast<float>(i) / static_cast<float>(std::max(1, samples));
-        Vec2 pt = point(t);
-        float dx = pt.x - p.x;
-        float dy = pt.y - p.y;
-        float d = dx * dx + dy * dy;
-        if (d < bestDist) { bestDist = d; bestT = t; }
-    }
-    return bestT;
+    (void)samples;
+    return findLocalMin01([&](float t) {
+        const Vec2 pt = point(t);
+        const float dx = pt.x - p.x;
+        const float dy = pt.y - p.y;
+        return dx * dx + dy * dy;
+    });
 }
 
 std::unique_ptr<Curve> createCurve(const Vec2Array& pts, bool bezier) {

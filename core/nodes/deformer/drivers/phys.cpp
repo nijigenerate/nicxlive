@@ -164,11 +164,6 @@ ConnectedPendulumDriver::ConnectedPendulumDriver(PathDeformer* deformer) : defor
 
 void ConnectedPendulumDriver::reset() {
     externalForce_ = Vec2{0, 0};
-    angles_.clear();
-    initialAngles_.clear();
-    angularVelocities_.clear();
-    lengths_.clear();
-    physDeformation_ = common::Vec2Array{};
 }
 
 void ConnectedPendulumDriver::rotate(float angle) { worldAngle_ = clampAngle(-angle); }
@@ -318,11 +313,6 @@ ConnectedSpringPendulumDriver::ConnectedSpringPendulumDriver(PathDeformer* defor
 
 void ConnectedSpringPendulumDriver::reset() {
     externalForce_ = Vec2{0, 0};
-    positions_ = common::Vec2Array{};
-    velocities_ = common::Vec2Array{};
-    initialPositions_ = common::Vec2Array{};
-    lengths_.clear();
-    physDeformation_ = common::Vec2Array{};
 }
 
 void ConnectedSpringPendulumDriver::enforce(const Vec2& force) {

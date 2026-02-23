@@ -529,15 +529,7 @@ NjgResult njgLoadPuppet(void* renderer, const char* pathUtf8, void** outPuppet) 
     if (!renderer || !pathUtf8 || !outPuppet) return NjgResult::InvalidArgument;
     try {
         auto pup = fmt::inLoadPuppet<Puppet>(pathUtf8);
-        std::fprintf(stderr, "[nicxlive] load: root=%p\n", pup->root.get());
-        if (pup->root) {
-            pup->root->setPuppet(pup);
-            pup->root->reconstruct();
-            pup->root->finalize();
-        }
         if (auto root = pup->actualRoot()) {
-            // D parity (nijilive.integration.unity): for dynamic composite offscreen
-            // children, ignore puppet transform on all Projectable nodes.
             std::function<void(const std::shared_ptr<nodes::Node>&)> markProjectablesIgnorePuppet;
             markProjectablesIgnorePuppet = [&](const std::shared_ptr<nodes::Node>& n) {
                 if (!n) return;
@@ -549,70 +541,8 @@ NjgResult njgLoadPuppet(void* renderer, const char* pathUtf8, void** outPuppet) 
                 }
             };
             markProjectablesIgnorePuppet(root);
-        }
-        if (pup->root) {
-            std::size_t nodeCount = 0;
-            std::size_t partCount = 0;
-            std::size_t maskCount = 0;
-            std::size_t projectableCount = 0;
-            std::size_t partWithMaskCount = 0;
-            std::size_t partWithTextureIdCount = 0;
-            std::size_t partWithTexturePtrCount = 0;
-            std::function<void(const std::shared_ptr<nodes::Node>&)> countNodes;
-            countNodes = [&](const std::shared_ptr<nodes::Node>& n) {
-                if (!n) return;
-                ++nodeCount;
-                if (auto p = std::dynamic_pointer_cast<nodes::Part>(n)) {
-                    ++partCount;
-                    if (!p->masks.empty()) ++partWithMaskCount;
-                    if (!p->textureIds.empty()) ++partWithTextureIdCount;
-                    bool hasTexPtr = false;
-                    for (const auto& t : p->textures) {
-                        if (t) {
-                            hasTexPtr = true;
-                            break;
-                        }
-                    }
-                    if (hasTexPtr) ++partWithTexturePtrCount;
-                    static int dbgPartLog = 0;
-                    if (dbgPartLog < 10) {
-                        std::fprintf(stderr, "[nicxlive] part summary uuid=%u texIds=%zu tex0=%d masks=%zu\n",
-                                     p->uuid,
-                                     p->textureIds.size(),
-                                     p->textures[0] ? 1 : 0,
-                                     p->masks.size());
-                        ++dbgPartLog;
-                    }
-                }
-                if (std::dynamic_pointer_cast<nodes::Mask>(n)) ++maskCount;
-                if (std::dynamic_pointer_cast<nodes::Projectable>(n)) ++projectableCount;
-                for (const auto& child : n->childrenList()) countNodes(child);
-            };
-            std::function<void(const std::shared_ptr<nodes::Node>&)> finalizeParts;
-            finalizeParts = [&](const std::shared_ptr<nodes::Node>& n) {
-                if (!n) return;
-                if (auto p = std::dynamic_pointer_cast<nodes::Part>(n)) {
-                    p->finalize();
-                }
-                for (const auto& child : n->childrenList()) finalizeParts(child);
-            };
-            finalizeParts(pup->root);
-            countNodes(pup->root);
-            std::fprintf(stderr, "[nicxlive] load tree: rootChildren=%zu nodes=%zu parts=%zu masks=%zu projectables=%zu parts(masked=%zu texIds=%zu texPtrs=%zu\n",
-                         pup->root->childrenList().size(),
-                         nodeCount,
-                         partCount,
-                         maskCount,
-                         projectableCount,
-                         partWithMaskCount,
-                         partWithTextureIdCount,
-                         partWithTexturePtrCount);
-            pup->scanParts(true, pup->root);
-            auto root = pup->actualRoot();
-            if (root) {
-                pup->rescanNodes();
-                root->build(true);
-            }
+            pup->rescanNodes();
+            root->build(true);
         }
         auto ctx = std::make_unique<PuppetCtx>();
         ctx->puppet = pup;
@@ -623,7 +553,6 @@ NjgResult njgLoadPuppet(void* renderer, const char* pathUtf8, void** outPuppet) 
             auto rit = gRenderers.find(renderer);
             if (rit != gRenderers.end()) {
                 pup->setRenderBackend(rit->second->backend);
-                std::fprintf(stderr, "[nicxlive] load: puppets=%zu\n", rit->second->puppetHandles.size());
                 rit->second->puppetHandles.push_back(handle);
                 ensurePuppetTextures(*rit->second, pup);
             }
@@ -637,7 +566,9 @@ NjgResult njgLoadPuppet(void* renderer, const char* pathUtf8, void** outPuppet) 
         unityLog("[nicxlive] njgLoadPuppet exception: unknown");
         return NjgResult::Failure;
     }
-}NjgResult njgGetParameters(void* puppetHandle, NjgParameterInfo* buffer, size_t bufferLength, size_t* outCount) {
+}
+
+NjgResult njgGetParameters(void* puppetHandle, NjgParameterInfo* buffer, size_t bufferLength, size_t* outCount) {
     if (!outCount) return NjgResult::InvalidArgument;
     *outCount = 0;
     std::shared_ptr<Puppet> pup;

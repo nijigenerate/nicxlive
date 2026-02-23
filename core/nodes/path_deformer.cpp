@@ -7,6 +7,8 @@
 #include "../param/parameter.hpp"
 #include "curve.hpp"
 #include "deformer/drivers/phys.hpp"
+#include "drawable.hpp"
+#include "grid_deformer.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -181,11 +183,12 @@ bool approxEqual(float a, float b, float eps = 1e-3f) {
 
 PathDeformer::PathDeformer() {
     requirePreProcessTask();
-    ensureDriver();
     diagnosticsEnabled = false;
     originalCurve = createCurve(Vec2Array{}, curveType == CurveType::Bezier);
     deformedCurve = createCurve(Vec2Array{}, curveType == CurveType::Bezier);
     prevCurve = createCurve(Vec2Array{}, curveType == CurveType::Bezier);
+    driver.reset();
+    prevRootSet = false;
 }
 
 void PathDeformer::ConnectedDriverAdapter::setup() {
@@ -372,16 +375,36 @@ float PathDeformer::curveLength() const {
     return len;
 }
 
-void PathDeformer::cacheClosestPoints(const std::shared_ptr<Node>& node, const Mat4& center, const Vec2Array& sample) {
+void PathDeformer::cacheClosestPoints(const std::shared_ptr<Node>& node, int nSamples) {
     if (!node) return;
-    auto id = node->uuid;
-    auto& cache = meshCaches[id];
-    cache.resize(sample.size());
+    Vec2Array nodeVertices;
+    if (auto deformable = std::dynamic_pointer_cast<Deformable>(node)) {
+        nodeVertices.resize(deformable->vertices.size());
+        for (std::size_t i = 0; i < deformable->vertices.size(); ++i) {
+            nodeVertices.xAt(i) = deformable->vertices[i].x;
+            nodeVertices.yAt(i) = deformable->vertices[i].y;
+        }
+    } else {
+        nodeVertices.resize(1);
+        auto t = node->transform();
+        nodeVertices.xAt(0) = t.translation.x;
+        nodeVertices.yAt(0) = t.translation.y;
+    }
+
+    auto& cache = meshCaches[node->uuid];
+    cache.resize(nodeVertices.size());
+
     const auto& curve = prevCurve ? prevCurve : originalCurve;
     if (!curve) return;
-    // sample points are already in deformer local space
-    for (std::size_t i = 0; i < sample.size(); ++i) {
-        cache[i] = curve->closestPoint(Vec2{sample.xAt(i), sample.yAt(i)}, 100);
+
+    Mat4 forward = node->globalTransform.toMat4();
+    Mat4 inv = Mat4::inverse(globalTransform.toMat4());
+    Mat4 tran = Mat4::multiply(inv, forward);
+
+    Vec2Array cVertices;
+    transformAssign(cVertices, nodeVertices, tran);
+    for (std::size_t i = 0; i < cVertices.size(); ++i) {
+        cache[i] = curve->closestPoint(Vec2{cVertices.xAt(i), cVertices.yAt(i)}, nSamples);
     }
 }
 
@@ -606,7 +629,7 @@ void PathDeformer::logTransformFailure(const std::string& ctx, const Mat4& m) {
 
 void PathDeformer::refreshInverseMatrix(const std::string& ctx) {
     bool okGlobal = true;
-    Mat4 global = requireFiniteMatrix(transform().toMat4(), ctx + ":global", okGlobal);
+    Mat4 global = requireFiniteMatrix(globalTransform.toMat4(), ctx + ":global", okGlobal);
     bool okInv = true;
     Mat4 inv = requireFiniteMatrix(Mat4::inverse(global), ctx + ":inverse", okInv);
     if (!okGlobal || !okInv) {
@@ -818,7 +841,7 @@ DeformResult PathDeformer::deformChildren(const std::shared_ptr<Node>& target,
     auto it = meshCaches.find(tgtId);
     bool hasValidCache = (it != meshCaches.end() && it->second.size() >= sample.size());
     if (!hasValidCache) {
-        cacheClosestPoints(target, center, sample);
+        cacheClosestPoints(target);
         it = meshCaches.find(tgtId);
         hasValidCache = (it != meshCaches.end() && it->second.size() >= sample.size());
     }
@@ -1068,7 +1091,6 @@ void PathDeformer::runRenderTask(core::RenderContext&) {
 void PathDeformer::switchDynamic(bool enablePhysics) {
     dynamicDeformation = enablePhysics;
     clearCache();
-    ensureDriver();
     resetDiagnostics();
     driverInitialized = false;
     prevRootSet = false;
@@ -1083,72 +1105,38 @@ void PathDeformer::notifyChange(const std::shared_ptr<Node>& target, NotifyReaso
 
 bool PathDeformer::setupChild(const std::shared_ptr<Node>& child) {
     Deformable::setupChild(child);
-    if (!child) return false;
-    Node::FilterHook hook;
-    hook.stage = kPathFilterStage;
-    hook.tag = reinterpret_cast<std::uintptr_t>(this);
-    hook.func = [this](auto t, auto v, auto d, auto mat) {
-        auto res = deformChildren(t, v, d, mat);
-        return std::make_tuple(res.vertices, std::optional<Mat4>{}, res.changed);
+    if (!child) return true;
+    std::function<void(const std::shared_ptr<Node>&)> setGroup;
+    setGroup = [&](const std::shared_ptr<Node>& node) {
+        setupChildNoRecurse(node);
+        if (node && node->mustPropagate()) {
+            for (auto& c : node->childrenRef()) setGroup(c);
+        }
     };
-    auto& pre = child->preProcessFilters;
-    auto& post = child->postProcessFilters;
-    const auto tag = reinterpret_cast<std::uintptr_t>(this);
-    pre.erase(std::remove_if(pre.begin(), pre.end(), [&](const auto& h) { return h.stage == kPathFilterStage && h.tag == tag; }), pre.end());
-    post.erase(std::remove_if(post.begin(), post.end(), [&](const auto& h) { return h.stage == kPathFilterStage && h.tag == tag; }), post.end());
-    auto deformable = std::dynamic_pointer_cast<Deformable>(child);
-    if (deformable) {
-        if (dynamicDeformation) {
-            post.push_back(hook);
-        } else {
-            pre.push_back(hook);
-        }
-    } else if (translateChildren) {
-        pre.push_back(hook);
-    }
-    // cache closest points for deformables
-    if (deformable && prevCurve) {
-        Mat4 m = child->transform().toMat4();
-        Mat4 center = Mat4::multiply(inverseMatrix, m);
-        Vec2Array verts;
-        verts.resize(deformable->vertices.size());
-        for (std::size_t i = 0; i < deformable->vertices.size(); ++i) {
-            verts.xAt(i) = deformable->vertices[i].x;
-            verts.yAt(i) = deformable->vertices[i].y;
-        }
-        Vec2Array sample;
-        transformAssign(sample, verts, center);
-        cacheClosestPoints(child, center, sample);
-    }
-    if (child->mustPropagate()) {
-        for (auto& c : child->childrenRef()) setupChild(c);
-    }
-    return false;
+    setGroup(child);
+    return true;
 }
 
 bool PathDeformer::releaseChild(const std::shared_ptr<Node>& child) {
-    if (child) {
-        auto& pre = child->preProcessFilters;
-        auto& post = child->postProcessFilters;
-        const auto tag = reinterpret_cast<std::uintptr_t>(this);
-        pre.erase(std::remove_if(pre.begin(), pre.end(), [&](const auto& h) { return h.stage == kPathFilterStage && h.tag == tag; }), pre.end());
-        post.erase(std::remove_if(post.begin(), post.end(), [&](const auto& h) { return h.stage == kPathFilterStage && h.tag == tag; }), post.end());
-        meshCaches.erase(child->uuid);
-        if (child->mustPropagate()) {
-            for (auto& c : child->childrenRef()) releaseChild(c);
+    std::function<void(const std::shared_ptr<Node>&)> unsetGroup;
+    unsetGroup = [&](const std::shared_ptr<Node>& node) {
+        releaseChildNoRecurse(node);
+        if (node && node->mustPropagate()) {
+            for (auto& c : node->childrenRef()) unsetGroup(c);
         }
-    }
+    };
+    unsetGroup(child);
     Deformable::releaseChild(child);
-    return false;
+    return true;
 }
 
 void PathDeformer::captureTarget(const std::shared_ptr<Node>& target) {
     childrenRef().push_back(target);
-    setupChild(target);
+    setupChildNoRecurse(target, true);
 }
 
 void PathDeformer::releaseTarget(const std::shared_ptr<Node>& target) {
-    releaseChild(target);
+    releaseChildNoRecurse(target);
     auto& ch = childrenRef();
     ch.erase(std::remove(ch.begin(), ch.end(), target), ch.end());
 }
@@ -1165,6 +1153,50 @@ void PathDeformer::build(bool force) {
     setupSelf();
     refresh();
     Node::build(force);
+}
+
+bool PathDeformer::setupChildNoRecurse(const std::shared_ptr<Node>& node, bool prepend) {
+    if (!node) return true;
+    auto drawable = std::dynamic_pointer_cast<Drawable>(node);
+    auto grid = std::dynamic_pointer_cast<GridDeformer>(node);
+    bool supportsDeform = static_cast<bool>(drawable) || static_cast<bool>(grid);
+
+    Node::FilterHook hook;
+    hook.stage = kPathFilterStage;
+    hook.tag = reinterpret_cast<std::uintptr_t>(this);
+    hook.func = [this](auto t, auto v, auto d, auto mat) {
+        auto res = deformChildren(t, v, d, mat);
+        return std::make_tuple(res.vertices, std::optional<Mat4>{}, res.changed);
+    };
+
+    auto& pre = node->preProcessFilters;
+    auto& post = node->postProcessFilters;
+    const auto tag = reinterpret_cast<std::uintptr_t>(this);
+    pre.erase(std::remove_if(pre.begin(), pre.end(), [&](const auto& h) { return h.stage == kPathFilterStage && h.tag == tag; }), pre.end());
+    post.erase(std::remove_if(post.begin(), post.end(), [&](const auto& h) { return h.stage == kPathFilterStage && h.tag == tag; }), post.end());
+
+    if (supportsDeform) {
+        cacheClosestPoints(node);
+        if (dynamicDeformation) {
+            if (prepend) post.insert(post.begin(), hook); else post.push_back(hook);
+        } else {
+            if (prepend) pre.insert(pre.begin(), hook); else pre.push_back(hook);
+        }
+    } else {
+        meshCaches.erase(node->uuid);
+    }
+    return true;
+}
+
+bool PathDeformer::releaseChildNoRecurse(const std::shared_ptr<Node>& node) {
+    if (!node) return true;
+    meshCaches.erase(node->uuid);
+    auto& pre = node->preProcessFilters;
+    auto& post = node->postProcessFilters;
+    const auto tag = reinterpret_cast<std::uintptr_t>(this);
+    pre.erase(std::remove_if(pre.begin(), pre.end(), [&](const auto& h) { return h.stage == kPathFilterStage && h.tag == tag; }), pre.end());
+    post.erase(std::remove_if(post.begin(), post.end(), [&](const auto& h) { return h.stage == kPathFilterStage && h.tag == tag; }), post.end());
+    return true;
 }
 
 void PathDeformer::applyDeformToChildren(const std::vector<std::shared_ptr<core::param::Parameter>>& params, bool recursive) {
@@ -1265,7 +1297,6 @@ void PathDeformer::rebuffer(const std::vector<Vec2>& points) {
     driverInitialized = false;
     prevRootSet = false;
     ensureDiagnosticCapacity(deformation.size());
-    ensureDriver();
 }
 
 void PathDeformer::serializeSelfImpl(::nicxlive::core::serde::InochiSerializer& serializer, bool recursive, SerializeNodeFlags flags) const {
@@ -1337,7 +1368,7 @@ void PathDeformer::serializeSelfImpl(::nicxlive::core::serde::InochiSerializer& 
         if (auto err = Deformable::deserializeFromFghj(data)) {
             return err;
         }
-        physicsEnabled = true;
+        driver.reset();
 
         auto parseCurveType = [](const ::nicxlive::core::serde::Fghj& node, CurveType& out) {
             try {
@@ -1432,12 +1463,12 @@ void PathDeformer::serializeSelfImpl(::nicxlive::core::serde::InochiSerializer& 
             st.externalForce.x = phy->get<float>("externalForce.x", 0.0f);
             st.externalForce.y = phy->get<float>("externalForce.y", 0.0f);
             st.damping = phy->get<float>("damping", st.damping);
-            st.restore = phy->get<float>("restore", st.restore);
+            st.restore = phy->get<float>("restore_constant", phy->get<float>("restore", st.restore));
             st.timeStep = phy->get<float>("timeStep", st.timeStep);
             st.gravity = phy->get<float>("gravity", st.gravity);
-            st.inputScale = phy->get<float>("inputScale", st.inputScale);
+            st.inputScale = phy->get<float>("input_scale", phy->get<float>("inputScale", st.inputScale));
             st.worldAngle = phy->get<float>("worldAngle", st.worldAngle);
-            st.propagateScale = phy->get<float>("propagateScale", st.propagateScale);
+            st.propagateScale = phy->get<float>("propagate_scale", phy->get<float>("propagateScale", st.propagateScale));
             st.gravityVec.x = phy->get<float>("gravityVec.x", st.gravityVec.x);
             st.gravityVec.y = phy->get<float>("gravityVec.y", st.gravityVec.y);
             st.springConstant = phy->get<float>("springConstant", st.springConstant);

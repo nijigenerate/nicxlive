@@ -177,6 +177,10 @@ public:
             if (yMajor) return newlySet[min][maj];
             return newlySet[maj][min];
         };
+        auto getDistance = [&](bool yMajor, uint32_t maj, uint32_t min) -> float {
+            if (yMajor) return interpDistance[min][maj];
+            return interpDistance[maj][min];
+        };
         auto setPoint = [&](bool yMajor, uint32_t maj, uint32_t min, const T& val, float distance, bool commit) {
             if (isValid(yMajor, maj, min)) return;
             if (yMajor) {
@@ -264,10 +268,10 @@ public:
                 float origin = axisPoint(yMajor, j);
                 for (uint32_t k = 0; k < j; ++k) {
                     float minDist = std::abs(axisPoint(yMajor, k) - origin);
-                    if (yMajor ? isNew(true, k, i) : isNew(false, i, k)) {
+                    if (yMajor && isNew(yMajor, i, k)) {
                         if (!detectedIntersections) commitPoints.clear();
-                        float majDist = interpDistance[yMajor ? k : i][yMajor ? i : k];
-                        float frac = minDist / (minDist + majDist * majDist / (minDist == 0 ? 1.0f : minDist));
+                        float majDist = getDistance(yMajor, i, k);
+                        float frac = minDist / (minDist + majDist * majDist / minDist);
                         auto cur = get(yMajor, i, k);
                         setPoint(yMajor, i, k, lerpT(val, cur, frac), minDist, true);
                         detectedIntersections = true;
@@ -281,10 +285,10 @@ public:
                 origin = axisPoint(yMajor, j);
                 for (uint32_t k = j + 1; k < minorCnt; ++k) {
                     float minDist = std::abs(axisPoint(yMajor, k) - origin);
-                    if (yMajor ? isNew(true, k, i) : isNew(false, i, k)) {
+                    if (yMajor && isNew(yMajor, i, k)) {
                         if (!detectedIntersections) commitPoints.clear();
-                        float majDist = interpDistance[yMajor ? k : i][yMajor ? i : k];
-                        float frac = minDist / (minDist + majDist * majDist / (minDist == 0 ? 1.0f : minDist));
+                        float majDist = getDistance(yMajor, i, k);
+                        float frac = minDist / (minDist + majDist * majDist / minDist);
                         auto cur = get(yMajor, i, k);
                         setPoint(yMajor, i, k, lerpT(val, cur, frac), minDist, true);
                         detectedIntersections = true;
