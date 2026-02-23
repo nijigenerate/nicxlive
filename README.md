@@ -40,59 +40,59 @@ cmake --build build-wasm
 ### Node Layer (D → C++ line counts with compat docs)
 | # | nijilive (D) | Lines | nicxlive (C++) | Lines | Compat note |
 | - | --- | ---:| --- | ---:| --- |
-| 1 | nodes/package.d | 1271 | core/nodes/node.cpp | 1063 | [compat-node](doc/compat-node.md) |
-| 2 | nodes/filter.d | 124 | core/nodes/filter.cpp | 59 | [compat-filter](doc/compat-filter.md) |
-| 3 | nodes/deformable.d | 185 | core/nodes/deformable.cpp | 136 | [compat-deformable](doc/compat-deformable.md) |
-| 4 | nodes/drawable.d | 645 | core/nodes/drawable.cpp | 874 | [compat-drawable](doc/compat-drawable.md) |
-| 5 | nodes/part/package.d | 715 | core/nodes/part.cpp | 635 | [compat-part](doc/compat-part.md) |
-| 6 | nodes/mask/package.d | 120 | core/nodes/mask.cpp | 65 | [compat-mask](doc/compat-mask.md) |
-| 7 | nodes/composite/projectable.d | 1116 | core/nodes/projectable.cpp | 743 | [compat-projectable](doc/compat-projectable.md) |
-| 8 | nodes/composite/package.d | 298 | core/nodes/composite.cpp | 213 | [compat-composite](doc/compat-composite.md) |
-| 9 | nodes/composite/dcomposite.d | 34 | core/nodes/dynamic_composite.cpp | 11 | [compat-dcomposite](doc/compat-dcomposite.md) |
-| 10 | nodes/meshgroup/package.d | 537 | core/nodes/mesh_group.cpp | 512 | [compat-meshgroup](doc/compat-meshgroup.md) |
-| 11 | nodes/deformer/base.d | 14 | core/nodes/deformer_base.hpp | 24 | [compat-deformable](doc/compat-deformable.md) |
-| 12 | nodes/deformer/grid.d | 677 | core/nodes/grid_deformer.cpp | 572 | [compat-grid_deformer](doc/compat-grid_deformer.md) |
-| 13 | nodes/deformer/path.d | 1204 | core/nodes/path_deformer.cpp | 1260 | [compat-path_deformer](doc/compat-path_deformer.md) |
-| 14 | nodes/drivers/package.d | 47 | core/nodes/driver.hpp | 29 | (WIP) |
-| 15 | nodes/drivers/simplephysics.d | 874 | core/nodes/simple_physics_driver.cpp | 599 | (WIP) |
-| nijilive (total) | 7,861 | nicxlive (total) | 6,795 |  |
+| 1 | core/nodes/node.d | 1458 | core/nodes/node.cpp | 1107 | [compat-node](doc/compat-node.md) |
+| 2 | core/nodes/filter.d | 146 | core/nodes/filter.cpp | 65 | [compat-filter](doc/compat-filter.md) |
+| 3 | core/nodes/deformable.d | 209 | core/nodes/deformable.cpp | 220 | [compat-deformable](doc/compat-deformable.md) |
+| 4 | core/nodes/drawable.d | 742 | core/nodes/drawable.cpp | 966 | [compat-drawable](doc/compat-drawable.md) |
+| 5 | core/nodes/part/package.d | 895 | core/nodes/part.cpp | 827 | [compat-part](doc/compat-part.md) |
+| 6 | core/nodes/mask/package.d | 149 | core/nodes/mask.cpp | 77 | [compat-mask](doc/compat-mask.md) |
+| 7 | core/nodes/composite/projectable.d | 1335 | core/nodes/projectable.cpp | 1001 | [compat-projectable](doc/compat-projectable.md) |
+| 8 | core/nodes/composite/composite.d | 674 | core/nodes/composite.cpp | 595 | [compat-composite](doc/compat-composite.md) |
+| 9 | core/nodes/composite/dcomposite.d | 41 | core/nodes/dynamic_composite.cpp | 15 | [compat-dcomposite](doc/compat-dcomposite.md) |
+| 10 | core/nodes/meshgroup/package.d | 611 | core/nodes/mesh_group.cpp | 651 | [compat-meshgroup](doc/compat-meshgroup.md) |
+| 11 | core/nodes/deformer/base.d | 16 | core/nodes/deformer_base.hpp | 33 | [compat-deformable](doc/compat-deformable.md) |
+| 12 | core/nodes/deformer/grid.d | 782 | core/nodes/grid_deformer.cpp | 657 | [compat-grid_deformer](doc/compat-grid_deformer.md) |
+| 13 | core/nodes/deformer/path.d | 1334 | core/nodes/path_deformer.cpp | 1411 | [compat-path_deformer](doc/compat-path_deformer.md) |
+| 14 | core/nodes/drivers/package.d | 58 | core/nodes/driver.hpp | 39 | [compat-driver](doc/compat-driver.md) |
+| 15 | core/nodes/drivers/simplephysics.d | 1003 | core/nodes/simple_physics_driver.cpp | 874 | [compat-simple_physics_driver](doc/compat-simple_physics_driver.md) |
+| nijilive (total) | 9,453 | nicxlive (total) | 8,538 |  |
 
 ### Render layer (D → C++)
 | # | nijilive (D) | Lines | nicxlive (C++) | Lines | Compat note |
 | - | --- | ---:| --- | ---:| --- |
-| RQ1 | render/commands.d | 195 | core/render/commands.cpp | 99 | [compat-commands](doc/compat-commands.md) |
-| RQ2 | render/command_emitter.d | 23 | core/render/command_emitter.cpp | 197 | [compat-command_emitter](doc/compat-command_emitter.md) |
-| RQ3 | render/graph_builder.d | 226 | core/render/graph_builder.cpp | 185 | [compat-render-graph](doc/compat-render-graph.md) |
-| RQ4 | render/scheduler.d | 84 | core/render/scheduler.cpp | 35 | [compat-scheduler](doc/compat-scheduler.md) |
-| RQ5 | render/shared_deform_buffer.d | 194 | core/render/shared_deform_buffer.cpp | 120 | [compat-queue](doc/compat-queue.md) |
-| RQ6 | render/immediate.d | 38 | core/render/immediate.cpp | 22 | [compat-queue](doc/compat-queue.md) |
-| RQ7 | render/passes.d | 34 | core/render/render_pass.hpp | 14 | [compat-queue](doc/compat-queue.md) |
-| RQ8 | render/profiler.d | 93 | core/render/profiler.cpp | 93 | [compat-queue](doc/compat-queue.md) |
-| RQ9 | render/backends/queue/package.d | 358 | core/render/backend_queue.cpp | 214 | [compat-queue](doc/compat-queue.md) |
-| RQ10 | render/backends/opengl/* | 3,682 | (not yet ported) | 0 | (WIP) |
-| RQ11 | render/backends/directx12/* | 2,989 | (not yet ported) | 0 | (WIP) |
-| RT1 | core/texture.d | 494 | core/texture.cpp | 166 | [compat-texture](doc/compat-texture.md) |
+| RQ1 | core/render/commands.d | 172 | core/render/commands.cpp | 115 | [compat-commands](doc/compat-commands.md) |
+| RQ2 | core/render/command_emitter.d | 25 | core/render/command_emitter.cpp | 249 | [compat-command_emitter](doc/compat-command_emitter.md) |
+| RQ3 | core/render/graph_builder.d | 266 | core/render/graph_builder.cpp | 235 | [compat-render-graph](doc/compat-render-graph.md) |
+| RQ4 | core/render/scheduler.d | 98 | core/render/scheduler.cpp | 53 | [compat-scheduler](doc/compat-scheduler.md) |
+| RQ5 | core/render/shared_deform_buffer.d | 240 | core/render/shared_deform_buffer.cpp | 185 | [compat-queue](doc/compat-queue.md) |
+| RQ6 | core/render/immediate.d | 42 | core/render/immediate.cpp | 28 | [compat-queue](doc/compat-queue.md) |
+| RQ7 | core/render/passes.d | 39 | core/render/render_pass.hpp | 20 | [compat-queue](doc/compat-queue.md) |
+| RQ8 | core/render/profiler.d | 119 | core/render/profiler.cpp | 108 | [compat-queue](doc/compat-queue.md) |
+| RQ9 | core/render/backends/queue/package.d | 457 | core/render/backend_queue.cpp | 201 | [compat-queue](doc/compat-queue.md) |
+| RQ10 | core/render/backends/opengl/* | 3,619 | (not yet ported) | 0 | (WIP) |
+| RQ11 | core/render/backends/directx12/* | 2,985 | (not yet ported) | 0 | (WIP) |
+| RT1 | core/texture.d | 571 | core/texture.cpp | 210 | [compat-texture](doc/compat-texture.md) |
 
 ### fmt layer (D → C++)
 | # | nijilive (D) | Lines | nicxlive (C++) | Lines | Compat note |
 | - | --- | ---:| --- | ---:| --- |
-| F1 | fmt/package.d | 277 | fmt/fmt.hpp | 180 | [compat-fmt](doc/compat-fmt.md) |
-| F2 | fmt/io.d | 61 | fmt/io.hpp | 49 | [compat-io](doc/compat-io.md) |
-| F3 | fmt/serialize.d | 83 | fmt/serialize.hpp | 53 | [compat-serialize](doc/compat-serialize.md) |
-| F4 | fmt/binfmt.d | 27 | fmt/binfmt.hpp | 26 | [compat-binfmt](doc/compat-binfmt.md) |
+| F1 | fmt/package.d | 339 | fmt/fmt.hpp | 217 | [compat-fmt](doc/compat-fmt.md) |
+| F2 | fmt/io.d | 69 | fmt/io.hpp | 59 | [compat-io](doc/compat-io.md) |
+| F3 | fmt/serialize.d | 99 | fmt/serialize.hpp | 94 | [compat-serialize](doc/compat-serialize.md) |
+| F4 | fmt/binfmt.d | 33 | fmt/binfmt.hpp | 33 | [compat-binfmt](doc/compat-binfmt.md) |
 
 ### Unity integration (D → C++)
 | # | nijilive (D) | Lines | nicxlive (C++) | Lines | Compat note |
 | - | --- | ---:| --- | ---:| --- |
-| U1 | integration/unity.d | 691 | core/unity_native.cpp + unity_native.hpp | 714 | [compat-unity_native](doc/compat-unity_native.md) |
+| U1 | integration/unity.d | 1018 | core/unity_native.cpp + core/unity_native.hpp | 1242 | [compat-unity_native](doc/compat-unity_native.md) |
 
 ### Math / Common (D → C++)
 | # | nijilive (D) | Lines | nicxlive (C++) | Lines | Compat note |
 | - | --- | ---:| --- | ---:| --- |
-| M1 | math/veca.d | 585 | core/math/veca.hpp | 796 | [compat-vec2array](doc/compat-vec2array.md) |
-| M2 | math/transform.d | 150 | core/math/transform.hpp | 108 | [compat-transform](doc/compat-transform.md) |
-| M3 | math/camera.d | 62 | core/math/camera.hpp + camera.cpp | 45 | [compat-runtime_state](doc/compat-runtime_state.md) |
-| M4 | math/triangle.d | 140 | core/math/triangle.hpp + triangle.cpp | 33 | [compat-triangle](doc/compat-triangle.md) |
-| C1 | core/nodes/common.d | 242 | core/nodes/common.hpp | 65 | [compat-common](doc/compat-common.md) |
+| M1 | math/veca.d | 673 | core/math/veca.hpp | 1065 | [compat-vec2array](doc/compat-vec2array.md) |
+| M2 | math/transform.d | 175 | core/math/transform.hpp | 210 | [compat-transform](doc/compat-transform.md) |
+| M3 | math/camera.d | 75 | core/math/camera.hpp + core/math/camera.cpp | 59 | [compat-runtime_state](doc/compat-runtime_state.md) |
+| M4 | math/triangle.d | 165 | core/math/triangle.hpp + core/math/triangle.cpp | 282 | [compat-triangle](doc/compat-triangle.md) |
+| C1 | core/nodes/common.d | 290 | core/nodes/common.hpp | 132 | [compat-common](doc/compat-common.md) |
 
 See `doc/compat-*.md` for detailed compatibility notes and remaining gaps.
