@@ -180,13 +180,15 @@ void QueueCommandEmitter::beginDynamicComposite(const std::shared_ptr<nodes::Pro
 }
 
 void QueueCommandEmitter::endDynamicComposite(const std::shared_ptr<nodes::Projectable>&, const DynamicCompositePass& pass) {
+    auto passData = pass;
     if (dynDepth_ > 0) {
         dynDepth_--;
     }
     if (!dynStack_.empty()) {
+        passData = dynStack_.back();
         dynStack_.pop_back();
     }
-    if (pass.surface && pass.surface->textureCount > 0 && pass.surface->textures[0]) {
+    if (passData.surface && passData.surface->textureCount > 0 && passData.surface->textures[0]) {
         ::nicxlive::core::inPopViewport();
     }
     if (!cameraStack_.empty()) {
@@ -196,11 +198,11 @@ void QueueCommandEmitter::endDynamicComposite(const std::shared_ptr<nodes::Proje
 
     QueuedCommand cmd{};
     cmd.kind = RenderCommandKind::EndDynamicComposite;
-    cmd.dynamicPass = pass;
+    cmd.dynamicPass = passData;
     if (backend_) {
         std::fprintf(stderr, "[nicxlive] emit push idx=%zu kind=EndDynamicComposite stencil=%u\n",
                      backend_->queue.size(),
-                     pass.stencil ? pass.stencil->backendId() : 0u);
+                     passData.stencil ? passData.stencil->backendId() : 0u);
         backend_->queue.push_back(std::move(cmd));
     }
 }
@@ -245,5 +247,4 @@ void QueueCommandEmitter::uploadSharedBuffers() {
 }
 
 } // namespace nicxlive::core::render
-
 

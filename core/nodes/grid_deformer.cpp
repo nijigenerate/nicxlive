@@ -243,7 +243,7 @@ DeformResult GridDeformer::deformChildren(const std::shared_ptr<Node>& target,
     if (!hasValidGrid() || !origTransform) return res;
     if (origDeformation.size() && origDeformation.size() < origVertices.size()) return res;
     if (auto path = std::dynamic_pointer_cast<PathDeformer>(target)) {
-        if (!path->physicsEnabled) return res;
+        if (!path->physicsEnabled()) return res;
     }
     if (!matrixIsFinite(inverseMatrix) || !matrixIsFinite(*origTransform)) return res;
 
@@ -298,6 +298,20 @@ DeformResult GridDeformer::deformChildren(const std::shared_ptr<Node>& target,
 
     res.vertices = toVec2List(deformOut);
     res.changed = true;
+    float maxAbs = 0.0f;
+    for (const auto& v : res.vertices) {
+        maxAbs = std::max(maxAbs, std::max(std::fabs(v.x), std::fabs(v.y)));
+    }
+    if (maxAbs > 10.0f) {
+        std::fprintf(stderr,
+                     "[nicxlive][GridDeformer][LargeOffset] node=%s target=%s targetUuid=%u maxAbs=%.6f first=(%.6f,%.6f)\n",
+                     name.c_str(),
+                     target ? target->name.c_str() : "<null>",
+                     target ? target->uuid : 0u,
+                     maxAbs,
+                     res.vertices.empty() ? 0.0f : res.vertices[0].x,
+                     res.vertices.empty() ? 0.0f : res.vertices[0].y);
+    }
     if (traceDeformerSummaryEnabled() && target && res.changed) {
         sChangedCount[target->uuid] += 1;
         ++sSummaryTick;

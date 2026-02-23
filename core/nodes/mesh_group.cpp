@@ -71,7 +71,6 @@ void MeshGroup::applyDeformToChildren(const std::vector<std::shared_ptr<core::pa
         auto selfBinding = std::dynamic_pointer_cast<core::param::DeformationParameterBinding>(
             param->getBinding(shared_from_this(), "deform"));
         if (!selfBinding) continue;
-        std::fprintf(stderr, "[nicxlive] meshgroup bake selfBinding param=%s node=%u\n", param->name.c_str(), uuid);
 
         const auto xCount = param->axisPointCount(0);
         const auto yCount = param->axisPointCount(1);
@@ -198,7 +197,8 @@ std::shared_ptr<Node> MeshGroup::parentPtr() const { return owner.lock(); }
 void MeshGroup::preProcess() { Drawable::preProcess(); }
 void MeshGroup::postProcess(int id) { Drawable::postProcess(id); }
 
-void MeshGroup::runPreProcessTask(core::RenderContext&) {
+void MeshGroup::runPreProcessTask(core::RenderContext& ctx) {
+    Drawable::runPreProcessTask(ctx);
     if (mesh->indices.empty()) return;
     if (!precalculated) precalculate();
     // update transformedVertices and triangle matrices
@@ -218,7 +218,7 @@ void MeshGroup::runPreProcessTask(core::RenderContext&) {
         triangles[i / 3].transformMatrix = mat * triangles[i / 3].offsetMatrices;
     }
     forwardMatrix = transform().toMat4();
-    inverseMatrix = forwardMatrix.inverse();
+    inverseMatrix = globalTransform.toMat4().inverse();
 }
 
 void MeshGroup::runRenderTask(core::RenderContext&) {
@@ -236,16 +236,11 @@ void MeshGroup::renderMask(bool dodge) {
 }
 
 void MeshGroup::rebuffer(const MeshData& data) {
-    *mesh = data;
-    vertices.clear();
-    deformation.clear();
-    vertices.resize(mesh->vertices.size());
-    deformation.resize(mesh->vertices.size());
-    for (std::size_t i = 0; i < mesh->vertices.size(); ++i) {
-        vertices.xAt(i) = mesh->vertices[i].x;
-        vertices.yAt(i) = mesh->vertices[i].y;
+    // D parity: MeshGroup.rebuffer calls Drawable.rebuffer so shared vertex/uv atlases are resized together.
+    Drawable::rebufferMesh(data);
+    if (dynamic) {
+        precalculated = false;
     }
-    precalculated = false;
 }
 
 void MeshGroup::switchMode(bool dyn) {
@@ -271,7 +266,7 @@ std::tuple<Vec2Array, std::optional<Mat4>, bool> MeshGroup::filterChildren(const
     if (auto deformer = std::dynamic_pointer_cast<Deformer>(target)) {
         if (std::dynamic_pointer_cast<PathDeformer>(deformer)) {
             auto pd = std::dynamic_pointer_cast<PathDeformer>(deformer);
-            if (pd && !pd->renderEnabled()) return {Vec2Array{}, std::nullopt, false};
+            if (pd && !pd->physicsEnabled()) return {Vec2Array{}, std::nullopt, false};
         } else if (!std::dynamic_pointer_cast<GridDeformer>(deformer)) {
             return {Vec2Array{}, std::nullopt, false};
         }
@@ -334,6 +329,20 @@ std::tuple<Vec2Array, std::optional<Mat4>, bool> MeshGroup::filterChildren(const
     inv[0][3] = inv[1][3] = inv[2][3] = 0.0f;
     Vec2Array out = origDeformation;
     transformAdd(out, offsetLocal, inv);
+    float maxAbs = 0.0f;
+    for (std::size_t i = 0; i < out.size(); ++i) {
+        maxAbs = std::max(maxAbs, std::max(std::fabs(out.xAt(i)), std::fabs(out.yAt(i))));
+    }
+    if (maxAbs > 10.0f) {
+        std::fprintf(stderr,
+                     "[nicxlive][MeshGroup][LargeOffset] node=%s target=%s targetUuid=%u maxAbs=%.6f first=(%.6f,%.6f)\n",
+                     name.c_str(),
+                     target ? target->name.c_str() : "<null>",
+                     target ? target->uuid : 0u,
+                     maxAbs,
+                     out.size() ? out.xAt(0) : 0.0f,
+                     out.size() ? out.yAt(0) : 0.0f);
+    }
     return {out, std::nullopt, true};
 }
 
@@ -599,6 +608,11 @@ void MeshGroup::serializeSelfImpl(::nicxlive::core::serde::InochiSerializer& ser
 
 void MeshGroup::setupChildNoRecurse(const std::shared_ptr<Node>& node, bool prepend) {
     if (!node) return;
+    if (auto comp = std::dynamic_pointer_cast<Composite>(node)) {
+        if (comp->propagateMeshGroupEnabled()) {
+            return;
+        }
+    }
     auto deformable = std::dynamic_pointer_cast<Deformable>(node);
     bool isDeformable = static_cast<bool>(deformable);
     Node::FilterHook hook{};

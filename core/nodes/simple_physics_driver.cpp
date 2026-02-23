@@ -432,12 +432,14 @@ SimplePhysicsDriver::~SimplePhysicsDriver() = default;
 SimplePhysicsDriver::SimplePhysicsDriver() {
     requirePreProcessTask();
     requirePostTask(0);
+    reset();
 }
 
 SimplePhysicsDriver::SimplePhysicsDriver(uint32_t uuidVal, const std::shared_ptr<Node>& parent)
     : Driver(uuidVal, parent) {
     requirePreProcessTask();
     requirePostTask(0);
+    reset();
 }
 
 const std::string& SimplePhysicsDriver::typeId() const {
@@ -551,6 +553,15 @@ void SimplePhysicsDriver::serializeSelfImpl(::nicxlive::core::serde::InochiSeria
     if (auto osx = data.get_optional<float>("output_scale_x")) outputScale[0] = *osx;
     if (auto osy = data.get_optional<float>("output_scale_y")) outputScale[1] = *osy;
     if (auto lo = data.get_optional<bool>("local_only")) localOnly = *lo;
+    static int sDeserLog = 0;
+    if (sDeserLog < 40) {
+        std::fprintf(stderr,
+                     "[nicxlive][SimplePhysics][deser] uuid=%u name=%s paramRef=%u model=%d map=%d len=%.6f out=(%.6f,%.6f) localOnly=%d\n",
+                     uuid, name.c_str(), paramRef,
+                     static_cast<int>(modelType), static_cast<int>(mapMode),
+                     length, outputScale[0], outputScale[1], localOnly ? 1 : 0);
+        ++sDeserLog;
+    }
     reset();
     return err;
 }
@@ -797,15 +808,6 @@ void SimplePhysicsDriver::updateOutputs() {
         logPhysicsState("updateOutputs:paramOffsetNonFinite");
         return;
     }
-    static int sTraceCount = 0;
-    if (sTraceCount < 80) {
-        std::fprintf(stderr,
-                     "[nicxlive][SimplePhysics] push driver=%u name=%s param=%u offset=(%.6f,%.6f) out=(%.6f,%.6f) anchor=(%.6f,%.6f)\n",
-                     uuid, name.c_str(), paramPtr->uuid,
-                     paramOffset.x, paramOffset.y, output.x, output.y, anchor.x, anchor.y);
-        ++sTraceCount;
-    }
-
     paramPtr->pushIOffset(paramOffset, core::param::ParamMergeMode::Forced);
     paramPtr->update();
 }

@@ -9,6 +9,8 @@
 #include "../../fmt/fmt.hpp"
 
 #include <algorithm>
+#include <cstddef>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -29,6 +31,30 @@ bool traceSharedEnabled() {
     return enabled != 0;
 }
 
+bool tracePartDeformEnabled() {
+    static int enabled = -1;
+    if (enabled >= 0) return enabled != 0;
+    const char* v = std::getenv("NJCX_TRACE_PART_DEFORM");
+    if (!v) {
+        enabled = 0;
+        return false;
+    }
+    enabled = (std::strcmp(v, "1") == 0 || std::strcmp(v, "true") == 0 || std::strcmp(v, "TRUE") == 0) ? 1 : 0;
+    return enabled != 0;
+}
+
+bool tracePartListEnabled() {
+    static int enabled = -1;
+    if (enabled >= 0) return enabled != 0;
+    const char* v = std::getenv("NJCX_TRACE_PART_LIST");
+    if (!v) {
+        enabled = 0;
+        return false;
+    }
+    enabled = (std::strcmp(v, "1") == 0 || std::strcmp(v, "true") == 0 || std::strcmp(v, "TRUE") == 0) ? 1 : 0;
+    return enabled != 0;
+}
+
 }
 
 static std::vector<MaskBinding> dedupMasks(const std::vector<MaskBinding>& masks);
@@ -36,6 +62,7 @@ static void emitMasks(const std::vector<MaskBinding>& bindings, core::RenderComm
 
 Part::Part() {
     initPartTasks();
+    updateUVs();
 }
 
 Part::Part(const MeshData& data, const std::array<std::shared_ptr<::nicxlive::core::Texture>, 3>& tex, uint32_t uuidVal)
@@ -328,6 +355,7 @@ void Part::serializeSelfImpl(::nicxlive::core::serde::InochiSerializer& serializ
             masks.push_back(mb);
         }
     }
+    updateUVs();
     return std::nullopt;
 }
 
@@ -610,6 +638,56 @@ void Part::fillDrawPacket(const Node& header, PartDrawPacket& packet, bool isMas
     packet.uvs = mesh->uvs;
     packet.indices = mesh->indices;
     packet.deformation = deformation;
+    if (tracePartListEnabled()) {
+        float maxAbs = 0.0f;
+        for (std::size_t i = 0; i < deformation.size(); ++i) {
+            maxAbs = std::max(maxAbs, std::max(std::fabs(deformation.xAt(i)), std::fabs(deformation.yAt(i))));
+        }
+        std::fprintf(stderr,
+                     "[nicxlive][part-list] name=%s uuid=%u th0=%u vtx=%u maxAbs=%.6f\n",
+                     name.c_str(),
+                     uuid,
+                     packet.textureUUIDs[0],
+                     packet.vertexCount,
+                     maxAbs);
+    }
+    static bool sTracePartDeform = []() {
+        const char* env = std::getenv("NJCX_TRACE_PART_DEFORM");
+        return env && env[0] != '\0' && env[0] != '0';
+    }();
+    if (sTracePartDeform && packet.vertexCount > 0) {
+        float maxAbs = 0.0f;
+        for (std::size_t i = 0; i < deformation.size(); ++i) {
+            maxAbs = std::max(maxAbs, std::max(std::fabs(deformation.xAt(i)), std::fabs(deformation.yAt(i))));
+        }
+        if (maxAbs > 5.0f) {
+            std::fprintf(stderr,
+                         "[nicxlive][PartDeform] name=%s uuid=%u vtx=%u maxAbs=%.6f first=(%.6f,%.6f)\n",
+                         name.c_str(),
+                         uuid,
+                         packet.vertexCount,
+                         maxAbs,
+                         deformation.size() ? deformation.xAt(0) : 0.0f,
+                         deformation.size() ? deformation.yAt(0) : 0.0f);
+        }
+    }
+    if (tracePartDeformEnabled() && packet.vertexCount > 0 && deformation.size() >= packet.vertexCount) {
+        const float dx0 = deformation.xAt(0);
+        const float dy0 = deformation.yAt(0);
+        const float abs0 = std::max(std::fabs(dx0), std::fabs(dy0));
+        const auto& atlas = sharedDeformBufferData();
+        const float* atlasX = atlas.dataX();
+        const float* localX = deformation.dataX();
+        std::ptrdiff_t xDelta = -1;
+        if (atlasX && localX) {
+            xDelta = localX - atlasX;
+        }
+        if (abs0 > 1.0f || xDelta != static_cast<std::ptrdiff_t>(packet.deformOffset)) {
+            std::fprintf(stderr,
+                         "[nicxlive][part-deform] name=%s uuid=%u do=%u xDelta=%td vtx=%u d0=(%.6f,%.6f)\n",
+                         name.c_str(), uuid, packet.deformOffset, xDelta, packet.vertexCount, dx0, dy0);
+        }
+    }
     // Keep queue backend IBO map in sync with packet handles.
     // Some load paths can leave ibo assigned while index data is not registered yet.
     if (packet.indexBuffer != 0 && !packet.indices.empty()) {
@@ -681,8 +759,9 @@ void Part::finalize() {
             if (m.maskSrcUUID == 0) continue;
             auto node = pup->findNodeById(m.maskSrcUUID);
             m.maskSrc = std::dynamic_pointer_cast<Drawable>(node);
-            // Keep unresolved bindings; runtime fallback resolves by UUID.
-            valid.push_back(m);
+            if (m.maskSrc) {
+                valid.push_back(m);
+            }
         }
         masks = std::move(valid);
         // Resolve texture pointers from slot IDs at finalize time.
@@ -731,7 +810,8 @@ static std::vector<MaskBinding> dedupMasks(const std::vector<MaskBinding>& masks
     std::vector<MaskBinding> out;
     std::set<uint64_t> seen;
     for (const auto& m : masks) {
-        uint64_t key = (static_cast<uint64_t>(m.maskSrcUUID) << 32) | static_cast<uint32_t>(m.mode);
+        if (!m.maskSrc) continue;
+        uint64_t key = (static_cast<uint64_t>(m.maskSrc->uuid) << 32) | static_cast<uint32_t>(m.mode);
         if (seen.count(key)) continue;
         seen.insert(key);
         out.push_back(m);
@@ -739,7 +819,7 @@ static std::vector<MaskBinding> dedupMasks(const std::vector<MaskBinding>& masks
     return out;
 }
 
-std::size_t Part::maskCount() const { return dedupMasks(masks).size(); }
+std::size_t Part::maskCount() const { return ::nicxlive::core::nodes::maskCount(masks); }
 std::size_t Part::dodgeCount() const {
     std::size_t c = 0;
     for (const auto& m : masks) {
@@ -750,13 +830,20 @@ std::size_t Part::dodgeCount() const {
 
 void Part::enqueueRenderCommands(core::RenderContext& ctx, const std::function<void(::nicxlive::core::RenderCommandEmitter&)>& post /*= {}*/) {
     if (!renderEnabled() || ctx.renderGraph == nullptr) return;
+    auto pup = puppetRef();
 
     auto dedupMaskBindings = [&]() {
         std::vector<MaskBinding> result;
         std::set<uint64_t> seen;
-        for (const auto& m : masks) {
-            if (!m.maskSrc) continue;
-            uint64_t key = (static_cast<uint64_t>(m.maskSrcUUID) << 32) | static_cast<uint32_t>(m.mode);
+        for (auto m : masks) {
+            auto maskPtr = m.maskSrc;
+            if (!maskPtr && pup && m.maskSrcUUID != 0) {
+                auto node = pup->findNodeById(m.maskSrcUUID);
+                maskPtr = std::dynamic_pointer_cast<Drawable>(node);
+            }
+            if (!maskPtr) continue;
+            m.maskSrc = maskPtr;
+            uint64_t key = (static_cast<uint64_t>(maskPtr->uuid) << 32) | static_cast<uint32_t>(m.mode);
             if (seen.count(key)) continue;
             seen.insert(key);
             result.push_back(m);

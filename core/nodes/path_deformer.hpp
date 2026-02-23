@@ -61,12 +61,11 @@ public:
     std::vector<float> curveParams{};
     Mat4 inverseMatrix{Mat4::identity()};
     float strength{0.0f};
-    bool physicsEnabled{true};
     bool translateChildren{true};
     bool dynamicDeformation{false};
     float maxSegmentLength{0.0f};
     float totalLength{0.0f};
-    CurveType curveType{CurveType::Bezier};
+    CurveType curveType{CurveType::Spline};
     PhysicsType physicsType{PhysicsType::Pendulum};
     uint64_t frameCounter{0};
     std::unique_ptr<PhysicsDriver> driver{};
@@ -158,8 +157,19 @@ public:
     void copyFrom(const Node& src, bool clone = false, bool deepCopy = true) override;
     void rebuffer(const std::vector<Vec2>& points);
     std::unique_ptr<PhysicsDriver> createPhysicsDriver();
+    bool physicsEnabled() const { return static_cast<bool>(driver); }
     void setStrength(float s) { strength = s; }
-    void setPhysicsEnabled(bool) { physicsEnabled = true; }
+    void setPhysicsEnabled(bool value) {
+        if (value) {
+            if (!driver) {
+                driver = createPhysicsDriver();
+            }
+        } else {
+            driver.reset();
+        }
+        driverInitialized = false;
+        prevRootSet = false;
+    }
     void setTranslateChildren(bool v) { translateChildren = v; }
     void setCurveType(CurveType t) { curveType = t; clearCache(); }
     void setPhysicsType(PhysicsType t) { physicsType = t; }
@@ -173,6 +183,8 @@ public:
     ::nicxlive::core::serde::SerdeException deserializeFromFghj(const ::nicxlive::core::serde::Fghj& data) override;
 
 private:
+    bool setupChildNoRecurse(const std::shared_ptr<Node>& node, bool prepend = false);
+    bool releaseChildNoRecurse(const std::shared_ptr<Node>& node);
     void rebuildCurveSamples();
     void ensureDriver();
     Vec2 projectToCurve(const Vec2& p) const;
@@ -184,7 +196,7 @@ private:
     void sanitizeOffsets(Vec2Array& offsets);
     void validateCurve();
     void resetDiagnostics();
-    void cacheClosestPoints(const std::shared_ptr<Node>& node, const Mat4& center, const Vec2Array& sample);
+    void cacheClosestPoints(const std::shared_ptr<Node>& node, int nSamples = 100);
     void disablePhysicsDriver(const std::string& reason);
     Vec2 sanitizeVec2(const Vec2& v) const;
     void applyPathDeform(const Vec2Array& origDeform);

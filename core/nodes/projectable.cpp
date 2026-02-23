@@ -1,17 +1,13 @@
 #include "projectable.hpp"
 
 #include <algorithm>
-#include <cstdio>
 #include <set>
 
 #include "../puppet.hpp"
 
 namespace nicxlive::core::nodes {
-
 namespace {
 std::size_t gProjectableFrameCounter = 0;
-int gProjectablePushLogs = 0;
-int gProjectableFailLogs = 0;
 }
 
 std::size_t advanceProjectableFrame() {
@@ -29,15 +25,6 @@ static bool hasProjectableAncestor(const std::shared_ptr<Projectable>& node) {
         cur = cur->parentPtr();
     }
     return false;
-}
-
-static void scanSubParts(const std::shared_ptr<Projectable>& self) {
-    if (!self) return;
-    self->subParts.clear();
-    self->maskParts.clear();
-    self->scanPartsRecurse(self);
-    self->invalidateChildrenBounds();
-    self->boundsDirty = true;
 }
 
 Projectable::Projectable(bool /*delegatedMode*/) {}
@@ -72,6 +59,26 @@ void Projectable::setIgnorePuppet(bool ignore) {
     }
 }
 
+void Projectable::scanParts() {
+    subParts.clear();
+    maskParts.clear();
+    for (auto& child : childrenRef()) {
+        scanPartsRecurse(child);
+    }
+    invalidateChildrenBounds();
+    boundsDirty = true;
+}
+
+void Projectable::scanSubParts(const std::vector<std::shared_ptr<Node>>& childNodes) {
+    subParts.clear();
+    maskParts.clear();
+    for (auto& child : childNodes) {
+        scanPartsRecurse(child);
+    }
+    invalidateChildrenBounds();
+    boundsDirty = true;
+}
+
 void Projectable::scanPartsRecurse(const std::shared_ptr<Node>& node) {
     if (!node) return;
     auto proj = std::dynamic_pointer_cast<Projectable>(node);
@@ -85,7 +92,7 @@ void Projectable::scanPartsRecurse(const std::shared_ptr<Node>& node) {
         if (!proj) {
             for (auto& c : part->childrenRef()) scanPartsRecurse(c);
         } else {
-            proj->scanPartsRecurse(proj);
+            proj->scanParts();
         }
     } else if (mask && node.get() != this) {
         maskParts.push_back(mask);
@@ -93,7 +100,7 @@ void Projectable::scanPartsRecurse(const std::shared_ptr<Node>& node) {
     } else if ((!proj || node.get() == this) && node->enabled) {
         for (auto& c : node->childrenRef()) scanPartsRecurse(c);
     } else if (proj && node.get() != this) {
-        proj->scanPartsRecurse(proj);
+        proj->scanParts();
     }
 }
 
@@ -488,10 +495,6 @@ bool Projectable::initTarget() {
         }
     }
     if (!hasBounds) {
-        if (gProjectableFailLogs < 32) {
-            std::fprintf(stderr, "[nicxlive] projectable initTarget fail: no bounds uuid=%u\n", uuid);
-            ++gProjectableFailLogs;
-        }
         return false;
     }
 
@@ -520,33 +523,10 @@ bool Projectable::initTarget() {
 
     Vec2 size{maxPos.x - minPos.x, maxPos.y - minPos.y};
     if (!std::isfinite(size.x) || !std::isfinite(size.y) || size.x <= 0 || size.y <= 0) {
-        if (gProjectableFailLogs < 32) {
-            std::fprintf(stderr, "[nicxlive] projectable initTarget fail: invalid size uuid=%u size=(%.3f,%.3f)\n",
-                         uuid, size.x, size.y);
-            ++gProjectableFailLogs;
-        }
         return false;
     }
     texWidth = static_cast<uint32_t>(std::ceil(size.x)) + 1;
     texHeight = static_cast<uint32_t>(std::ceil(size.y)) + 1;
-    static int gInitTargetLogCount = 0;
-    if (gInitTargetLogCount < 128) {
-        std::fprintf(stderr,
-                     "[nicxlive] initTarget type=%s uuid=%u name=%s auto=%d size=(%.6f,%.6f) tex=(%u,%u) bounds=(%.6f,%.6f,%.6f,%.6f)\n",
-                     typeId().c_str(),
-                     uuid,
-                     name.c_str(),
-                     autoResizedMesh ? 1 : 0,
-                     size.x,
-                     size.y,
-                     texWidth,
-                     texHeight,
-                     b[0],
-                     b[1],
-                     b[2],
-                     b[3]);
-        ++gInitTargetLogCount;
-    }
     Vec2 deformOffset = deformationTranslationOffset();
     auto t = transform();
     textureOffset = Vec2{(b[0]+b[2])/2.0f, (b[1]+b[3])/2.0f};
@@ -618,12 +598,6 @@ bool Projectable::updateDynamicRenderStateFlags() {
 }
 
 void Projectable::dynamicRenderBegin(core::RenderContext& ctx) {
-    static int gProjBeginLogCount = 0;
-    if (gProjBeginLogCount < 64) {
-        std::fprintf(stderr, "[nicxlive] proj begin type=%s uuid=%u name=%s auto=%d\n",
-                     typeId().c_str(), uuid, name.c_str(), autoResizedMesh ? 1 : 0);
-        ++gProjBeginLogCount;
-    }
     dynamicScopeActive = false;
     dynamicScopeToken = static_cast<std::size_t>(-1);
     reuseCachedTextureThisFrame = false;
@@ -643,24 +617,11 @@ void Projectable::dynamicRenderBegin(core::RenderContext& ctx) {
     selfSort();
     auto pass = prepareDynamicCompositePass();
     if (!pass.surface) {
-        if (gProjectableFailLogs < 32) {
-            std::fprintf(stderr, "[nicxlive] projectable skip dynamic: no surface uuid=%u tex0=%d texCount=%zu\n",
-                         uuid,
-                         (textures.size() > 0 && textures[0]) ? 1 : 0,
-                         textures.size());
-            ++gProjectableFailLogs;
-        }
         reuseCachedTextureThisFrame = true;
         loggedFirstRenderAttempt = true;
         return;
     }
     dynamicScopeToken = ctx.renderGraph->pushDynamicComposite(std::dynamic_pointer_cast<Projectable>(shared_from_this()), pass, zSort());
-    if (gProjectablePushLogs < 32) {
-        auto p = parentPtr();
-        std::fprintf(stderr, "[nicxlive] push dyn uuid=%u parent=%u z=%.6f base=%.6f rel=%.6f off=%.6f token=%zu\n",
-                     uuid, p ? p->uuid : 0u, zSort(), zSortBase(), relZSort(), offsetSort, dynamicScopeToken);
-        ++gProjectablePushLogs;
-    }
     dynamicScopeActive = true;
 
     Mat4 translate = Mat4::translation(Vec3{-textureOffset.x, -textureOffset.y, 0});
@@ -693,6 +654,7 @@ void Projectable::dynamicRenderBegin(core::RenderContext& ctx) {
 
 void Projectable::dynamicRenderEnd(core::RenderContext& ctx) {
     if (!ctx.renderGraph) return;
+    auto pup = puppetRef();
     bool redrew = dynamicScopeActive;
     if (dynamicScopeActive) {
         auto queuedForCleanup = queuedOffscreenParts;
@@ -700,9 +662,15 @@ void Projectable::dynamicRenderEnd(core::RenderContext& ctx) {
         auto dedupMaskBindings = [&]() {
             std::vector<MaskBinding> result;
             std::set<uint64_t> seen;
-            for (const auto& m : masks) {
-                if (!m.maskSrc) continue;
-                uint64_t key = (static_cast<uint64_t>(m.maskSrcUUID) << 32) | static_cast<uint32_t>(m.mode);
+            for (auto m : masks) {
+                auto maskPtr = m.maskSrc;
+                if (!maskPtr && pup && m.maskSrcUUID != 0) {
+                    auto node = pup->findNodeById(m.maskSrcUUID);
+                    maskPtr = std::dynamic_pointer_cast<Drawable>(node);
+                }
+                if (!maskPtr) continue;
+                m.maskSrc = maskPtr;
+                uint64_t key = (static_cast<uint64_t>(maskPtr->uuid) << 32) | static_cast<uint32_t>(m.mode);
                 if (seen.count(key)) continue;
                 seen.insert(key);
                 result.push_back(m);
@@ -720,9 +688,16 @@ void Projectable::dynamicRenderEnd(core::RenderContext& ctx) {
             if (!maskBindings.empty()) {
                 emitter.beginMask(useStencil);
                 for (auto binding : maskBindings) {
-                    if (!binding.maskSrc) continue;
+                    auto maskPtr = binding.maskSrc;
+                    if (!maskPtr) {
+                        if (auto pup = self->puppetRef()) {
+                            auto node = pup->findNodeById(binding.maskSrcUUID);
+                            maskPtr = std::dynamic_pointer_cast<Drawable>(node);
+                        }
+                    }
+                    if (!maskPtr) continue;
                     bool isDodge = binding.mode == MaskingMode::DodgeMask;
-                    emitter.applyMask(binding.maskSrc, isDodge);
+                    emitter.applyMask(maskPtr, isDodge);
                 }
                 emitter.beginMaskContent();
             }
@@ -860,7 +835,7 @@ void Projectable::runPostTaskImpl(std::size_t priority, core::RenderContext& ctx
 void Projectable::notifyChange(const std::shared_ptr<Node>& target, NotifyReason reason) {
     if (target != shared_from_this()) {
         if (reason == NotifyReason::AttributeChanged) {
-            scanPartsRecurse(shared_from_this());
+            scanSubParts(childrenRef());
         }
         if (reason != NotifyReason::Initialized) {
             textureInvalidated = true;
@@ -916,7 +891,7 @@ bool Projectable::setupChild(const std::shared_ptr<Node>& child) {
 
 bool Projectable::releaseChild(const std::shared_ptr<Node>& child) {
     setIgnorePuppetRecurse(child, false);
-    scanSubParts(std::dynamic_pointer_cast<Projectable>(shared_from_this()));
+    scanSubParts(childrenRef());
     forceResize = true;
     invalidateChildrenBounds();
     boundsDirty = true;
@@ -925,7 +900,7 @@ bool Projectable::releaseChild(const std::shared_ptr<Node>& child) {
 
 void Projectable::setupSelf() {
     transformChanged();
-    scanSubParts(std::dynamic_pointer_cast<Projectable>(shared_from_this()));
+    scanSubParts(childrenRef());
     if (autoResizedMesh) {
         if (createSimpleMesh()) initialized = false;
     }
