@@ -15,6 +15,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <limits>
 #include <random>
 #include <unordered_map>
@@ -1091,7 +1092,15 @@ void Node::serializePartial(::nicxlive::core::serde::InochiSerializer& serialize
         if (auto childrenTree = data.get_child_optional("children")) {
             for (const auto& childNode : *childrenTree) {
                 std::string type = childNode.second.get<std::string>("type", "Node");
-                if (!Node::inHasNodeType(type)) continue;
+                if (!Node::inHasNodeType(type)) {
+                    static std::size_t sUnknownTypeLogCount = 0;
+                    if (sUnknownTypeLogCount < 128) {
+                        std::fprintf(stderr, "[nicxlive] node.deserialize unknown-type parent=%u parentType=%s name=%s childType=%s\n",
+                                     uuid, typeId().c_str(), name.c_str(), type.c_str());
+                        ++sUnknownTypeLogCount;
+                    }
+                    continue;
+                }
                 auto child = Node::inInstantiateNode(type, shared_from_this());
                 if (!child) continue;
                 child->deserializeFromFghj(childNode.second);

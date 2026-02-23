@@ -31,15 +31,6 @@ static bool hasProjectableAncestor(const std::shared_ptr<Projectable>& node) {
     return false;
 }
 
-static void scanSubParts(const std::shared_ptr<Projectable>& self) {
-    if (!self) return;
-    self->subParts.clear();
-    self->maskParts.clear();
-    self->scanPartsRecurse(self);
-    self->invalidateChildrenBounds();
-    self->boundsDirty = true;
-}
-
 Projectable::Projectable(bool /*delegatedMode*/) {}
 
 void Projectable::selfSort() {
@@ -72,6 +63,26 @@ void Projectable::setIgnorePuppet(bool ignore) {
     }
 }
 
+void Projectable::scanParts() {
+    subParts.clear();
+    maskParts.clear();
+    for (auto& child : childrenRef()) {
+        scanPartsRecurse(child);
+    }
+    invalidateChildrenBounds();
+    boundsDirty = true;
+}
+
+void Projectable::scanSubParts(const std::vector<std::shared_ptr<Node>>& childNodes) {
+    subParts.clear();
+    maskParts.clear();
+    for (auto& child : childNodes) {
+        scanPartsRecurse(child);
+    }
+    invalidateChildrenBounds();
+    boundsDirty = true;
+}
+
 void Projectable::scanPartsRecurse(const std::shared_ptr<Node>& node) {
     if (!node) return;
     auto proj = std::dynamic_pointer_cast<Projectable>(node);
@@ -85,7 +96,7 @@ void Projectable::scanPartsRecurse(const std::shared_ptr<Node>& node) {
         if (!proj) {
             for (auto& c : part->childrenRef()) scanPartsRecurse(c);
         } else {
-            proj->scanPartsRecurse(proj);
+            proj->scanParts();
         }
     } else if (mask && node.get() != this) {
         maskParts.push_back(mask);
@@ -93,7 +104,7 @@ void Projectable::scanPartsRecurse(const std::shared_ptr<Node>& node) {
     } else if ((!proj || node.get() == this) && node->enabled) {
         for (auto& c : node->childrenRef()) scanPartsRecurse(c);
     } else if (proj && node.get() != this) {
-        proj->scanPartsRecurse(proj);
+        proj->scanParts();
     }
 }
 
@@ -860,7 +871,7 @@ void Projectable::runPostTaskImpl(std::size_t priority, core::RenderContext& ctx
 void Projectable::notifyChange(const std::shared_ptr<Node>& target, NotifyReason reason) {
     if (target != shared_from_this()) {
         if (reason == NotifyReason::AttributeChanged) {
-            scanPartsRecurse(shared_from_this());
+            scanSubParts(childrenRef());
         }
         if (reason != NotifyReason::Initialized) {
             textureInvalidated = true;
@@ -916,7 +927,7 @@ bool Projectable::setupChild(const std::shared_ptr<Node>& child) {
 
 bool Projectable::releaseChild(const std::shared_ptr<Node>& child) {
     setIgnorePuppetRecurse(child, false);
-    scanSubParts(std::dynamic_pointer_cast<Projectable>(shared_from_this()));
+    scanSubParts(childrenRef());
     forceResize = true;
     invalidateChildrenBounds();
     boundsDirty = true;
@@ -925,7 +936,7 @@ bool Projectable::releaseChild(const std::shared_ptr<Node>& child) {
 
 void Projectable::setupSelf() {
     transformChanged();
-    scanSubParts(std::dynamic_pointer_cast<Projectable>(shared_from_this()));
+    scanSubParts(childrenRef());
     if (autoResizedMesh) {
         if (createSimpleMesh()) initialized = false;
     }

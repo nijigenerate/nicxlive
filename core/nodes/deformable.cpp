@@ -1,6 +1,8 @@
 #include "deformable.hpp"
 #include "../puppet.hpp"
 #include "../render/shared_deform_buffer.hpp"
+#include <cstdio>
+#include <cmath>
 
 namespace nicxlive::core::nodes {
 namespace {
@@ -82,6 +84,17 @@ void DeformationStack::push(const Deformation& deform) {
     const auto& d = deform.vertexOffsets;
     if (!owner_ || owner_->deformation.size() != d.size()) return;
     owner_->deformation += d;
+    float maxAbs = 0.0f;
+    for (std::size_t i = 0; i < owner_->deformation.size(); ++i) {
+        maxAbs = std::max(maxAbs, std::max(std::fabs(owner_->deformation.xAt(i)), std::fabs(owner_->deformation.yAt(i))));
+    }
+    if (maxAbs > 50.0f) {
+        std::fprintf(stderr,
+                     "[nicxlive][Deformable][StackLarge] node=%s uuid=%u maxAbs=%.6f first=(%.6f,%.6f)\n",
+                     owner_->name.c_str(), owner_->uuid, maxAbs,
+                     owner_->deformation.size() ? owner_->deformation.xAt(0) : 0.0f,
+                     owner_->deformation.size() ? owner_->deformation.yAt(0) : 0.0f);
+    }
     owner_->notifyDeformPushed(d);
 }
 
@@ -157,6 +170,17 @@ void Deformable::preProcess() {
         if (!newDeform.empty()) {
             fromStdVec(deformation, newDeform);
             ::nicxlive::core::render::sharedDeformMarkDirty();
+            float maxAbs = 0.0f;
+            for (std::size_t i = 0; i < deformation.size(); ++i) {
+                maxAbs = std::max(maxAbs, std::max(std::fabs(deformation.xAt(i)), std::fabs(deformation.yAt(i))));
+            }
+            if (maxAbs > 50.0f) {
+                std::fprintf(stderr,
+                             "[nicxlive][Deformable][PreFilterLarge] node=%s uuid=%u stage=%zu maxAbs=%.6f first=(%.6f,%.6f)\n",
+                             name.c_str(), uuid, hook.stage, maxAbs,
+                             deformation.size() ? deformation.xAt(0) : 0.0f,
+                             deformation.size() ? deformation.yAt(0) : 0.0f);
+            }
         }
         if (newMat.has_value()) {
             overrideTransformMatrix = newMat;
@@ -182,6 +206,17 @@ void Deformable::postProcess(int id) {
         if (!newDeform.empty()) {
             fromStdVec(deformation, newDeform);
             ::nicxlive::core::render::sharedDeformMarkDirty();
+            float maxAbs = 0.0f;
+            for (std::size_t i = 0; i < deformation.size(); ++i) {
+                maxAbs = std::max(maxAbs, std::max(std::fabs(deformation.xAt(i)), std::fabs(deformation.yAt(i))));
+            }
+            if (maxAbs > 50.0f) {
+                std::fprintf(stderr,
+                             "[nicxlive][Deformable][PostFilterLarge] node=%s uuid=%u stage=%zu maxAbs=%.6f first=(%.6f,%.6f)\n",
+                             name.c_str(), uuid, hook.stage, maxAbs,
+                             deformation.size() ? deformation.xAt(0) : 0.0f,
+                             deformation.size() ? deformation.yAt(0) : 0.0f);
+            }
         }
         if (newMat.has_value()) {
             overrideTransformMatrix = newMat;

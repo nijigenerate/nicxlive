@@ -9,6 +9,8 @@
 #include "../../fmt/fmt.hpp"
 
 #include <algorithm>
+#include <cstddef>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -29,6 +31,18 @@ bool traceSharedEnabled() {
     return enabled != 0;
 }
 
+bool tracePartDeformEnabled() {
+    static int enabled = -1;
+    if (enabled >= 0) return enabled != 0;
+    const char* v = std::getenv("NJCX_TRACE_PART_DEFORM");
+    if (!v) {
+        enabled = 0;
+        return false;
+    }
+    enabled = (std::strcmp(v, "1") == 0 || std::strcmp(v, "true") == 0 || std::strcmp(v, "TRUE") == 0) ? 1 : 0;
+    return enabled != 0;
+}
+
 }
 
 static std::vector<MaskBinding> dedupMasks(const std::vector<MaskBinding>& masks);
@@ -36,6 +50,7 @@ static void emitMasks(const std::vector<MaskBinding>& bindings, core::RenderComm
 
 Part::Part() {
     initPartTasks();
+    updateUVs();
 }
 
 Part::Part(const MeshData& data, const std::array<std::shared_ptr<::nicxlive::core::Texture>, 3>& tex, uint32_t uuidVal)
@@ -328,6 +343,7 @@ void Part::serializeSelfImpl(::nicxlive::core::serde::InochiSerializer& serializ
             masks.push_back(mb);
         }
     }
+    updateUVs();
     return std::nullopt;
 }
 
@@ -610,6 +626,23 @@ void Part::fillDrawPacket(const Node& header, PartDrawPacket& packet, bool isMas
     packet.uvs = mesh->uvs;
     packet.indices = mesh->indices;
     packet.deformation = deformation;
+    if (tracePartDeformEnabled() && packet.vertexCount > 0 && deformation.size() >= packet.vertexCount) {
+        const float dx0 = deformation.xAt(0);
+        const float dy0 = deformation.yAt(0);
+        const float abs0 = std::max(std::fabs(dx0), std::fabs(dy0));
+        const auto& atlas = sharedDeformBufferData();
+        const float* atlasX = atlas.dataX();
+        const float* localX = deformation.dataX();
+        std::ptrdiff_t xDelta = -1;
+        if (atlasX && localX) {
+            xDelta = localX - atlasX;
+        }
+        if (abs0 > 1.0f || xDelta != static_cast<std::ptrdiff_t>(packet.deformOffset)) {
+            std::fprintf(stderr,
+                         "[nicxlive][part-deform] name=%s uuid=%u do=%u xDelta=%td vtx=%u d0=(%.6f,%.6f)\n",
+                         name.c_str(), uuid, packet.deformOffset, xDelta, packet.vertexCount, dx0, dy0);
+        }
+    }
     // Keep queue backend IBO map in sync with packet handles.
     // Some load paths can leave ibo assigned while index data is not registered yet.
     if (packet.indexBuffer != 0 && !packet.indices.empty()) {

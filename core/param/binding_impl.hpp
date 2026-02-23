@@ -4,6 +4,8 @@
 #include "../nodes/common.hpp"
 #include "../serde.hpp"
 #include <algorithm>
+#include <array>
+#include <cctype>
 #include <cstdlib>
 #include <cstring>
 #include <cstdio>
@@ -25,6 +27,8 @@ namespace nicxlive::core::param {
 
 bool pushDeformationToNode(const std::shared_ptr<Node>& node, const DeformSlot& value);
 bool getDeformationNodeVertexCount(const std::shared_ptr<Node>& node, std::size_t& outVertexCount);
+template <typename T>
+inline T cubicValue(const T& p0, const T& p1, const T& p2, const T& p3, float t);
 
 inline bool traceParamBindingEnabled() {
     static int enabled = -1;
@@ -174,6 +178,7 @@ public:
             return newlySet[maj][min];
         };
         auto setPoint = [&](bool yMajor, uint32_t maj, uint32_t min, const T& val, float distance, bool commit) {
+            if (isValid(yMajor, maj, min)) return;
             if (yMajor) {
                 values[min][maj] = val;
                 interpDistance[min][maj] = distance;
@@ -257,7 +262,7 @@ public:
                 if (j >= minorCnt) continue;
                 T val = get(yMajor, i, j);
                 float origin = axisPoint(yMajor, j);
-                for (uint32_t k = 0; k <= j; ++k) {
+                for (uint32_t k = 0; k < j; ++k) {
                     float minDist = std::abs(axisPoint(yMajor, k) - origin);
                     if (yMajor ? isNew(true, k, i) : isNew(false, i, k)) {
                         if (!detectedIntersections) commitPoints.clear();
@@ -488,7 +493,13 @@ protected:
             auto p1 = sample(std::min<std::size_t>(lx + 1, values.size() - 1), 0);
             auto t = std::clamp(offset.x, 0.0f, 1.0f);
             if (interpolateMode_ == InterpolateMode::Cubic) {
-                return lerpValue(p0, p1, t);
+                const std::ptrdiff_t xkp = static_cast<std::ptrdiff_t>(lx);
+                const std::size_t xlen = values.size() - 1;
+                const auto& c0 = sample(static_cast<std::size_t>(std::clamp<std::ptrdiff_t>(xkp - 1, 0, static_cast<std::ptrdiff_t>(xlen))), 0);
+                const auto& c1 = sample(static_cast<std::size_t>(std::clamp<std::ptrdiff_t>(xkp, 0, static_cast<std::ptrdiff_t>(xlen))), 0);
+                const auto& c2 = sample(static_cast<std::size_t>(std::clamp<std::ptrdiff_t>(xkp + 1, 0, static_cast<std::ptrdiff_t>(xlen))), 0);
+                const auto& c3 = sample(static_cast<std::size_t>(std::clamp<std::ptrdiff_t>(xkp + 2, 0, static_cast<std::ptrdiff_t>(xlen))), 0);
+                return cubicValue(c0, c1, c2, c3, t);
             }
             return lerpValue(p0, p1, t);
         } else {
@@ -498,11 +509,27 @@ protected:
             const auto& p11 = sample(lx + 1, ly + 1);
             auto ty = std::clamp(offset.y, 0.0f, 1.0f);
             auto tx = std::clamp(offset.x, 0.0f, 1.0f);
+            if (interpolateMode_ == InterpolateMode::Cubic) {
+                const std::size_t xlen = values.size() - 1;
+                const std::size_t ylen = values[0].size() - 1;
+                const std::ptrdiff_t xkp = static_cast<std::ptrdiff_t>(lx);
+                const std::ptrdiff_t ykp = static_cast<std::ptrdiff_t>(ly);
+                auto bicubicInterp = [&](float xt, float yt) {
+                    std::array<T, 4> outRow{};
+                    for (std::size_t y = 0; y < 4; ++y) {
+                        const std::size_t yp = static_cast<std::size_t>(std::clamp<std::ptrdiff_t>(ykp + static_cast<std::ptrdiff_t>(y) - 1, 0, static_cast<std::ptrdiff_t>(ylen)));
+                        const auto& c0 = sample(static_cast<std::size_t>(std::clamp<std::ptrdiff_t>(xkp - 1, 0, static_cast<std::ptrdiff_t>(xlen))), yp);
+                        const auto& c1 = sample(static_cast<std::size_t>(std::clamp<std::ptrdiff_t>(xkp, 0, static_cast<std::ptrdiff_t>(xlen))), yp);
+                        const auto& c2 = sample(static_cast<std::size_t>(std::clamp<std::ptrdiff_t>(xkp + 1, 0, static_cast<std::ptrdiff_t>(xlen))), yp);
+                        const auto& c3 = sample(static_cast<std::size_t>(std::clamp<std::ptrdiff_t>(xkp + 2, 0, static_cast<std::ptrdiff_t>(xlen))), yp);
+                        outRow[y] = cubicValue(c0, c1, c2, c3, xt);
+                    }
+                    return cubicValue(outRow[0], outRow[1], outRow[2], outRow[3], yt);
+                };
+                return bicubicInterp(tx, ty);
+            }
             auto p0 = lerpValue(p00, p01, ty);
             auto p1 = lerpValue(p10, p11, ty);
-            if (interpolateMode_ == InterpolateMode::Cubic) {
-                return lerpValue(p0, p1, tx);
-            }
             return lerpValue(p0, p1, tx);
         }
     }
@@ -565,7 +592,23 @@ public:
 
     void applyToTarget(const DeformSlot& value) override {
         if (target.name != "deform") return;
-        pushDeformationToNode(target.target.lock(), value);
+        float maxAbs = 0.0f;
+        for (std::size_t i = 0; i < value.vertexOffsets.size(); ++i) {
+            maxAbs = std::max(maxAbs, std::max(std::fabs(value.vertexOffsets.xAt(i)), std::fabs(value.vertexOffsets.yAt(i))));
+        }
+        auto node = target.target.lock();
+        if (maxAbs > 10.0f) {
+            std::fprintf(stderr,
+                         "[nicxlive][DeformBind][LargeApply] param=%u:%s target=%u:%s maxAbs=%.6f first=(%.6f,%.6f)\n",
+                         parameter ? parameter->uuid : 0u,
+                         parameter ? parameter->name.c_str() : "<null>",
+                         node ? node->uuid : 0u,
+                         node ? node->name.c_str() : "<null>",
+                         maxAbs,
+                         value.vertexOffsets.size() ? value.vertexOffsets.xAt(0) : 0.0f,
+                         value.vertexOffsets.size() ? value.vertexOffsets.yAt(0) : 0.0f);
+        }
+        pushDeformationToNode(node, value);
     }
 
     void clearValue(DeformSlot& v) override {
@@ -595,7 +638,7 @@ public:
 
     void update(const Vec2u& point, const Vec2Array& offsets) {
         if (point.x >= values.size() || point.y >= values[point.x].size()) return;
-        values[point.x][point.y].vertexOffsets = offsets;
+        values[point.x][point.y].vertexOffsets = offsets.dup();
         isSetFlags[point.x][point.y] = true;
         reInterpolate();
     }
@@ -640,7 +683,7 @@ public:
                     offsets = reordered;
                     if (x < isSetFlags.size() && y < isSetFlags[x].size()) isSetFlags[x][y] = !offsets.empty();
                 } else if (replacement.size() == newLength && newLength > 0) {
-                    offsets = replacement;
+                    offsets = replacement.dup();
                     if (x < isSetFlags.size() && y < isSetFlags[x].size()) isSetFlags[x][y] = true;
                 } else {
                     offsets.resize(newLength);
@@ -1019,6 +1062,17 @@ inline void deserializeValueNode(const boost::property_tree::ptree& node, Deform
 } // namespace detail
 
 template <typename T>
+inline T cubicValue(const T& p0, const T& p1, const T& p2, const T& p3, float t) {
+    const float t2 = t * t;
+    const float t3 = t2 * t;
+    const T a = p1 * 2.0f;
+    const T b = (p2 - p0) * t;
+    const T c = (p0 * 2.0f - p1 * 5.0f + p2 * 4.0f - p3) * t2;
+    const T d = (p1 * 3.0f - p2 * 3.0f + p3 - p0) * t3;
+    return (a + b + c + d) * 0.5f;
+}
+
+template <typename T>
 ::nicxlive::core::serde::SerdeException ParameterBindingImpl<T>::serializeSelf(::nicxlive::core::serde::InochiSerializer& serializer) const {
     serializer.putKey("node");
     serializer.putValue(getNodeUUID());
@@ -1057,7 +1111,19 @@ template <typename T>
     nodeUuid_ = data.get<uint32_t>("node", 0);
     target.uuid = nodeUuid_;
     target.name = data.get<std::string>("param_name", target.name);
-    interpolateMode_ = static_cast<InterpolateMode>(data.get<int>("interpolate_mode", static_cast<int>(InterpolateMode::Linear)));
+    interpolateMode_ = InterpolateMode::Linear;
+    if (auto modeInt = data.get_optional<int>("interpolate_mode")) {
+        interpolateMode_ = static_cast<InterpolateMode>(*modeInt);
+    } else if (auto modeStr = data.get_optional<std::string>("interpolate_mode")) {
+        auto mode = *modeStr;
+        std::transform(mode.begin(), mode.end(), mode.begin(), [](unsigned char c) {
+            return static_cast<char>(std::tolower(c));
+        });
+        if (mode == "nearest") interpolateMode_ = InterpolateMode::Nearest;
+        else if (mode == "linear") interpolateMode_ = InterpolateMode::Linear;
+        else if (mode == "cubic") interpolateMode_ = InterpolateMode::Cubic;
+        else if (mode == "step") interpolateMode_ = InterpolateMode::Step;
+    }
 
     static const boost::property_tree::ptree empty{};
     const auto valuesIt = data.find("values");

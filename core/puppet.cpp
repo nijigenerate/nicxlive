@@ -4,6 +4,9 @@
 #include "render/scheduler.hpp"
 #include "render/command_emitter.hpp"
 #include "nodes/projectable.hpp"
+#include "nodes/mesh_group.hpp"
+#include "nodes/path_deformer.hpp"
+#include "nodes/grid_deformer.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -514,6 +517,26 @@ void Puppet::recordNodeChange(nodes::NotifyReason reason) {
             root->name = "Root";
             scanParts(true, root);
             selfSort();
+            std::size_t totalNodes = 0;
+            std::size_t partCount = 0;
+            std::size_t meshGroupCount = 0;
+            std::size_t pathDeformerCount = 0;
+            std::size_t gridDeformerCount = 0;
+            std::size_t compositeCount = 0;
+            std::function<void(const std::shared_ptr<nodes::Node>&)> countNodes = [&](const std::shared_ptr<nodes::Node>& n) {
+                if (!n) return;
+                ++totalNodes;
+                if (std::dynamic_pointer_cast<nodes::Part>(n)) ++partCount;
+                if (std::dynamic_pointer_cast<nodes::MeshGroup>(n)) ++meshGroupCount;
+                if (std::dynamic_pointer_cast<nodes::PathDeformer>(n)) ++pathDeformerCount;
+                if (std::dynamic_pointer_cast<nodes::GridDeformer>(n)) ++gridDeformerCount;
+                if (std::dynamic_pointer_cast<nodes::Composite>(n)) ++compositeCount;
+                for (const auto& c : n->childrenRef()) countNodes(c);
+            };
+            countNodes(root);
+            std::fprintf(stderr,
+                         "[nicxlive] load types total=%zu part=%zu meshgroup=%zu pathDeformer=%zu gridDeformer=%zu composite=%zu\n",
+                         totalNodes, partCount, meshGroupCount, pathDeformerCount, gridDeformerCount, compositeCount);
         }
     } catch (const std::exception& ex) {
         return std::string(ex.what());

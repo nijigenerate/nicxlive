@@ -159,7 +159,17 @@ public:
     void rebuffer(const std::vector<Vec2>& points);
     std::unique_ptr<PhysicsDriver> createPhysicsDriver();
     void setStrength(float s) { strength = s; }
-    void setPhysicsEnabled(bool) { physicsEnabled = true; }
+    void setPhysicsEnabled(bool value) {
+        if (value) {
+            if (!driver) {
+                driver = createPhysicsDriver();
+            }
+        } else {
+            driver.reset();
+        }
+        driverInitialized = false;
+        prevRootSet = false;
+    }
     void setTranslateChildren(bool v) { translateChildren = v; }
     void setCurveType(CurveType t) { curveType = t; clearCache(); }
     void setPhysicsType(PhysicsType t) { physicsType = t; }

@@ -38,6 +38,8 @@ public:
     void setIgnorePuppetRecurse(const std::shared_ptr<Node>& node, bool ignore);
     void setIgnorePuppet(bool ignore);
 
+    void scanParts();
+    void scanSubParts(const std::vector<std::shared_ptr<Node>>& childNodes);
     void scanPartsRecurse(const std::shared_ptr<Node>& node);
 
     void drawSelf(bool isMask = false) override;

@@ -110,6 +110,11 @@ Drawable::Drawable(const MeshData& data, uint32_t uuidVal, const std::shared_ptr
     ::nicxlive::core::render::sharedDeformRegister(deformation, &deformOffset);
     ::nicxlive::core::render::sharedVertexRegister(vertices, &vertexOffset);
     ::nicxlive::core::render::sharedUvRegister(sharedUvs, &uvOffset);
+    sharedUvResize(sharedUvs, mesh->uvs.size());
+    for (std::size_t i = 0; i < mesh->uvs.size(); ++i) {
+        sharedUvs.set(i, mesh->uvs[i]);
+    }
+    sharedUvMarkDirty();
     updateIndices();
     updateVertices();
 }
@@ -464,12 +469,6 @@ void Drawable::updateVertices() {
     }
     sharedVertexMarkDirty();
 
-    sharedUvResize(sharedUvs, mesh->uvs.size());
-    for (std::size_t i = 0; i < mesh->uvs.size(); ++i) {
-        sharedUvs.set(i, mesh->uvs[i]);
-    }
-    sharedUvMarkDirty();
-
     deformation.resize(vertices.size());
     deformation.fill(Vec2{0.0f, 0.0f});
     deformationOffsets.resize(vertices.size(), Vec2{});
@@ -479,6 +478,11 @@ void Drawable::updateVertices() {
 }
 
 void Drawable::rebufferMesh(const MeshData& data) {
+    sharedUvResize(sharedUvs, data.uvs.size());
+    for (std::size_t i = 0; i < data.uvs.size(); ++i) {
+        sharedUvs.set(i, data.uvs[i]);
+    }
+    sharedUvMarkDirty();
     *mesh = data;
     updateIndices();
     updateVertices();
@@ -574,20 +578,11 @@ std::tuple<Vec2Array, std::optional<Mat4>, bool> Drawable::weldingProcessor(cons
     Vec2Array localTarget = common::makeZeroVecArray(targetIndices.size());
     transformAdd(localTarget, deltaTarget, targetInv);
 
-    Vec2Array selfDeformOut = deformation;
-    scatterAddVec2(localSelf, selfIndices, selfDeformOut, changed);
+    scatterAddVec2(localSelf, selfIndices, deformation, changed);
     Vec2Array targetDeformOut = origDeformation;
     scatterAddVec2(localTarget, targetIndices, targetDeformOut, changed);
-    if (changed) {
-        deformation = selfDeformOut;
-        targetDrawable->deformation = targetDeformOut;
-    }
-
-    if (changed) {
-        sharedDeformMarkDirty();
-        updateBounds();
-    }
-    return {origDeformation, std::nullopt, changed};
+    sharedDeformMarkDirty();
+    return {targetDeformOut, std::nullopt, changed};
 }
 
 void Drawable::addWeldedTarget(const std::shared_ptr<Drawable>& target,
@@ -686,20 +681,6 @@ void Drawable::runBeginTask(core::RenderContext& ctx) {
 
 void Drawable::runPostTaskImpl(std::size_t priority, core::RenderContext& ctx) {
     Deformable::runPostTaskImpl(priority, ctx);
-    if (priority == 2) {
-        auto pup = puppetRef();
-        for (const auto& link : weldedLinks) {
-            std::shared_ptr<Node> tgtNode;
-            if (pup) tgtNode = pup->findNodeById(link.targetUUID);
-            auto tgtDrawable = std::dynamic_pointer_cast<Drawable>(tgtNode);
-            if (!tgtDrawable) continue;
-            Mat4 tmat = tgtDrawable->transform().toMat4();
-            auto res = weldingProcessor(tgtDrawable, tgtDrawable->vertices, tgtDrawable->deformation, &tmat);
-            if (std::get<2>(res)) {
-                changed = true;
-            }
-        }
-    }
 }
 
 void Drawable::normalizeUv() {
@@ -754,6 +735,11 @@ void Drawable::copyFromDrawable(const Drawable& src) {
     weldedLinks = src.weldedLinks;
     weldingApplied = src.weldingApplied;
     vertexOffset = uvOffset = deformOffset = 0;
+    sharedUvResize(sharedUvs, mesh->uvs.size());
+    for (std::size_t i = 0; i < mesh->uvs.size(); ++i) {
+        sharedUvs.set(i, mesh->uvs[i]);
+    }
+    sharedUvMarkDirty();
     updateVertices();
     updateIndices();
 }
@@ -882,14 +868,14 @@ void Drawable::registerWeldFilter(const std::shared_ptr<Drawable>& target) {
     hook.stage = 2;
     hook.tag = tag;
     std::weak_ptr<Drawable> weakTarget = target;
-    hook.func = [weakTarget, this](std::shared_ptr<Node> self, const std::vector<Vec2>& verts, const std::vector<Vec2>& deform, const Mat4* mat) {
+    hook.func = [weakTarget](std::shared_ptr<Node> self, const std::vector<Vec2>& verts, const std::vector<Vec2>& deform, const Mat4* mat) {
         auto tgt = weakTarget.lock();
         if (!tgt) return std::make_tuple(std::vector<Vec2>{}, std::optional<Mat4>{}, false);
         Vec2Array v; v.resize(verts.size());
         for (std::size_t i = 0; i < verts.size(); ++i) { v.set(i, verts[i]); }
         Vec2Array d; d.resize(deform.size());
         for (std::size_t i = 0; i < deform.size(); ++i) { d.set(i, deform[i]); }
-        auto res = weldingProcessor(tgt, v, d, mat);
+        auto res = tgt->weldingProcessor(self, v, d, mat);
         std::vector<Vec2> out;
         const auto& def = std::get<0>(res);
         out.reserve(def.size());

@@ -605,13 +605,14 @@ void PathDeformer::logTransformFailure(const std::string& ctx, const Mat4& m) {
 }
 
 void PathDeformer::refreshInverseMatrix(const std::string& ctx) {
-    bool ok = true;
-    Mat4 m = transform().toMat4();
-    Mat4 inv = requireFiniteMatrix(Mat4::inverse(m), ctx, ok);
-    if (!ok) {
-        logTransformFailure(ctx, m);
-        disablePhysicsDriver("inverseInvalid");
+    bool okGlobal = true;
+    Mat4 global = requireFiniteMatrix(transform().toMat4(), ctx + ":global", okGlobal);
+    bool okInv = true;
+    Mat4 inv = requireFiniteMatrix(Mat4::inverse(global), ctx + ":inverse", okInv);
+    if (!okGlobal || !okInv) {
+        logTransformFailure(ctx, global);
         matrixInvalidThisFrame = true;
+        invalidThisFrame = true;
     }
     inverseMatrix = inv;
 }
@@ -757,7 +758,9 @@ DeformResult PathDeformer::deformChildren(const std::shared_ptr<Node>& target,
     static std::unordered_map<uint32_t, uint64_t> sChangedCount;
     static uint64_t sSummaryTick = 0;
     DeformResult res;
-    res.vertices = origDeformation.empty() ? origVertices : origDeformation;
+    // D parity: unchanged path filter returns empty deformation payload.
+    // Returning original vertices/deformation here causes caller-side overwrite.
+    res.vertices.clear();
     res.transform = std::nullopt;
     res.changed = false;
 
@@ -810,17 +813,22 @@ DeformResult PathDeformer::deformChildren(const std::shared_ptr<Node>& target,
         return res;
     }
 
-    // cache closest t samples per target
+    // D parity: only reuse cached t-samples when entry already exists and has enough vertices.
     auto tgtId = target ? target->uuid : 0u;
-    auto& cache = meshCaches[tgtId];
-    cache.resize(sample.size());
-    std::vector<float> tSamples(sample.size());
-    if (cache.size() == sample.size() && prevCurve) {
-        tSamples.assign(cache.begin(), cache.end());
-    } else {
+    auto it = meshCaches.find(tgtId);
+    bool hasValidCache = (it != meshCaches.end() && it->second.size() >= sample.size());
+    if (!hasValidCache) {
         cacheClosestPoints(target, center, sample);
-        tSamples.assign(cache.begin(), cache.end());
+        it = meshCaches.find(tgtId);
+        hasValidCache = (it != meshCaches.end() && it->second.size() >= sample.size());
     }
+    if (!hasValidCache) {
+        if (diagStarted) endDiagnosticFrame();
+        return res;
+    }
+    auto& cache = it->second;
+    std::vector<float> tSamples(sample.size());
+    std::copy_n(cache.begin(), sample.size(), tSamples.begin());
 
     Curve* baseCurve = prevCurve ? prevCurve.get() : originalCurve.get();
     Vec2Array closestOrig;
@@ -893,14 +901,24 @@ DeformResult PathDeformer::deformChildren(const std::shared_ptr<Node>& target,
     transformAdd(deformOut, offsetLocal, inv, offsetLocal.size());
 
     res.vertices.resize(deformOut.size());
+    float maxAbs = 0.0f;
     for (std::size_t i = 0; i < deformOut.size(); ++i) {
         res.vertices[i] = Vec2{deformOut.xAt(i), deformOut.yAt(i)};
         if (!std::isfinite(res.vertices[i].x) || !std::isfinite(res.vertices[i].y)) {
             recordInvalid("resultNaN", i, res.vertices[i]);
             res.vertices[i] = Vec2{0, 0};
         }
+        maxAbs = std::max(maxAbs, std::max(std::fabs(res.vertices[i].x), std::fabs(res.vertices[i].y)));
     }
     res.changed = true;
+    if (maxAbs > 10.0f) {
+        pathLog("[PathDeformer][LargeOffset] node=", name,
+                " target=", (target ? target->name : std::string("<null>")),
+                " targetUuid=", (target ? target->uuid : 0u),
+                " maxAbs=", maxAbs,
+                " first=(", (res.vertices.empty() ? 0.0f : res.vertices[0].x),
+                ",", (res.vertices.empty() ? 0.0f : res.vertices[0].y), ")");
+    }
     if (driver && target) {
         target->notifyChange(target);
     }
@@ -957,15 +975,11 @@ void PathDeformer::applyPathDeform(const Vec2Array& origDeform) {
     refreshInverseMatrix("applyPathDeform:pre");
     sanitizeOffsets(deformation);
     auto pup = puppetRef();
-    bool allowDrivers = !pup || pup->enableDrivers;
-    if (!allowDrivers && driver) {
-        driver->reset();
-        driverInitialized = false;
-    }
-    if (driver && allowDrivers) {
+    const bool enableDriverStep = (pup && pup->enableDrivers);
+    if (driver) {
         Vec2Array baseline = (origDeform.size() == deformation.size()) ? origDeform : deformation;
         sanitizeOffsets(baseline);
-        if (!driverInitialized) {
+        if (!driverInitialized && enableDriverStep) {
             driver->setup();
             driverInitialized = true;
         }
@@ -984,38 +998,40 @@ void PathDeformer::applyPathDeform(const Vec2Array& origDeform) {
             prevCurve = createCurve(prevCandidate, curveType == CurveType::Bezier);
             clearCache();
             logCurveHealth("applyPathDeform:driverPrev", originalCurve, prevCurve, deformation);
-            driver->updateDefaultShape();
-            Vec2 root{};
-            Mat4 transformMatrix = transform().toMat4();
-            if (deformation.size() > 0) {
-                auto tp = transformMatrix.transformPoint(Vec3{vertices[0].x + deformation.xAt(0), vertices[0].y + deformation.yAt(0), 0.0f});
-                root = sanitizeVec2(Vec2{tp.x, tp.y});
-            }
-            if (prevRootSet) {
-                Vec2 deform = sanitizeVec2(Vec2{root.x - prevRoot.x, root.y - prevRoot.y});
-                driver->reset();
-                driver->enforce(deform);
-                driver->rotate(transform().rotation.z);
-                if (physicsOnly) {
-                    Vec2Array prevDeform = deformation;
-                    driver->update(prevDeform, strength, frameCounter);
-                    prevCurve = createCurve(vertices, curveType == CurveType::Bezier);
-                    logCurveHealth("applyPathDeform:physicsPrev", originalCurve, prevCurve, deformation);
-                    if (prevDeform.size() == deformation.size()) {
-                        for (std::size_t i = 0; i < deformation.size(); ++i) {
-                            deformation.set(i, Vec2{
-                                deformation.xAt(i) - prevDeform.xAt(i),
-                                deformation.yAt(i) - prevDeform.yAt(i),
-                            });
-                        }
-                    }
-                    sanitizeOffsets(deformation);
-                } else {
-                    driver->update(deformation, strength, frameCounter);
+            if (enableDriverStep) {
+                driver->updateDefaultShape();
+                Vec2 root{};
+                Mat4 transformMatrix = transform().toMat4();
+                if (deformation.size() > 0) {
+                    auto tp = transformMatrix.transformPoint(Vec3{vertices[0].x + deformation.xAt(0), vertices[0].y + deformation.yAt(0), 0.0f});
+                    root = sanitizeVec2(Vec2{tp.x, tp.y});
                 }
+                if (prevRootSet) {
+                    Vec2 deform = sanitizeVec2(Vec2{root.x - prevRoot.x, root.y - prevRoot.y});
+                    driver->reset();
+                    driver->enforce(deform);
+                    driver->rotate(transform().rotation.z);
+                    if (physicsOnly) {
+                        Vec2Array prevDeform = deformation;
+                        driver->update(deformation, strength, frameCounter);
+                        prevCurve = createCurve(vertices, curveType == CurveType::Bezier);
+                        logCurveHealth("applyPathDeform:physicsPrev", originalCurve, prevCurve, deformation);
+                        if (prevDeform.size() == deformation.size()) {
+                            for (std::size_t i = 0; i < deformation.size(); ++i) {
+                                deformation.set(i, Vec2{
+                                    deformation.xAt(i) - prevDeform.xAt(i),
+                                    deformation.yAt(i) - prevDeform.yAt(i),
+                                });
+                            }
+                        }
+                        sanitizeOffsets(deformation);
+                    } else {
+                        driver->update(deformation, strength, frameCounter);
+                    }
+                }
+                prevRoot = root;
+                prevRootSet = true;
             }
-            prevRoot = root;
-            prevRootSet = true;
 
             auto candidate = vertices;
             candidate += deformation;
@@ -1317,23 +1333,53 @@ void PathDeformer::serializeSelfImpl(::nicxlive::core::serde::InochiSerializer& 
 }
 
 ::nicxlive::core::serde::SerdeException PathDeformer::deserializeFromFghj(const ::nicxlive::core::serde::Fghj& data) {
-    if (auto err = Deformable::deserializeFromFghj(data)) return err;
-    physicsEnabled = true;
+    try {
+        if (auto err = Deformable::deserializeFromFghj(data)) {
+            return err;
+        }
+        physicsEnabled = true;
+
+        auto parseCurveType = [](const ::nicxlive::core::serde::Fghj& node, CurveType& out) {
+            try {
+                out = static_cast<CurveType>(node.get_value<int>());
+                return;
+            } catch (...) {
+            }
+            try {
+                auto s = node.get_value<std::string>();
+                if (s == "Bezier") out = CurveType::Bezier;
+                else if (s == "Spline") out = CurveType::Spline;
+            } catch (...) {
+            }
+        };
+        auto parsePhysicsType = [](const ::nicxlive::core::serde::Fghj& node, PhysicsType& out) {
+            try {
+                out = static_cast<PhysicsType>(node.get_value<int>());
+                return;
+            } catch (...) {
+            }
+            try {
+                auto s = node.get_value<std::string>();
+                if (s == "SpringPendulum") out = PhysicsType::SpringPendulum;
+                else if (s == "Pendulum") out = PhysicsType::Pendulum;
+            } catch (...) {
+            }
+        };
     if (auto st = data.get_child_optional("strength")) {
         strength = st->get_value<float>();
     }
     if (auto tc = data.get_child_optional("translateChildren")) {
         translateChildren = tc->get_value<bool>();
     }
-    if (auto ct = data.get_child_optional("curveType")) {
-        curveType = static_cast<CurveType>(ct->get_value<int>());
-    }
-    if (auto ct2 = data.get_child_optional("curve_type")) {
-        curveType = static_cast<CurveType>(ct2->get_value<int>());
-    }
-    if (auto pt = data.get_child_optional("physicsType")) {
-        physicsType = static_cast<PhysicsType>(pt->get_value<int>());
-    }
+        if (auto ct = data.get_child_optional("curveType")) {
+            parseCurveType(*ct, curveType);
+        }
+        if (auto ct2 = data.get_child_optional("curve_type")) {
+            parseCurveType(*ct2, curveType);
+        }
+        if (auto pt = data.get_child_optional("physicsType")) {
+            parsePhysicsType(*pt, physicsType);
+        }
     if (auto po = data.get_child_optional("physics_only")) {
         physicsOnly = po->get_value<bool>();
     }
@@ -1342,7 +1388,19 @@ void PathDeformer::serializeSelfImpl(::nicxlive::core::serde::InochiSerializer& 
     } else {
         dynamicDeformation = false;
     }
-    if (auto cps = data.get_child_optional("controlPoints")) {
+    if (auto verts = data.get_child_optional("vertices")) {
+        controlPoints.clear();
+        for (auto it = verts->begin(); it != verts->end();) {
+            Vec2 p{};
+            p.x = it->second.get_value<float>();
+            ++it;
+            if (it == verts->end()) break;
+            p.y = it->second.get_value<float>();
+            ++it;
+            controlPoints.push_back(p);
+        }
+    } else if (auto cps = data.get_child_optional("controlPoints")) {
+        // Backward-compat fallback (non-D format)
         controlPoints.clear();
         for (const auto& cp : *cps) {
             Vec2 p{};
@@ -1387,7 +1445,10 @@ void PathDeformer::serializeSelfImpl(::nicxlive::core::serde::InochiSerializer& 
             adapter->setState(st);
         }
     }
-    return std::nullopt;
+        return std::nullopt;
+    } catch (const std::exception& e) {
+        return std::string(e.what());
+    }
 }
 
 // simple pendulum-ish drivers

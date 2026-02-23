@@ -86,23 +86,33 @@ inline void transformAssign(Vec2Array& dst, const Vec2Array& src, const nodes::M
 
 inline void transformAdd(Vec2Array& dst, const Vec2Array& src, const nodes::Mat4& mat) {
     if (dst.size() < src.size()) dst.resize(src.size());
+    const float m00 = mat[0][0];
+    const float m01 = mat[0][1];
+    const float m10 = mat[1][0];
+    const float m11 = mat[1][1];
     for (std::size_t i = 0; i < src.size(); ++i) {
         auto sv = src.at(i);
-        nodes::Vec3 v{sv.x, sv.y, 0.0f};
-        auto tv = mat.transformPoint(v);
         auto dv = dst.at(i);
-        dst.set(i, nodes::Vec2{dv.x + tv.x, dv.y + tv.y});
+        dst.set(i, nodes::Vec2{
+            dv.x + (sv.x * m00 + sv.y * m01),
+            dv.y + (sv.x * m10 + sv.y * m11),
+        });
     }
 }
 
 inline void transformAdd(Vec2Array& dst, const Vec2Array& src, const nodes::Mat4& mat, std::size_t count) {
     if (dst.size() < count) dst.resize(count);
+    const float m00 = mat[0][0];
+    const float m01 = mat[0][1];
+    const float m10 = mat[1][0];
+    const float m11 = mat[1][1];
     for (std::size_t i = 0; i < count && i < src.size(); ++i) {
         auto sv = src.at(i);
-        nodes::Vec3 v{sv.x, sv.y, 0.0f};
-        auto tv = mat.transformPoint(v);
         auto dv = dst.at(i);
-        dst.set(i, nodes::Vec2{dv.x + tv.x, dv.y + tv.y});
+        dst.set(i, nodes::Vec2{
+            dv.x + (sv.x * m00 + sv.y * m01),
+            dv.y + (sv.x * m10 + sv.y * m11),
+        });
     }
 }
 

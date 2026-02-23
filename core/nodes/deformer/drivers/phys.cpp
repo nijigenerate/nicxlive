@@ -86,7 +86,7 @@ static std::pair<std::vector<float>, std::vector<float>> extractAnglesAndLengths
         float dx = b.x - a.x;
         float dy = screenToPhysicsY(b.y) - screenToPhysicsY(a.y);
         float len = std::sqrt(dx * dx + dy * dy);
-        float angle = std::atan2(dx, dy); // note: D uses sin/cos with inverted y
+        float angle = std::atan2(dx, -dy);
         angles.push_back(angle);
         lengths.push_back(len);
         if (!std::isfinite(len) || len <= lengthEpsilon) {
@@ -182,7 +182,16 @@ void ConnectedPendulumDriver::enforce(const Vec2& force) {
 
 void ConnectedPendulumDriver::updateDefaultShape(PathDeformer* deformer) {
     if (!deformer) return;
-    auto control = deformer->controlPoints; // screen space
+    std::vector<Vec2> control;
+    if (deformer->originalCurve) {
+        auto& cp = deformer->originalCurve->controlPoints(); // D: originalCurve.controlPoints
+        control.resize(cp.size());
+        for (std::size_t i = 0; i < cp.size(); ++i) {
+            control[i] = Vec2{cp.xAt(i), cp.yAt(i)};
+        }
+    } else {
+        control = deformer->controlPoints;
+    }
     initialAngles_.clear();
     lengths_.clear();
     auto anglesAndLens = extractAnglesAndLengths(deformer, control);
@@ -206,8 +215,13 @@ void ConnectedPendulumDriver::setup(PathDeformer* deformer) {
     for (std::size_t i = 0; i < physDeformation_.size(); ++i) {
         physDeformation_.set(i, Vec2{0.0f, 0.0f});
     }
-    base_ = Vec2{deformer_->controlPoints.empty() ? 0.0f : deformer_->controlPoints[0].x,
-                 deformer_->controlPoints.empty() ? 0.0f : screenToPhysicsY(deformer_->controlPoints[0].y)};
+    if (deformer_->originalCurve && deformer_->originalCurve->controlPoints().size() > 0) {
+        auto& cp = deformer_->originalCurve->controlPoints();
+        base_ = Vec2{cp.xAt(0), screenToPhysicsY(cp.yAt(0))};
+    } else {
+        base_ = Vec2{deformer_->controlPoints.empty() ? 0.0f : deformer_->controlPoints[0].x,
+                     deformer_->controlPoints.empty() ? 0.0f : screenToPhysicsY(deformer_->controlPoints[0].y)};
+    }
     guardFinite(deformer_, "pendulum:base", base_, 0);
 }
 
@@ -232,18 +246,39 @@ void ConnectedPendulumDriver::update(PathDeformer* deformer, core::common::Vec2A
             physDeformation_.set(i, Vec2{0.0f, 0.0f});
             continue;
         }
-        Vec2 delta{screenPos.x - deformer->controlPoints[i].x, screenPos.y - deformer->controlPoints[i].y};
+        Vec2 basePoint{};
+        bool hasBasePoint = false;
+        if (deformer->originalCurve && i < deformer->originalCurve->controlPoints().size()) {
+            auto& cp = deformer->originalCurve->controlPoints();
+            basePoint = Vec2{cp.xAt(i), cp.yAt(i)};
+            hasBasePoint = true;
+        } else if (i < deformer->controlPoints.size()) {
+            basePoint = deformer->controlPoints[i];
+            hasBasePoint = true;
+        }
+        if (!hasBasePoint) {
+            physDeformation_.set(i, Vec2{0.0f, 0.0f});
+            continue;
+        }
+        Vec2 delta{screenPos.x - basePoint.x, screenPos.y - basePoint.y};
         if (!guardFinite(deformer, "pendulum:newDelta", delta, i)) {
             physDeformation_.set(i, Vec2{0.0f, 0.0f});
             continue;
         }
         physDeformation_.set(i, delta);
     }
-    outOffsets.resize(deformer->vertices.size());
+    if (outOffsets.size() < deformer->vertices.size()) {
+        std::size_t oldSize = outOffsets.size();
+        outOffsets.resize(deformer->vertices.size());
+        for (std::size_t i = oldSize; i < outOffsets.size(); ++i) {
+            outOffsets.set(i, Vec2{0.0f, 0.0f});
+        }
+    }
     for (std::size_t i = 0; i < deformer->vertices.size(); ++i) {
         float dx = (i < physDeformation_.size()) ? physDeformation_.xAt(i) : 0.0f;
         float dy = (i < physDeformation_.size()) ? physDeformation_.yAt(i) : 0.0f;
-        outOffsets.set(i, Vec2{dx, dy});
+        outOffsets.xAt(i) += dx;
+        outOffsets.yAt(i) += dy;
     }
 }
 
@@ -299,9 +334,19 @@ void ConnectedSpringPendulumDriver::rotate(float) {}
 
 void ConnectedSpringPendulumDriver::updateDefaultShape(PathDeformer* deformer) {
     if (!deformer) return;
-    initialPositions_.resize(deformer->controlPoints.size());
-    for (std::size_t i = 0; i < deformer->controlPoints.size(); ++i) {
-        Vec2 pt = deformer->controlPoints[i];
+    std::vector<Vec2> basePoints;
+    if (deformer->originalCurve) {
+        auto& cp = deformer->originalCurve->controlPoints();
+        basePoints.resize(cp.size());
+        for (std::size_t i = 0; i < cp.size(); ++i) {
+            basePoints[i] = Vec2{cp.xAt(i), cp.yAt(i)};
+        }
+    } else {
+        basePoints = deformer->controlPoints;
+    }
+    initialPositions_.resize(basePoints.size());
+    for (std::size_t i = 0; i < basePoints.size(); ++i) {
+        Vec2 pt = basePoints[i];
         pt.y = screenToPhysicsY(pt.y);
         if (!guardFinite(deformer, "springPendulum:controlPoint", pt, i)) {
             initialPositions_.clear();
@@ -360,25 +405,43 @@ void ConnectedSpringPendulumDriver::update(PathDeformer* deformer, core::common:
     }
     updateSpringPendulum(positions_, velocities_, initialPositions_, lengths_, damping_, springConstant_, restorationConstant_, h);
 
-    for (std::size_t i = 0; i < positions_.size() && i < deformer->controlPoints.size(); ++i) {
+    for (std::size_t i = 0; i < positions_.size(); ++i) {
+        Vec2 basePoint{};
+        bool hasBasePoint = false;
+        if (deformer->originalCurve && i < deformer->originalCurve->controlPoints().size()) {
+            auto& cp = deformer->originalCurve->controlPoints();
+            basePoint = Vec2{cp.xAt(i), cp.yAt(i)};
+            hasBasePoint = true;
+        } else if (i < deformer->controlPoints.size()) {
+            basePoint = deformer->controlPoints[i];
+            hasBasePoint = true;
+        }
+        if (!hasBasePoint) break;
         Vec2 pos{positions_.xAt(i), positions_.yAt(i)};
         Vec2 screenPos{pos.x, physicsToScreenY(pos.y)};
         if (!guardFinite(deformer, "springPendulum:position", screenPos, i)) {
             physDeformation_.set(i, Vec2{0.0f, 0.0f});
             continue;
         }
-        Vec2 delta{screenPos.x - deformer->controlPoints[i].x, screenPos.y - deformer->controlPoints[i].y};
+        Vec2 delta{screenPos.x - basePoint.x, screenPos.y - basePoint.y};
         if (!guardFinite(deformer, "springPendulum:delta", delta, i)) {
             physDeformation_.set(i, Vec2{0.0f, 0.0f});
             continue;
         }
         physDeformation_.set(i, delta);
     }
-    outOffsets.resize(deformer->vertices.size());
+    if (outOffsets.size() < deformer->vertices.size()) {
+        std::size_t oldSize = outOffsets.size();
+        outOffsets.resize(deformer->vertices.size());
+        for (std::size_t i = oldSize; i < outOffsets.size(); ++i) {
+            outOffsets.set(i, Vec2{0.0f, 0.0f});
+        }
+    }
     for (std::size_t i = 0; i < deformer->vertices.size(); ++i) {
         float dx = (i < physDeformation_.size()) ? physDeformation_.xAt(i) : 0.0f;
         float dy = (i < physDeformation_.size()) ? physDeformation_.yAt(i) : 0.0f;
-        outOffsets.set(i, Vec2{dx, dy});
+        outOffsets.xAt(i) += dx;
+        outOffsets.yAt(i) += dy;
     }
 }
 
