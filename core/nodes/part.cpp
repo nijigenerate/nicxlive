@@ -744,6 +744,7 @@ static std::size_t maskCount(const std::vector<MaskBinding>& masks) {
 }
 
 void Part::finalize() {
+    Drawable::finalize();
     if (auto pup = puppetRef()) {
         std::vector<MaskBinding> valid;
         for (auto& m : masks) {

@@ -13,7 +13,7 @@
 | `deserializeFromFghj` (`blend_mode`) | 文字列/数値の両方を受理 | 文字列優先で復元し、数値も受理 | ◯ |
 | `deserializeFromFghj` (`mask_mode`, `masks[].mode`) | 文字列/数値の両方を受理 | 文字列/数値の両方を受理（`Mask`/`DodgeMask`） | ◯ |
 | `deserializeFromFghj` (`masked_by`) | 単一 mode で mask UUID を復元 | `MaskBinding{maskSrcUUID, mode}` へ写経復元 | ◯ |
-| `finalize` | puppet 解決で `masks[].maskSrc` を束縛 | 同等（`maskSrcUUID` を Drawable に解決） | ◯ |
+| `finalize` | `super.finalize()` 後に puppet 解決で `masks[].maskSrc` を束縛 | `Drawable::finalize()` 後に `maskSrcUUID` を Drawable に解決 | ◯ |
 | `rebuffer` | `rebufferMesh` 後に UV 更新 | `rebufferMesh(data)` + `updateUVs()` | ◯ |
 | `isMaskedBy` | マスク有無を判定 | UUIDベース | ◯ |
 | `getMaskIdx` | マスクインデックス取得 | UUIDベース | ◯ |

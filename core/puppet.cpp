@@ -482,7 +482,9 @@ void Puppet::recordNodeChange(nodes::NotifyReason reason) {
             std::string type = rootNode->get<std::string>("type", "Node");
             loadedRoot = nodes::Node::inInstantiateNode(type);
             if (!loadedRoot) loadedRoot = std::make_shared<nodes::Node>();
-            loadedRoot->deserializeFromFghj(*rootNode);
+            if (auto rootErr = loadedRoot->deserializeFromFghj(*rootNode)) {
+                return rootErr;
+            }
             std::fprintf(stderr, "[nicxlive] puppet.deserialize loadedRoot children=%zu\n", loadedRoot->childrenList().size());
         }
         parameters.clear();
