@@ -1,8 +1,7 @@
 #include "profiler.hpp"
+#include "../debug_log.hpp"
 
 #include <chrono>
-#include <iomanip>
-#include <iostream>
 #include <map>
 #include <string>
 #include <vector>
@@ -41,11 +40,11 @@ struct RenderProfiler {
 
 private:
     void report(std::chrono::steady_clock::duration interval) {
+#ifdef NJCX_ENABLE_DEBUG_LOG
         double secondsElapsed = std::chrono::duration_cast<std::chrono::microseconds>(interval).count() / 1'000'000.0;
-        std::cerr << "[RenderProfiler] " << std::fixed << std::setprecision(3) << secondsElapsed << "s window ("
-                  << frameCount << " frames)" << std::endl;
+        NJCX_DBG_LOG("[RenderProfiler] %.3fs window (%zu frames)\n", secondsElapsed, frameCount);
         if (accumUsec.empty()) {
-            std::cerr << "  (no instrumented passes recorded)" << std::endl;
+            NJCX_DBG_LOG("  (no instrumented passes recorded)\n");
             return;
         }
         std::vector<std::pair<std::string, long long>> entries(accumUsec.begin(), accumUsec.end());
@@ -55,11 +54,15 @@ private:
             auto countIt = callCounts.find(entry.first);
             std::size_t count = countIt == callCounts.end() ? 0 : countIt->second;
             double avgMs = count ? totalMs / static_cast<double>(count) : totalMs;
-            std::cerr << "  " << std::left << std::setw(18) << entry.first
-                      << " total=" << std::setw(8) << std::fixed << std::setprecision(3) << totalMs << " ms"
-                      << "  avg=" << std::setw(6) << std::fixed << std::setprecision(3) << avgMs << " ms"
-                      << "  calls=" << std::setw(6) << count << std::endl;
+            NJCX_DBG_LOG("  %-18s total=%8.3f ms  avg=%6.3f ms  calls=%6zu\n",
+                         entry.first.c_str(),
+                         totalMs,
+                         avgMs,
+                         count);
         }
+#else
+        (void)interval;
+#endif
     }
 };
 

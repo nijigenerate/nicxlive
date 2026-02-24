@@ -7,6 +7,7 @@
 #include "../runtime_state.hpp"
 #include "../texture.hpp"
 #include "../../fmt/fmt.hpp"
+#include "../debug_log.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -605,8 +606,7 @@ void Part::fillDrawPacket(const Node& header, PartDrawPacket& packet, bool isMas
         const std::size_t deformEnd = static_cast<std::size_t>(packet.deformOffset) +
                                       static_cast<std::size_t>(packet.vertexCount);
         if (deformEnd > packet.deformAtlasStride) {
-            std::fprintf(stderr,
-                         "[nicxlive][shared-check][OOB] part uuid=%u name=%s deformOffset=%u vertexCount=%u deformStride=%u\n",
+            NJCX_DBG_LOG("[nicxlive][shared-check][OOB] part uuid=%u name=%s deformOffset=%u vertexCount=%u deformStride=%u\n",
                          uuid,
                          name.c_str(),
                          packet.deformOffset,
@@ -634,8 +634,7 @@ void Part::fillDrawPacket(const Node& header, PartDrawPacket& packet, bool isMas
         for (std::size_t i = 0; i < deformation.size(); ++i) {
             maxAbs = std::max(maxAbs, std::max(std::fabs(deformation.xAt(i)), std::fabs(deformation.yAt(i))));
         }
-        std::fprintf(stderr,
-                     "[nicxlive][part-list] name=%s uuid=%u th0=%u vtx=%u maxAbs=%.6f\n",
+        NJCX_DBG_LOG("[nicxlive][part-list] name=%s uuid=%u th0=%u vtx=%u maxAbs=%.6f\n",
                      name.c_str(),
                      uuid,
                      packet.textureUUIDs[0],
@@ -652,8 +651,7 @@ void Part::fillDrawPacket(const Node& header, PartDrawPacket& packet, bool isMas
             maxAbs = std::max(maxAbs, std::max(std::fabs(deformation.xAt(i)), std::fabs(deformation.yAt(i))));
         }
         if (maxAbs > 5.0f) {
-            std::fprintf(stderr,
-                         "[nicxlive][PartDeform] name=%s uuid=%u vtx=%u maxAbs=%.6f first=(%.6f,%.6f)\n",
+            NJCX_DBG_LOG("[nicxlive][PartDeform] name=%s uuid=%u vtx=%u maxAbs=%.6f first=(%.6f,%.6f)\n",
                          name.c_str(),
                          uuid,
                          packet.vertexCount,
@@ -674,8 +672,7 @@ void Part::fillDrawPacket(const Node& header, PartDrawPacket& packet, bool isMas
             xDelta = localX - atlasX;
         }
         if (abs0 > 1.0f || xDelta != static_cast<std::ptrdiff_t>(packet.deformOffset)) {
-            std::fprintf(stderr,
-                         "[nicxlive][part-deform] name=%s uuid=%u do=%u xDelta=%td vtx=%u d0=(%.6f,%.6f)\n",
+            NJCX_DBG_LOG("[nicxlive][part-deform] name=%s uuid=%u do=%u xDelta=%td vtx=%u d0=(%.6f,%.6f)\n",
                          name.c_str(), uuid, packet.deformOffset, xDelta, packet.vertexCount, dx0, dy0);
         }
     }

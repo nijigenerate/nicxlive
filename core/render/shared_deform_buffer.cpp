@@ -1,4 +1,5 @@
 #include "shared_deform_buffer.hpp"
+#include "../debug_log.hpp"
 
 #include <algorithm>
 #include <cstdio>
@@ -48,7 +49,7 @@ struct SharedVecAtlas {
         bindings.push_back(Binding{ptr, offsetSink, target.size(), 0});
         rebuild();
         if (traceSharedEnabled()) {
-            std::fprintf(stderr, "[nicxlive][shared-atlas] register target=%p len=%zu bindings=%zu stride=%zu\n",
+            NJCX_DBG_LOG("[nicxlive][shared-atlas] register target=%p len=%zu bindings=%zu stride=%zu\n",
                          static_cast<void*>(ptr), target.size(), bindings.size(), storage.size());
         }
     }
@@ -67,7 +68,7 @@ struct SharedVecAtlas {
         bindings.pop_back();
         rebuild();
         if (traceSharedEnabled()) {
-            std::fprintf(stderr, "[nicxlive][shared-atlas] unregister target=%p bindings=%zu stride=%zu\n",
+            NJCX_DBG_LOG("[nicxlive][shared-atlas] unregister target=%p bindings=%zu stride=%zu\n",
                          static_cast<void*>(ptr), bindings.size(), storage.size());
         }
     }
@@ -81,7 +82,7 @@ struct SharedVecAtlas {
         bindings[idx].length = newLength;
         rebuild();
         if (traceSharedEnabled()) {
-            std::fprintf(stderr, "[nicxlive][shared-atlas] resize target=%p newLen=%zu bindings=%zu stride=%zu\n",
+            NJCX_DBG_LOG("[nicxlive][shared-atlas] resize target=%p newLen=%zu bindings=%zu stride=%zu\n",
                          static_cast<void*>(ptr), newLength, bindings.size(), storage.size());
         }
     }
@@ -144,7 +145,7 @@ private:
                 const auto end = binding.offset + binding.length;
                 if (end > maxEnd) maxEnd = end;
             }
-            std::fprintf(stderr, "[nicxlive][shared-atlas] rebuild bindings=%zu stride=%zu maxEnd=%zu dirty=%d\n",
+            NJCX_DBG_LOG("[nicxlive][shared-atlas] rebuild bindings=%zu stride=%zu maxEnd=%zu dirty=%d\n",
                          bindings.size(), storage.size(), maxEnd, dirty ? 1 : 0);
         }
     }

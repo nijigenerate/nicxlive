@@ -4,6 +4,7 @@
 #include "../render.hpp"
 #include "../serde.hpp"
 #include "../param/parameter.hpp"
+#include "../debug_log.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -334,8 +335,7 @@ std::tuple<Vec2Array, std::optional<Mat4>, bool> MeshGroup::filterChildren(const
         maxAbs = std::max(maxAbs, std::max(std::fabs(out.xAt(i)), std::fabs(out.yAt(i))));
     }
     if (maxAbs > 10.0f) {
-        std::fprintf(stderr,
-                     "[nicxlive][MeshGroup][LargeOffset] node=%s target=%s targetUuid=%u maxAbs=%.6f first=(%.6f,%.6f)\n",
+        NJCX_DBG_LOG("[nicxlive][MeshGroup][LargeOffset] node=%s target=%s targetUuid=%u maxAbs=%.6f first=(%.6f,%.6f)\n",
                      name.c_str(),
                      target ? target->name.c_str() : "<null>",
                      target ? target->uuid : 0u,

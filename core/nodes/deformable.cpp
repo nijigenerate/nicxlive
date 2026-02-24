@@ -1,6 +1,7 @@
 #include "deformable.hpp"
 #include "../puppet.hpp"
 #include "../render/shared_deform_buffer.hpp"
+#include "../debug_log.hpp"
 #include <cstdio>
 #include <cmath>
 
@@ -89,8 +90,7 @@ void DeformationStack::push(const Deformation& deform) {
         maxAbs = std::max(maxAbs, std::max(std::fabs(owner_->deformation.xAt(i)), std::fabs(owner_->deformation.yAt(i))));
     }
     if (maxAbs > 50.0f) {
-        std::fprintf(stderr,
-                     "[nicxlive][Deformable][StackLarge] node=%s uuid=%u maxAbs=%.6f first=(%.6f,%.6f)\n",
+        NJCX_DBG_LOG("[nicxlive][Deformable][StackLarge] node=%s uuid=%u maxAbs=%.6f first=(%.6f,%.6f)\n",
                      owner_->name.c_str(), owner_->uuid, maxAbs,
                      owner_->deformation.size() ? owner_->deformation.xAt(0) : 0.0f,
                      owner_->deformation.size() ? owner_->deformation.yAt(0) : 0.0f);
@@ -175,8 +175,7 @@ void Deformable::preProcess() {
                 maxAbs = std::max(maxAbs, std::max(std::fabs(deformation.xAt(i)), std::fabs(deformation.yAt(i))));
             }
             if (maxAbs > 50.0f) {
-                std::fprintf(stderr,
-                             "[nicxlive][Deformable][PreFilterLarge] node=%s uuid=%u stage=%zu maxAbs=%.6f first=(%.6f,%.6f)\n",
+                NJCX_DBG_LOG("[nicxlive][Deformable][PreFilterLarge] node=%s uuid=%u stage=%zu maxAbs=%.6f first=(%.6f,%.6f)\n",
                              name.c_str(), uuid, hook.stage, maxAbs,
                              deformation.size() ? deformation.xAt(0) : 0.0f,
                              deformation.size() ? deformation.yAt(0) : 0.0f);
@@ -211,8 +210,7 @@ void Deformable::postProcess(int id) {
                 maxAbs = std::max(maxAbs, std::max(std::fabs(deformation.xAt(i)), std::fabs(deformation.yAt(i))));
             }
             if (maxAbs > 50.0f) {
-                std::fprintf(stderr,
-                             "[nicxlive][Deformable][PostFilterLarge] node=%s uuid=%u stage=%zu maxAbs=%.6f first=(%.6f,%.6f)\n",
+                NJCX_DBG_LOG("[nicxlive][Deformable][PostFilterLarge] node=%s uuid=%u stage=%zu maxAbs=%.6f first=(%.6f,%.6f)\n",
                              name.c_str(), uuid, hook.stage, maxAbs,
                              deformation.size() ? deformation.xAt(0) : 0.0f,
                              deformation.size() ? deformation.yAt(0) : 0.0f);

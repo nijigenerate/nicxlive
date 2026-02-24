@@ -3,6 +3,7 @@
 #include "binding.hpp"
 #include "../nodes/common.hpp"
 #include "../serde.hpp"
+#include "../debug_log.hpp"
 #include <algorithm>
 #include <array>
 #include <cctype>
@@ -608,8 +609,7 @@ public:
         }
         auto node = target.target.lock();
         if (maxAbs > 10.0f) {
-            std::fprintf(stderr,
-                         "[nicxlive][DeformBind][LargeApply] param=%u:%s target=%u:%s maxAbs=%.6f first=(%.6f,%.6f)\n",
+            NJCX_DBG_LOG("[nicxlive][DeformBind][LargeApply] param=%u:%s target=%u:%s maxAbs=%.6f first=(%.6f,%.6f)\n",
                          parameter ? parameter->uuid : 0u,
                          parameter ? parameter->name.c_str() : "<null>",
                          node ? node->uuid : 0u,
@@ -878,8 +878,7 @@ inline void Parameter::update() {
         (value.y + sum.y) * mul.y,
     };
     if (bindingMap.empty() && traceParamBindingEnabled()) {
-        std::fprintf(stderr,
-                     "[nicxlive][Param] no-binding uuid=%u name=%s value=(%.6f,%.6f) latest=(%.6f,%.6f)\n",
+        NJCX_DBG_LOG("[nicxlive][Param] no-binding uuid=%u name=%s value=(%.6f,%.6f) latest=(%.6f,%.6f)\n",
                      uuid, name.c_str(), value.x, value.y, latestInternal.x, latestInternal.y);
     }
 

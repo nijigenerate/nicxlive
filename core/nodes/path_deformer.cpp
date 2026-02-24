@@ -5,6 +5,7 @@
 #include "../puppet.hpp"
 #include "../serde.hpp"
 #include "../param/parameter.hpp"
+#include "../debug_log.hpp"
 #include "curve.hpp"
 #include "deformer/drivers/phys.hpp"
 #include "drawable.hpp"
@@ -15,7 +16,6 @@
 #include <cstdlib>
 #include <cstring>
 #include <limits>
-#include <iostream>
 #include <sstream>
 #include <unordered_set>
 #include <unordered_map>
@@ -48,8 +48,10 @@ bool traceDeformerSummaryEnabled() {
 
 template <typename... Args>
 void pathLog(const Args&... args) {
-    // simple debug logger
-    (std::cerr << ... << args) << std::endl;
+    std::ostringstream oss;
+    (oss << ... << args);
+    oss << '\n';
+    NJCX_DBG_LOG("%s", oss.str().c_str());
 }
 
 std::vector<Vec2> toVec2List(const Vec2Array& arr) {
