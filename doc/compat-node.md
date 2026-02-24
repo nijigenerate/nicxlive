@@ -8,7 +8,7 @@
 | `serializeSelfImpl` | あり（flags対応） | transform/offset/子/型マップ対応 | ◯ |
 | `serializeSelf` | あり | 同等 | ◯ |
 | `serializePartial` | あり | 同等 | ◯ |
-| `deserializeFromFghj` | あり（子型生成含む） | transform/offset/型マップ対応 | ◯ |
+| `deserializeFromFghj` | あり（子型生成含む。子のdeserialize失敗は呼び出し元へ返す） | transform/offset/型マップ対応。子deserializeの例外を伝播 | ◯ |
 | `forceSetUUID` | あり | 実装済み | ◯ |
 | `inCreateUUID` | あり | 実装済み | ◯ |
 | `inUnloadUUID` | あり | 実装済み | ◯ |
@@ -51,4 +51,3 @@
 - ノードファクトリ／型登録 (`inRegisterNodeType`/`inHasNodeType`/`inInstantiateNode`) をC++側に実装済み。未知型はスキップし、Tmpノードも登録。
 - UUID管理 (`inCreateUUID`/`inUnloadUUID`/`inClearUUIDs`) を実装済み。
 - 残る差分はデバッグ描画バックエンドが未接続な点と、D側にある詳細コメント/DBG呼び出しによる行数増のみ。実装機能としては概ねパリティ達成。
-

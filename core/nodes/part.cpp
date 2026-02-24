@@ -7,8 +7,10 @@
 #include "../runtime_state.hpp"
 #include "../texture.hpp"
 #include "../../fmt/fmt.hpp"
+#include "../debug_log.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <cstddef>
 #include <cmath>
 #include <cstdio>
@@ -53,6 +55,20 @@ bool tracePartListEnabled() {
     }
     enabled = (std::strcmp(v, "1") == 0 || std::strcmp(v, "true") == 0 || std::strcmp(v, "TRUE") == 0) ? 1 : 0;
     return enabled != 0;
+}
+
+std::optional<MaskingMode> parseMaskingModeString(const std::string& raw) {
+    if (raw.empty()) return std::nullopt;
+    std::string key;
+    key.reserve(raw.size());
+    for (char ch : raw) {
+        if (std::isalnum(static_cast<unsigned char>(ch))) {
+            key.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
+        }
+    }
+    if (key == "mask") return MaskingMode::Mask;
+    if (key == "dodgemask") return MaskingMode::DodgeMask;
+    return std::nullopt;
 }
 
 }
@@ -235,27 +251,6 @@ void Part::serializeSelfImpl(::nicxlive::core::serde::InochiSerializer& serializ
             }
         }
         serializer.listEnd(arr);
-        if (!maskedBy.empty()) {
-            serializer.putKey("masked_by");
-            auto marr = serializer.listBegin();
-            for (auto id : maskedBy) {
-                serializer.elemBegin();
-                serializer.putValue(static_cast<std::size_t>(id));
-            }
-            serializer.listEnd(marr);
-            serializer.putKey("mask_mode");
-            serializer.putValue(static_cast<int>(maskedByMode));
-        }
-        if (!maskList.empty()) {
-            serializer.putKey("maskList");
-            auto marr = serializer.listBegin();
-            for (const auto& l : maskList) {
-                serializer.elemBegin();
-                serializer.putKey("target");
-                serializer.putValue(static_cast<std::size_t>(l.target));
-            }
-            serializer.listEnd(marr);
-        }
     }
     if (has_flag(flags, SerializeNodeFlags::Links) && !masks.empty()) {
         serializer.putKey("masks");
@@ -273,13 +268,13 @@ void Part::serializeSelfImpl(::nicxlive::core::serde::InochiSerializer& serializ
 
 ::nicxlive::core::serde::SerdeException Part::deserializeFromFghj(const ::nicxlive::core::serde::Fghj& data) {
     if (auto err = Drawable::deserializeFromFghj(data)) return err;
-    if (auto bm = data.get_optional<int>("blend_mode")) {
-        if (*bm >= 0 && *bm <= static_cast<int>(BlendMode::SliceFromLower)) {
-            blendMode = static_cast<BlendMode>(*bm);
-        }
-    } else if (auto bs = data.get_optional<std::string>("blend_mode")) {
+    if (auto bs = data.get_optional<std::string>("blend_mode")) {
         if (auto parsed = parseBlendMode(*bs)) {
             blendMode = *parsed;
+        }
+    } else if (auto bm = data.get_optional<int>("blend_mode")) {
+        if (*bm >= 0 && *bm <= static_cast<int>(BlendMode::SliceFromLower)) {
+            blendMode = static_cast<BlendMode>(*bm);
         }
     }
     if (auto th = data.get_optional<float>("mask_threshold")) maskAlphaThreshold = *th;
@@ -298,14 +293,6 @@ void Part::serializeSelfImpl(::nicxlive::core::serde::InochiSerializer& serializ
         if (ss >> screenTint.x >> comma >> screenTint.y >> comma >> screenTint.z) {
         }
     }
-    if (auto ml = data.get_child_optional("maskList")) {
-        maskList.clear();
-        for (const auto& elem : *ml) {
-            MaskLink l;
-            l.target = elem.second.get<uint32_t>("target", 0);
-            maskList.push_back(l);
-        }
-    }
     textureIds.clear();
     if (auto tx = data.get_child_optional("textures")) {
         // Keep texture slots compact like D implementation:
@@ -317,17 +304,6 @@ void Part::serializeSelfImpl(::nicxlive::core::serde::InochiSerializer& serializ
             textureIds.push_back(static_cast<int32_t>(raw));
         }
     }
-    if (auto mb = data.get_child_optional("masked_by")) {
-        for (const auto& e : *mb) {
-            maskedBy.push_back(static_cast<uint32_t>(e.second.get_value<std::size_t>()));
-        }
-    }
-    if (auto mm = data.get_optional<int>("mask_mode")) {
-        int modeVal = *mm;
-        if (modeVal >= 0 && modeVal <= static_cast<int>(MaskingMode::DodgeMask)) {
-            maskedByMode = static_cast<MaskingMode>(modeVal);
-        }
-    }
     if (auto pup = puppetRef()) {
         for (std::size_t i = 0; i < textureIds.size() && i < textures.size(); ++i) {
             uint32_t id = static_cast<uint32_t>(textureIds[i]);
@@ -336,22 +312,39 @@ void Part::serializeSelfImpl(::nicxlive::core::serde::InochiSerializer& serializ
         }
     }
     masks.clear();
+    if (auto mb = data.get_child_optional("masked_by")) {
+        MaskingMode mode = MaskingMode::Mask;
+        if (auto ms = data.get_optional<std::string>("mask_mode")) {
+            if (auto parsed = parseMaskingModeString(*ms)) {
+                mode = *parsed;
+            }
+        } else if (auto mm = data.get_optional<int>("mask_mode")) {
+            int modeVal = *mm;
+            if (modeVal >= 0 && modeVal <= static_cast<int>(MaskingMode::DodgeMask)) {
+                mode = static_cast<MaskingMode>(modeVal);
+            }
+        }
+        for (const auto& e : *mb) {
+            MaskBinding binding;
+            binding.maskSrcUUID = static_cast<uint32_t>(e.second.get_value<std::size_t>());
+            binding.mode = mode;
+            masks.push_back(binding);
+        }
+    }
     if (auto ml = data.get_child_optional("masks")) {
         for (const auto& e : *ml) {
             MaskBinding mb;
             mb.maskSrcUUID = e.second.get<uint32_t>("source", 0);
-            int modeVal = e.second.get<int>("mode", 0);
-            if (modeVal >= 0 && modeVal <= static_cast<int>(MaskingMode::DodgeMask)) {
-                mb.mode = static_cast<MaskingMode>(modeVal);
+            if (auto modeText = e.second.get_optional<std::string>("mode")) {
+                if (auto parsed = parseMaskingModeString(*modeText)) {
+                    mb.mode = *parsed;
+                }
+            } else if (auto modeValOpt = e.second.get_optional<int>("mode")) {
+                int modeVal = *modeValOpt;
+                if (modeVal >= 0 && modeVal <= static_cast<int>(MaskingMode::DodgeMask)) {
+                    mb.mode = static_cast<MaskingMode>(modeVal);
+                }
             }
-            masks.push_back(mb);
-        }
-    }
-    if (!maskList.empty()) {
-        for (const auto& l : maskList) {
-            MaskBinding mb;
-            mb.maskSrcUUID = l.target;
-            mb.mode = maskedByMode;
             masks.push_back(mb);
         }
     }
@@ -462,8 +455,7 @@ void Part::runBeginTask(core::RenderContext& ctx) {
 }
 
 void Part::rebuffer(const MeshData& data) {
-    *mesh = data;
-    updateVertices();
+    rebufferMesh(data);
     updateUVs();
 }
 
@@ -614,8 +606,7 @@ void Part::fillDrawPacket(const Node& header, PartDrawPacket& packet, bool isMas
         const std::size_t deformEnd = static_cast<std::size_t>(packet.deformOffset) +
                                       static_cast<std::size_t>(packet.vertexCount);
         if (deformEnd > packet.deformAtlasStride) {
-            std::fprintf(stderr,
-                         "[nicxlive][shared-check][OOB] part uuid=%u name=%s deformOffset=%u vertexCount=%u deformStride=%u\n",
+            NJCX_DBG_LOG("[nicxlive][shared-check][OOB] part uuid=%u name=%s deformOffset=%u vertexCount=%u deformStride=%u\n",
                          uuid,
                          name.c_str(),
                          packet.deformOffset,
@@ -643,8 +634,7 @@ void Part::fillDrawPacket(const Node& header, PartDrawPacket& packet, bool isMas
         for (std::size_t i = 0; i < deformation.size(); ++i) {
             maxAbs = std::max(maxAbs, std::max(std::fabs(deformation.xAt(i)), std::fabs(deformation.yAt(i))));
         }
-        std::fprintf(stderr,
-                     "[nicxlive][part-list] name=%s uuid=%u th0=%u vtx=%u maxAbs=%.6f\n",
+        NJCX_DBG_LOG("[nicxlive][part-list] name=%s uuid=%u th0=%u vtx=%u maxAbs=%.6f\n",
                      name.c_str(),
                      uuid,
                      packet.textureUUIDs[0],
@@ -661,8 +651,7 @@ void Part::fillDrawPacket(const Node& header, PartDrawPacket& packet, bool isMas
             maxAbs = std::max(maxAbs, std::max(std::fabs(deformation.xAt(i)), std::fabs(deformation.yAt(i))));
         }
         if (maxAbs > 5.0f) {
-            std::fprintf(stderr,
-                         "[nicxlive][PartDeform] name=%s uuid=%u vtx=%u maxAbs=%.6f first=(%.6f,%.6f)\n",
+            NJCX_DBG_LOG("[nicxlive][PartDeform] name=%s uuid=%u vtx=%u maxAbs=%.6f first=(%.6f,%.6f)\n",
                          name.c_str(),
                          uuid,
                          packet.vertexCount,
@@ -683,8 +672,7 @@ void Part::fillDrawPacket(const Node& header, PartDrawPacket& packet, bool isMas
             xDelta = localX - atlasX;
         }
         if (abs0 > 1.0f || xDelta != static_cast<std::ptrdiff_t>(packet.deformOffset)) {
-            std::fprintf(stderr,
-                         "[nicxlive][part-deform] name=%s uuid=%u do=%u xDelta=%td vtx=%u d0=(%.6f,%.6f)\n",
+            NJCX_DBG_LOG("[nicxlive][part-deform] name=%s uuid=%u do=%u xDelta=%td vtx=%u d0=(%.6f,%.6f)\n",
                          name.c_str(), uuid, packet.deformOffset, xDelta, packet.vertexCount, dx0, dy0);
         }
     }
@@ -753,6 +741,7 @@ static std::size_t maskCount(const std::vector<MaskBinding>& masks) {
 }
 
 void Part::finalize() {
+    Drawable::finalize();
     if (auto pup = puppetRef()) {
         std::vector<MaskBinding> valid;
         for (auto& m : masks) {
@@ -769,18 +758,6 @@ void Part::finalize() {
         for (std::size_t i = 0; i < textureIds.size() && i < textures.size(); ++i) {
             if (textureIds[i] < 0) continue;
             textures[i] = pup->resolveTextureSlot(static_cast<uint32_t>(textureIds[i]));
-        }
-        // apply maskedBy legacy bindings
-        for (auto id : maskedBy) {
-            auto mnode = pup->findNodeById(id);
-            auto drawable = std::dynamic_pointer_cast<Drawable>(mnode);
-            if (drawable) {
-                MaskBinding mb;
-                mb.maskSrcUUID = id;
-                mb.maskSrc = drawable;
-                mb.mode = maskedByMode;
-                masks.push_back(mb);
-            }
         }
     }
 }
@@ -837,12 +814,7 @@ void Part::enqueueRenderCommands(core::RenderContext& ctx, const std::function<v
         std::set<uint64_t> seen;
         for (auto m : masks) {
             auto maskPtr = m.maskSrc;
-            if (!maskPtr && pup && m.maskSrcUUID != 0) {
-                auto node = pup->findNodeById(m.maskSrcUUID);
-                maskPtr = std::dynamic_pointer_cast<Drawable>(node);
-            }
             if (!maskPtr) continue;
-            m.maskSrc = maskPtr;
             uint64_t key = (static_cast<uint64_t>(maskPtr->uuid) << 32) | static_cast<uint32_t>(m.mode);
             if (seen.count(key)) continue;
             seen.insert(key);
@@ -856,7 +828,6 @@ void Part::enqueueRenderCommands(core::RenderContext& ctx, const std::function<v
     for (const auto& m : maskBindings) {
         if (m.mode == MaskingMode::Mask) { useStencil = true; break; }
     }
-
     auto scopeHint = determineRenderScopeHint();
     if (scopeHint.skip) return;
     auto self = std::dynamic_pointer_cast<Part>(shared_from_this());
@@ -868,12 +839,6 @@ void Part::enqueueRenderCommands(core::RenderContext& ctx, const std::function<v
             emitter.beginMask(useStencil);
             for (auto binding : maskBindings) {
                 auto maskPtr = binding.maskSrc;
-                if (!maskPtr) {
-                    if (auto pup = part->puppetRef()) {
-                        auto node = pup->findNodeById(binding.maskSrcUUID);
-                        maskPtr = std::dynamic_pointer_cast<Drawable>(node);
-                    }
-                }
                 if (!maskPtr) continue;
                 bool isDodge = binding.mode == MaskingMode::DodgeMask;
                 emitter.applyMask(maskPtr, isDodge);

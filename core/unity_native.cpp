@@ -20,6 +20,7 @@
 #include <cstring>
 #include "runtime_state.hpp"
 #include "timing.hpp"
+#include "debug_log.hpp"
 #include "render/shared_deform_buffer.hpp"
 
 using namespace nicxlive::core;
@@ -869,9 +870,9 @@ NjgResult njgTickPuppet(void* puppet, double deltaSeconds) {
             gUnityTimeTicker += deltaSeconds;
         }
         inUpdate();
-        std::fprintf(stderr, "[nicxlive] tick update start\n");
+        NJCX_DBG_LOG("[nicxlive] tick update start\n");
         it->second->puppet->update();
-        std::fprintf(stderr, "[nicxlive] tick update end graphEmpty=%d rootParts=%zu\n", it->second->puppet->isRenderGraphEmpty() ? 1 : 0, it->second->puppet->rootPartCount());
+        NJCX_DBG_LOG("[nicxlive] tick update end graphEmpty=%d rootParts=%zu\n", it->second->puppet->isRenderGraphEmpty() ? 1 : 0, it->second->puppet->rootPartCount());
     }
     return NjgResult::Ok;
 }
@@ -884,27 +885,27 @@ NjgResult njgEmitCommands(void* renderer, CommandQueueView* outView) {
     ctx.backend->clear();
     setCurrentRenderBackend(ctx.backend);
     // draw all puppets into queue
-    std::fprintf(stderr, "[nicxlive] emit begin puppets=%zu\n", ctx.puppetHandles.size());
-    unityLog(std::string("[nicxlive] emit begin: puppets=") + std::to_string(ctx.puppetHandles.size()));
+    NJCX_DBG_LOG("[nicxlive] emit begin puppets=%zu\n", ctx.puppetHandles.size());
+    NJCX_DBG_CODE(unityLog(std::string("[nicxlive] emit begin: puppets=") + std::to_string(ctx.puppetHandles.size())););
     for (auto h : ctx.puppetHandles) {
         auto pit = gPuppets.find(h);
         if (pit == gPuppets.end()) continue;
         if (pit->second && pit->second->puppet) {
             pit->second->puppet->draw();
-            unityLog(std::string("[nicxlive] emit draw puppet: handle=") + std::to_string(reinterpret_cast<uintptr_t>(h)) + std::string(" queue=") + std::to_string(ctx.backend->queue.size()) + std::string(" graphEmpty=") + (pit->second->puppet->isRenderGraphEmpty() ? "true" : "false") + std::string(" rootParts=") + std::to_string(pit->second->puppet->rootPartCount()));
-            std::fprintf(stderr, "[nicxlive] emit drew puppet queue=%zu\n", ctx.backend->queue.size());
+            NJCX_DBG_CODE(unityLog(std::string("[nicxlive] emit draw puppet: handle=") + std::to_string(reinterpret_cast<uintptr_t>(h)) + std::string(" queue=") + std::to_string(ctx.backend->queue.size()) + std::string(" graphEmpty=") + (pit->second->puppet->isRenderGraphEmpty() ? "true" : "false") + std::string(" rootParts=") + std::to_string(pit->second->puppet->rootPartCount())););
+            NJCX_DBG_LOG("[nicxlive] emit drew puppet queue=%zu\n", ctx.backend->queue.size());
         }
-            std::fprintf(stderr, "[nicxlive] emit puppet state graphEmpty=%d rootParts=%zu\n", pit->second->puppet->isRenderGraphEmpty() ? 1 : 0, pit->second->puppet->rootPartCount());
+            NJCX_DBG_LOG("[nicxlive] emit puppet state graphEmpty=%d rootParts=%zu\n", pit->second->puppet->isRenderGraphEmpty() ? 1 : 0, pit->second->puppet->rootPartCount());
     }
     // Apply deferred texture create/update/dispose callbacks.
     applyTextureCommands(ctx);
 
     packQueuedCommands(ctx);
-    unityLog(std::string("[nicxlive] emit packed queue=") + std::to_string(ctx.backend->queue.size()));
+    NJCX_DBG_CODE(unityLog(std::string("[nicxlive] emit packed queue=") + std::to_string(ctx.backend->queue.size())););
     outView->commands = ctx.queued.empty() ? nullptr : ctx.queued.data();
-    std::fprintf(stderr, "[nicxlive] emit packed queue=%zu out=%zu\n", ctx.backend->queue.size(), outView->count);
+    NJCX_DBG_LOG("[nicxlive] emit packed queue=%zu out=%zu\n", ctx.backend->queue.size(), outView->count);
     outView->count = ctx.queued.size();
-    unityLog(std::string("[nicxlive] emit out count=") + std::to_string(outView->count));
+    NJCX_DBG_CODE(unityLog(std::string("[nicxlive] emit out count=") + std::to_string(outView->count)););
     return NjgResult::Ok;
 }
 

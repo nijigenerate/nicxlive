@@ -3,6 +3,7 @@
 #include "render/graph_builder.hpp"
 #include "render/scheduler.hpp"
 #include "render/command_emitter.hpp"
+#include "debug_log.hpp"
 #include "nodes/projectable.hpp"
 #include "nodes/mesh_group.hpp"
 #include "nodes/path_deformer.hpp"
@@ -70,7 +71,7 @@ void Puppet::scanPartsRecurse(const std::shared_ptr<Node>& node, bool driversOnl
         drivers.push_back(drv);
         static int sDriverTypeLog = 0;
         if (sDriverTypeLog < 64) {
-            std::fprintf(stderr, "[nicxlive] scan-driver uuid=%u type=%s name=%s\n",
+            NJCX_DBG_LOG("[nicxlive] scan-driver uuid=%u type=%s name=%s\n",
                          drv->uuid, drv->typeId().c_str(), drv->name.c_str());
             ++sDriverTypeLog;
         }
@@ -166,7 +167,7 @@ void Puppet::updateParametersAndDrivers(const std::shared_ptr<Node>& rootNode) {
             }
         }
         if (sUpdLog < 20) {
-            std::fprintf(stderr, "[nicxlive] upd-drivers total=%zu ran=%zu rootParts=%zu\n",
+            NJCX_DBG_LOG("[nicxlive] upd-drivers total=%zu ran=%zu rootParts=%zu\n",
                          drivers.size(), ranDrivers, rootParts.size());
             ++sUpdLog;
         }
@@ -221,14 +222,14 @@ void Puppet::update() {
         frameChanges.structureDirty = frameChanges.structureDirty || additional.structureDirty;
     }
 
-    std::fprintf(stderr, "[nicxlive] puppet.update tasks total=%zu rb=%zu r=%zu re=%zu\n",
+    NJCX_DBG_LOG("[nicxlive] puppet.update tasks total=%zu rb=%zu r=%zu re=%zu\n",
                  renderScheduler.totalTaskCount(),
                  renderScheduler.taskCount(TaskOrder::RenderBegin),
                  renderScheduler.taskCount(TaskOrder::Render),
                  renderScheduler.taskCount(TaskOrder::RenderEnd));
     renderGraph.beginFrame();
     renderScheduler.executeRange(renderContext, TaskOrder::PreProcess, TaskOrder::Final);
-    std::fprintf(stderr, "[nicxlive] puppet.update graph depth=%zu rootItems=%zu empty=%d\n",
+    NJCX_DBG_LOG("[nicxlive] puppet.update graph depth=%zu rootItems=%zu empty=%d\n",
                  renderGraph.passDepth(),
                  renderGraph.rootItemCount(),
                  renderGraph.empty() ? 1 : 0);
@@ -266,12 +267,12 @@ std::shared_ptr<nodes::Node> Puppet::actualRoot() {
 
 void Puppet::draw() {
     if (!commandEmitterOwned || !renderBackend) {
-        std::fprintf(stderr, "[nicxlive] puppet.draw fallback reason=no_emitter_or_backend\n");
+        NJCX_DBG_LOG("[nicxlive] puppet.draw fallback reason=no_emitter_or_backend\n");
         drawImmediateFallback();
         return;
     }
     if (renderGraph.empty()) {
-        std::fprintf(stderr, "[nicxlive] puppet.draw fallback reason=graph_empty rootItems=%zu depth=%zu\n",
+        NJCX_DBG_LOG("[nicxlive] puppet.draw fallback reason=graph_empty rootItems=%zu depth=%zu\n",
                      renderGraph.rootItemCount(),
                      renderGraph.passDepth());
         drawImmediateFallback();
@@ -467,7 +468,7 @@ void Puppet::recordNodeChange(nodes::NotifyReason reason) {
             ++topKeys;
             if (kv.first == "nodes") hasNodesKey = true;
         }
-        std::fprintf(stderr, "[nicxlive] puppet.deserialize topKeys=%zu hasNodes=%d\n", topKeys, hasNodesKey ? 1 : 0);
+        NJCX_DBG_LOG("[nicxlive] puppet.deserialize topKeys=%zu hasNodes=%d\n", topKeys, hasNodesKey ? 1 : 0);
         if (auto metaNode = data.get_child_optional("meta")) {
             if (auto preserve = metaNode->get_optional<bool>("preservePixels")) meta.preservePixels = *preserve;
             if (auto thumb = metaNode->get_optional<uint32_t>("thumbnailId")) meta.thumbnailId = *thumb;
@@ -478,12 +479,14 @@ void Puppet::recordNodeChange(nodes::NotifyReason reason) {
         }
         std::shared_ptr<nodes::Node> loadedRoot;
         if (auto rootNode = data.get_child_optional("nodes")) {
-            std::fprintf(stderr, "[nicxlive] puppet.deserialize nodes childCount=%zu\n", rootNode->size());
+            NJCX_DBG_LOG("[nicxlive] puppet.deserialize nodes childCount=%zu\n", rootNode->size());
             std::string type = rootNode->get<std::string>("type", "Node");
             loadedRoot = nodes::Node::inInstantiateNode(type);
             if (!loadedRoot) loadedRoot = std::make_shared<nodes::Node>();
-            loadedRoot->deserializeFromFghj(*rootNode);
-            std::fprintf(stderr, "[nicxlive] puppet.deserialize loadedRoot children=%zu\n", loadedRoot->childrenList().size());
+            if (auto rootErr = loadedRoot->deserializeFromFghj(*rootNode)) {
+                return rootErr;
+            }
+            NJCX_DBG_LOG("[nicxlive] puppet.deserialize loadedRoot children=%zu\n", loadedRoot->childrenList().size());
         }
         parameters.clear();
         if (auto paramNode = data.get_child_optional("param")) {
@@ -491,12 +494,12 @@ void Puppet::recordNodeChange(nodes::NotifyReason reason) {
                 auto p = std::make_shared<param::Parameter>();
                 if (!p) continue;
                 if (auto err = p->deserializeFromFghj(child.second)) {
-                    std::fprintf(stderr, "[nicxlive] puppet.deserialize param parse error: %s\n", err->c_str());
+                    NJCX_DBG_LOG("[nicxlive] puppet.deserialize param parse error: %s\n", err->c_str());
                     continue;
                 }
                 parameters.push_back(p);
             }
-            std::fprintf(stderr, "[nicxlive] puppet.deserialize params=%zu\n", parameters.size());
+            NJCX_DBG_LOG("[nicxlive] puppet.deserialize params=%zu\n", parameters.size());
         }
 
         if (loadedRoot) {
@@ -534,8 +537,7 @@ void Puppet::recordNodeChange(nodes::NotifyReason reason) {
                 for (const auto& c : n->childrenRef()) countNodes(c);
             };
             countNodes(root);
-            std::fprintf(stderr,
-                         "[nicxlive] load types total=%zu part=%zu meshgroup=%zu pathDeformer=%zu gridDeformer=%zu composite=%zu\n",
+            NJCX_DBG_LOG("[nicxlive] load types total=%zu part=%zu meshgroup=%zu pathDeformer=%zu gridDeformer=%zu composite=%zu\n",
                          totalNodes, partCount, meshGroupCount, pathDeformerCount, gridDeformerCount, compositeCount);
         }
     } catch (const std::exception& ex) {

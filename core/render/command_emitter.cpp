@@ -1,6 +1,7 @@
 ﻿#include "command_emitter.hpp"
 #include "backend_queue.hpp"
 #include "../runtime_state.hpp"
+#include "../debug_log.hpp"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -67,8 +68,7 @@ void QueueCommandEmitter::endFrame(RenderBackend*, RenderGpuState&) {
         using ::nicxlive::core::render::sharedDeformBufferData;
         auto& deform = sharedDeformBufferData();
         const uint64_t h = hashVec2Array(deform);
-        std::fprintf(stderr,
-                     "[nicxlive][shared-hash] queue=%zu deformStride=%zu hash=%llu\n",
+        NJCX_DBG_LOG("[nicxlive][shared-hash] queue=%zu deformStride=%zu hash=%llu\n",
                      backend_ ? backend_->queue.size() : 0,
                      deform.size(),
                      static_cast<unsigned long long>(h));
@@ -172,7 +172,7 @@ void QueueCommandEmitter::beginDynamicComposite(const std::shared_ptr<nodes::Pro
     cmd.kind = RenderCommandKind::BeginDynamicComposite;
     cmd.dynamicPass = passData;
     if (backend_) {
-        std::fprintf(stderr, "[nicxlive] emit push idx=%zu kind=BeginDynamicComposite stencil=%u\n",
+        NJCX_DBG_LOG("[nicxlive] emit push idx=%zu kind=BeginDynamicComposite stencil=%u\n",
                      backend_->queue.size(),
                      passData.stencil ? passData.stencil->backendId() : 0u);
         backend_->queue.push_back(std::move(cmd));
@@ -200,7 +200,7 @@ void QueueCommandEmitter::endDynamicComposite(const std::shared_ptr<nodes::Proje
     cmd.kind = RenderCommandKind::EndDynamicComposite;
     cmd.dynamicPass = passData;
     if (backend_) {
-        std::fprintf(stderr, "[nicxlive] emit push idx=%zu kind=EndDynamicComposite stencil=%u\n",
+        NJCX_DBG_LOG("[nicxlive] emit push idx=%zu kind=EndDynamicComposite stencil=%u\n",
                      backend_->queue.size(),
                      passData.stencil ? passData.stencil->backendId() : 0u);
         backend_->queue.push_back(std::move(cmd));

@@ -4,12 +4,12 @@
 #include "../puppet.hpp"
 #include "../nodes/common.hpp"
 #include "../timing.hpp"
+#include "../debug_log.hpp"
 
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
-#include <iostream>
 #include <memory>
 #include <limits>
 #include <numbers>
@@ -555,8 +555,7 @@ void SimplePhysicsDriver::serializeSelfImpl(::nicxlive::core::serde::InochiSeria
     if (auto lo = data.get_optional<bool>("local_only")) localOnly = *lo;
     static int sDeserLog = 0;
     if (sDeserLog < 40) {
-        std::fprintf(stderr,
-                     "[nicxlive][SimplePhysics][deser] uuid=%u name=%s paramRef=%u model=%d map=%d len=%.6f out=(%.6f,%.6f) localOnly=%d\n",
+        NJCX_DBG_LOG("[nicxlive][SimplePhysics][deser] uuid=%u name=%s paramRef=%u model=%d map=%d len=%.6f out=(%.6f,%.6f) localOnly=%d\n",
                      uuid, name.c_str(), paramRef,
                      static_cast<int>(modelType), static_cast<int>(mapMode),
                      length, outputScale[0], outputScale[1], localOnly ? 1 : 0);
@@ -719,7 +718,7 @@ void SimplePhysicsDriver::updateOutputs() {
     if (!paramPtr) {
         static int sNoParamCount = 0;
         if (sNoParamCount < 40) {
-            std::fprintf(stderr, "[nicxlive][SimplePhysics] no-param driver=%u name=%s paramRef=%u\n",
+            NJCX_DBG_LOG("[nicxlive][SimplePhysics] no-param driver=%u name=%s paramRef=%u\n",
                          uuid, name.c_str(), paramRef);
             ++sNoParamCount;
         }
@@ -825,9 +824,10 @@ void SimplePhysicsDriver::finalize() {
 }
 
 void SimplePhysicsDriver::logPhysicsState(const std::string& context, const std::string& extra) {
-    std::cerr << "[SimplePhysicsDriver] " << context;
-    if (!extra.empty()) std::cerr << " " << extra;
-    std::cerr << std::endl;
+    NJCX_DBG_LOG("[SimplePhysicsDriver] %s%s%s\n",
+                 context.c_str(),
+                 extra.empty() ? "" : " ",
+                 extra.c_str());
 }
 
 void SimplePhysicsDriver::drawDebug() {

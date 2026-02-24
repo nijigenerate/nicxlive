@@ -5,6 +5,7 @@
 #include "../puppet.hpp"
 #include "../serde.hpp"
 #include "../param/parameter.hpp"
+#include "../debug_log.hpp"
 #include "curve.hpp"
 #include "deformer/drivers/phys.hpp"
 #include "drawable.hpp"
@@ -15,7 +16,6 @@
 #include <cstdlib>
 #include <cstring>
 #include <limits>
-#include <iostream>
 #include <sstream>
 #include <unordered_set>
 #include <unordered_map>
@@ -48,8 +48,10 @@ bool traceDeformerSummaryEnabled() {
 
 template <typename... Args>
 void pathLog(const Args&... args) {
-    // simple debug logger
-    (std::cerr << ... << args) << std::endl;
+    std::ostringstream oss;
+    (oss << ... << args);
+    oss << '\n';
+    NJCX_DBG_LOG("%s", oss.str().c_str());
 }
 
 std::vector<Vec2> toVec2List(const Vec2Array& arr) {
@@ -391,14 +393,14 @@ void PathDeformer::cacheClosestPoints(const std::shared_ptr<Node>& node, int nSa
         nodeVertices.yAt(0) = t.translation.y;
     }
 
-    auto& cache = meshCaches[node->uuid];
+    auto& cache = meshCaches[node.get()];
     cache.resize(nodeVertices.size());
 
     const auto& curve = prevCurve ? prevCurve : originalCurve;
     if (!curve) return;
 
-    Mat4 forward = node->globalTransform.toMat4();
-    Mat4 inv = Mat4::inverse(globalTransform.toMat4());
+    Mat4 forward = node->transform().toMat4();
+    Mat4 inv = Mat4::inverse(transform().toMat4());
     Mat4 tran = Mat4::multiply(inv, forward);
 
     Vec2Array cVertices;
@@ -629,7 +631,7 @@ void PathDeformer::logTransformFailure(const std::string& ctx, const Mat4& m) {
 
 void PathDeformer::refreshInverseMatrix(const std::string& ctx) {
     bool okGlobal = true;
-    Mat4 global = requireFiniteMatrix(globalTransform.toMat4(), ctx + ":global", okGlobal);
+    Mat4 global = requireFiniteMatrix(transform().toMat4(), ctx + ":global", okGlobal);
     bool okInv = true;
     Mat4 inv = requireFiniteMatrix(Mat4::inverse(global), ctx + ":inverse", okInv);
     if (!okGlobal || !okInv) {
@@ -837,12 +839,12 @@ DeformResult PathDeformer::deformChildren(const std::shared_ptr<Node>& target,
     }
 
     // D parity: only reuse cached t-samples when entry already exists and has enough vertices.
-    auto tgtId = target ? target->uuid : 0u;
-    auto it = meshCaches.find(tgtId);
+    const Node* tgtKey = target.get();
+    auto it = meshCaches.find(tgtKey);
     bool hasValidCache = (it != meshCaches.end() && it->second.size() >= sample.size());
     if (!hasValidCache) {
         cacheClosestPoints(target);
-        it = meshCaches.find(tgtId);
+        it = meshCaches.find(tgtKey);
         hasValidCache = (it != meshCaches.end() && it->second.size() >= sample.size());
     }
     if (!hasValidCache) {
@@ -890,22 +892,18 @@ DeformResult PathDeformer::deformChildren(const std::shared_ptr<Node>& target,
     Vec2Array offsetLocal = deformedVertices;
     offsetLocal -= sample;
 
-    bool anyChanged = false;
     float sumOffset = 0.0f;
     for (std::size_t i = 0; i < offsetLocal.size(); ++i) {
         if (!std::isfinite(offsetLocal.xAt(i)) || !std::isfinite(offsetLocal.yAt(i))) {
             offsetLocal.xAt(i) = 0;
             offsetLocal.yAt(i) = 0;
             recordInvalid("offsetNaN", i, Vec2{0, 0});
-        } else if (offsetLocal.xAt(i) != 0 || offsetLocal.yAt(i) != 0) {
-            anyChanged = true;
         }
         float mag = std::sqrt(offsetLocal.xAt(i) * offsetLocal.xAt(i) + offsetLocal.yAt(i) * offsetLocal.yAt(i));
         sumOffset += mag;
         lastMaxOffset = std::max(lastMaxOffset, mag);
     }
     if (offsetLocal.size() > 0) lastAvgOffset = sumOffset / static_cast<float>(offsetLocal.size());
-    if (!anyChanged) { if (diagStarted) endDiagnosticFrame(); return res; }
 
     Mat4 inv = Mat4::inverse(center);
     if (!isFiniteMatrix(inv)) {
@@ -997,6 +995,20 @@ void PathDeformer::applyPathDeform(const Vec2Array& origDeform) {
     transform();
     refreshInverseMatrix("applyPathDeform:pre");
     sanitizeOffsets(deformation);
+    auto logMaxDeform = [&](const char* phase) {
+        float maxAbs = 0.0f;
+        for (std::size_t i = 0; i < deformation.size(); ++i) {
+            maxAbs = std::max(maxAbs, std::fabs(deformation.xAt(i)));
+            maxAbs = std::max(maxAbs, std::fabs(deformation.yAt(i)));
+        }
+        if (maxAbs > 5.0f) {
+            pathLog("[PathDeformer][DeformMag] node=", name,
+                    " phase=", phase,
+                    " maxAbs=", maxAbs,
+                    " count=", deformation.size());
+        }
+    };
+    logMaxDeform("pre");
     auto pup = puppetRef();
     const bool enableDriverStep = (pup && pup->enableDrivers);
     if (driver) {
@@ -1060,6 +1072,7 @@ void PathDeformer::applyPathDeform(const Vec2Array& origDeform) {
             candidate += deformation;
             sanitizeOffsets(candidate);
             deform(candidate);
+            logMaxDeform("postDriver");
             logCurveState("applyPathDeform");
         }
         refreshInverseMatrix("applyPathDeform:postDriver");
@@ -1069,6 +1082,7 @@ void PathDeformer::applyPathDeform(const Vec2Array& origDeform) {
             candidate += deformation;
             sanitizeOffsets(candidate);
             deform(candidate);
+            logMaxDeform("postNoDriver");
             logCurveState("applyPathDeform");
         }
         refreshInverseMatrix("applyPathDeform:postNoDriver");
@@ -1098,7 +1112,7 @@ void PathDeformer::switchDynamic(bool enablePhysics) {
 
 void PathDeformer::notifyChange(const std::shared_ptr<Node>& target, NotifyReason reason) {
     if (reason == NotifyReason::StructureChanged && target) {
-        meshCaches.erase(target->uuid);
+        meshCaches.erase(target.get());
     }
     Node::notifyChange(target, reason);
 }
@@ -1183,14 +1197,14 @@ bool PathDeformer::setupChildNoRecurse(const std::shared_ptr<Node>& node, bool p
             if (prepend) pre.insert(pre.begin(), hook); else pre.push_back(hook);
         }
     } else {
-        meshCaches.erase(node->uuid);
+        meshCaches.erase(node.get());
     }
     return true;
 }
 
 bool PathDeformer::releaseChildNoRecurse(const std::shared_ptr<Node>& node) {
     if (!node) return true;
-    meshCaches.erase(node->uuid);
+    meshCaches.erase(node.get());
     auto& pre = node->preProcessFilters;
     auto& post = node->postProcessFilters;
     const auto tag = reinterpret_cast<std::uintptr_t>(this);

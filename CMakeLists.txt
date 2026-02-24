@@ -19,6 +19,7 @@ endif()
 # Toggle for shared library build
 option(NICXLIVE_BUILD_SHARED "Build nicxlive as a shared library" ON)
 option(NICXLIVE_BUILD_TESTS "Build nicxlive tests" ON)
+option(NICXLIVE_ENABLE_DEBUG_LOG "Enable nicxlive debug log output (NJCX_ENABLE_DEBUG_LOG)" OFF)
 
 # WASM (Emscripten) build toggle
 option(BUILD_WASM "Build nicxlive for WebAssembly via Emscripten" OFF)
@@ -114,6 +115,9 @@ target_link_libraries(nicxlive
 )
 
 target_compile_features(nicxlive PUBLIC cxx_std_20)
+if(NICXLIVE_ENABLE_DEBUG_LOG)
+  target_compile_definitions(nicxlive PUBLIC NJCX_ENABLE_DEBUG_LOG=1)
+endif()
 
 if(NICXLIVE_BUILD_SHARED)
   add_library(nicxlive_shared SHARED ${NICXLIVE_SOURCES})
@@ -131,6 +135,9 @@ if(NICXLIVE_BUILD_SHARED)
           ${NICXLIVE_BOOST_HEADERS_TARGET}
   )
   target_compile_features(nicxlive_shared PUBLIC cxx_std_20)
+  if(NICXLIVE_ENABLE_DEBUG_LOG)
+    target_compile_definitions(nicxlive_shared PUBLIC NJCX_ENABLE_DEBUG_LOG=1)
+  endif()
 endif()
 
 if(NICXLIVE_BUILD_TESTS)

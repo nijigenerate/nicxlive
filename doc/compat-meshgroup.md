@@ -33,7 +33,7 @@
 | filter hook 同一性管理 | `(stage, func)` 単位で登録/解除 | `stage + tag` 単位で登録/解除を一致化 | ◯ |
 | `captureTarget` | children_ref に追加し setupChildNoRecurse | add+フィルタ設定 | ◯ |
 | `releaseTarget` | フィルタ解除し children_ref から除去 | フィルタ解除＋削除 | ◯ |
-| `applyDeformToChildren` | translateChildren/dynamic に応じ deform 伝達→メッシュ破棄 | パラメータの deform binding 反映後 filterChildren→meshクリア | ◯ |
+| `applyDeformToChildren` | translateChildren/dynamic に応じ deform 伝達→メッシュ破棄 | パラメータの deform/value binding に D 同様の raw setter 経路で反映後、filterChildren→meshクリア | ◯ |
 | `switchMode` | dynamic 切替で precalc クリア | 同等 | ◯ |
 | `getTranslateChildren` | getter | 同等 | ◯ |
 | `setTranslateChildren` | setter＋子再setup | 同等 | ◯ |
@@ -43,4 +43,3 @@
 | `build` | precalc→子setup→super | precalc＋子setup＋Drawable build | ◯ |
 | `coverOthers` | true | 同等 | ◯ |
 | `mustPropagate` | false | 同等 | ◯ |
-

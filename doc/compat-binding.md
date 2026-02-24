@@ -35,5 +35,10 @@
 | `clearValue (ParameterParameter)` | 参照パラメータのデフォルトに戻す | 実装あり | ◯ |
 | `isCompatibleWithNode` | node 型検証 | Value/Deformation/ParameterParameter を D 基準で判定 | ◯ |
 
-**現状**: binding API は D 基準で実装済み。***
+## C++側にのみ存在する補助
+| C++独自関数 | 内容 | 判定 |
+| --- | --- | --- |
+| `ValueParameterBinding::setRawValueAt` | 補間なしで keypoint 値を直接更新（D の内部値代入と同契約で MeshGroup から使用） | △ |
+| `DeformationParameterBinding::setRawOffsetsAt` | 補間なしで offsets を直接更新（D の内部値代入と同契約で MeshGroup から使用） | △ |
 
+**現状**: binding API は D 基準で実装済み。***

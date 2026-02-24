@@ -12,6 +12,7 @@
 #include "path_deformer.hpp"
 #include "driver.hpp"
 #include "simple_physics_driver.hpp"
+#include "../debug_log.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -1095,7 +1096,7 @@ void Node::serializePartial(::nicxlive::core::serde::InochiSerializer& serialize
                 if (!Node::inHasNodeType(type)) {
                     static std::size_t sUnknownTypeLogCount = 0;
                     if (sUnknownTypeLogCount < 128) {
-                        std::fprintf(stderr, "[nicxlive] node.deserialize unknown-type parent=%u parentType=%s name=%s childType=%s\n",
+                        NJCX_DBG_LOG("[nicxlive] node.deserialize unknown-type parent=%u parentType=%s name=%s childType=%s\n",
                                      uuid, typeId().c_str(), name.c_str(), type.c_str());
                         ++sUnknownTypeLogCount;
                     }
@@ -1103,7 +1104,9 @@ void Node::serializePartial(::nicxlive::core::serde::InochiSerializer& serialize
                 }
                 auto child = Node::inInstantiateNode(type, shared_from_this());
                 if (!child) continue;
-                child->deserializeFromFghj(childNode.second);
+                if (auto childErr = child->deserializeFromFghj(childNode.second)) {
+                    return childErr;
+                }
             }
         }
     } catch (const std::exception& e) {

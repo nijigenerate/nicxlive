@@ -4,6 +4,7 @@
 #include "../render.hpp"
 #include "../serde.hpp"
 #include "../param/parameter.hpp"
+#include "../debug_log.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -128,7 +129,7 @@ void MeshGroup::applyDeformToChildren(const std::vector<std::shared_ptr<core::pa
                             auto filtered = filterChildren(node, deformable->vertices, nodeDeform, &matrix);
                             const auto& outDeform = std::get<0>(filtered);
                             if (outDeform.size() > 0) {
-                                nodeBinding->update(core::param::Vec2u{x, y}, outDeform);
+                                nodeBinding->setRawOffsetsAt(core::param::Vec2u{x, y}, outDeform);
                             }
                         }
                     } else if (shouldTransferTranslate && !isComposite) {
@@ -154,8 +155,8 @@ void MeshGroup::applyDeformToChildren(const std::vector<std::shared_ptr<core::pa
                         if (outDeform.size() > 0 && nodeBindingX && nodeBindingY) {
                             float curX = nodeBindingX->valueAt(core::param::Vec2u{x, y});
                             float curY = nodeBindingY->valueAt(core::param::Vec2u{x, y});
-                            nodeBindingX->update(core::param::Vec2u{x, y}, curX + outDeform.xAt(0));
-                            nodeBindingY->update(core::param::Vec2u{x, y}, curY + outDeform.yAt(0));
+                            nodeBindingX->setRawValueAt(core::param::Vec2u{x, y}, curX + outDeform.xAt(0));
+                            nodeBindingY->setRawValueAt(core::param::Vec2u{x, y}, curY + outDeform.yAt(0));
                         }
                     }
 
@@ -334,8 +335,7 @@ std::tuple<Vec2Array, std::optional<Mat4>, bool> MeshGroup::filterChildren(const
         maxAbs = std::max(maxAbs, std::max(std::fabs(out.xAt(i)), std::fabs(out.yAt(i))));
     }
     if (maxAbs > 10.0f) {
-        std::fprintf(stderr,
-                     "[nicxlive][MeshGroup][LargeOffset] node=%s target=%s targetUuid=%u maxAbs=%.6f first=(%.6f,%.6f)\n",
+        NJCX_DBG_LOG("[nicxlive][MeshGroup][LargeOffset] node=%s target=%s targetUuid=%u maxAbs=%.6f first=(%.6f,%.6f)\n",
                      name.c_str(),
                      target ? target->name.c_str() : "<null>",
                      target ? target->uuid : 0u,
@@ -542,8 +542,10 @@ void MeshGroup::centralize() {
         center = Vec2{ct.x, ct.y};
     }
     Vec2 diff{center.x - localTransform.translation.x, center.y - localTransform.translation.y};
-    for (auto& v : vertices.x) v -= diff.x;
-    for (auto& v : vertices.y) v -= diff.y;
+    for (std::size_t i = 0; i < vertices.size(); ++i) {
+        vertices.xAt(i) -= diff.x;
+        vertices.yAt(i) -= diff.y;
+    }
     localTransform.translation.x = center.x;
     localTransform.translation.y = center.y;
     transformChanged();

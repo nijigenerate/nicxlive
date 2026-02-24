@@ -1,6 +1,7 @@
 #include "mask.hpp"
 #include "../render/common.hpp"
 #include "../render/commands.hpp"
+#include "../render/backend_queue.hpp"
 #include "../puppet.hpp"
 #include "../runtime_state.hpp"
 
@@ -20,9 +21,7 @@ void Mask::fillDrawPacket(const Node& header, PartDrawPacket& packet, bool isMas
     Part::fillDrawPacket(header, packet, isMask);
     packet.renderable = false;
     for (auto& t : packet.textureUUIDs) t = 0;
-    packet.vertices.clear();
-    packet.uvs.clear();
-    packet.indices.clear();
+    for (auto& t : packet.textures) t.reset();
 }
 
 void Mask::serializeSelfImpl(::nicxlive::core::serde::InochiSerializer& serializer, bool recursive, SerializeNodeFlags flags) const {
@@ -34,7 +33,7 @@ void Mask::serializeSelfImpl(::nicxlive::core::serde::InochiSerializer& serializ
     return Drawable::deserializeFromFghj(data);
 }
 
-void Mask::renderMask(bool /*dodge*/) {
+void Mask::renderMask(bool dodge) {
     auto backend = ::nicxlive::core::getCurrentRenderBackend();
     if (!backend) return;
     ::nicxlive::core::nodes::MaskDrawPacket packet{};
@@ -42,17 +41,26 @@ void Mask::renderMask(bool /*dodge*/) {
     ::nicxlive::core::RenderBackend::MaskApplyPacket mp;
     mp.kind = ::nicxlive::core::RenderBackend::MaskDrawableKind::Mask;
     mp.maskPacket = packet;
-    mp.isDodge = false;
+    mp.isDodge = dodge;
     backend->applyMask(mp);
 }
 
 void Mask::fillMaskDrawPacket(::nicxlive::core::nodes::MaskDrawPacket& packet) const {
-    packet.modelMatrix = immediateModelMatrix();
-    Mat4 puppetMatrix = Mat4::identity();
-    if (auto pup = puppetRef()) {
-        puppetMatrix = pup->transform.toMat4();
+    Mat4 modelMatrix = immediateModelMatrix();
+    packet.modelMatrix = modelMatrix;
+
+    if (hasOffscreenModelMatrix) {
+        if (hasOffscreenRenderMatrix) {
+            packet.mvp = offscreenRenderMatrix * modelMatrix;
+        } else {
+            auto renderSpace = currentRenderSpace();
+            packet.mvp = renderSpace.matrix * modelMatrix;
+        }
+    } else {
+        auto renderSpace = currentRenderSpace();
+        packet.mvp = renderSpace.matrix * modelMatrix;
     }
-    packet.mvp = ::nicxlive::core::inGetCamera().matrix() * puppetMatrix * packet.modelMatrix;
+
     packet.origin = mesh->origin;
     packet.vertexOffset = vertexOffset;
     packet.vertexAtlasStride = sharedVertexBufferData().size();
@@ -61,6 +69,14 @@ void Mask::fillMaskDrawPacket(::nicxlive::core::nodes::MaskDrawPacket& packet) c
     packet.indexBuffer = ibo;
     packet.indexCount = static_cast<uint32_t>(mesh->indices.size());
     packet.vertexCount = static_cast<uint32_t>(mesh->vertices.size());
+    // Keep queue backend IBO map in sync, same contract as Part::fillDrawPacket.
+    if (packet.indexBuffer != 0 && !mesh->indices.empty()) {
+        if (auto qb = std::dynamic_pointer_cast<core::render::QueueRenderBackend>(core::getCurrentRenderBackend())) {
+            if (!qb->hasDrawableIndices(packet.indexBuffer)) {
+                qb->uploadDrawableIndices(packet.indexBuffer, mesh->indices);
+            }
+        }
+    }
 }
 
 void Mask::runRenderTask(core::RenderContext&) {
