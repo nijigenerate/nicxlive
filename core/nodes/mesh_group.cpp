@@ -128,7 +128,7 @@ void MeshGroup::applyDeformToChildren(const std::vector<std::shared_ptr<core::pa
                             auto filtered = filterChildren(node, deformable->vertices, nodeDeform, &matrix);
                             const auto& outDeform = std::get<0>(filtered);
                             if (outDeform.size() > 0) {
-                                nodeBinding->update(core::param::Vec2u{x, y}, outDeform);
+                                nodeBinding->setRawOffsetsAt(core::param::Vec2u{x, y}, outDeform);
                             }
                         }
                     } else if (shouldTransferTranslate && !isComposite) {
@@ -154,8 +154,8 @@ void MeshGroup::applyDeformToChildren(const std::vector<std::shared_ptr<core::pa
                         if (outDeform.size() > 0 && nodeBindingX && nodeBindingY) {
                             float curX = nodeBindingX->valueAt(core::param::Vec2u{x, y});
                             float curY = nodeBindingY->valueAt(core::param::Vec2u{x, y});
-                            nodeBindingX->update(core::param::Vec2u{x, y}, curX + outDeform.xAt(0));
-                            nodeBindingY->update(core::param::Vec2u{x, y}, curY + outDeform.yAt(0));
+                            nodeBindingX->setRawValueAt(core::param::Vec2u{x, y}, curX + outDeform.xAt(0));
+                            nodeBindingY->setRawValueAt(core::param::Vec2u{x, y}, curY + outDeform.yAt(0));
                         }
                     }
 
@@ -542,8 +542,10 @@ void MeshGroup::centralize() {
         center = Vec2{ct.x, ct.y};
     }
     Vec2 diff{center.x - localTransform.translation.x, center.y - localTransform.translation.y};
-    for (auto& v : vertices.x) v -= diff.x;
-    for (auto& v : vertices.y) v -= diff.y;
+    for (std::size_t i = 0; i < vertices.size(); ++i) {
+        vertices.xAt(i) -= diff.x;
+        vertices.yAt(i) -= diff.y;
+    }
     localTransform.translation.x = center.x;
     localTransform.translation.y = center.y;
     transformChanged();

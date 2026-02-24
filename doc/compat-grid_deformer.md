@@ -1,48 +1,54 @@
-﻿# GridDeformer 実装互換性チェック (D ↔ C++)
+# GridDeformer 実装互換性チェック (D ↔ C++)
 
-判定基準: D実装を正とし、Dに存在してC++にない項目は `✗（未実装）`、Dに存在せずC++のみにある項目は `✗（削除候補）` とする。
+判定基準: D実装 (`nijilive/source/nijilive/core/nodes/deformer/grid.d`) を正とし、関数一覧単位で C++ (`nicxlive/core/nodes/grid_deformer.cpp/.hpp`) を照合する。
 
-| 項目 | D 実装 | C++ 現状 | 互換性評価 |
-| --- | --- | --- | --- |
-| フィールド vertexBuffer | グリッド頂点 SoA | Deformable.vertices で保持（名前のみ差） | ◯ |
-| フィールド axisX | グリッド軸 X | 実装・正規化あり | ◯ |
-| フィールド axisY | グリッド軸 Y | 実装・正規化あり | ◯ |
-| フィールド formation | GridFormation(Bilinear) | GridFormation(Bilinear) | ◯ |
-| フィールド inverseMatrix | 逆行列キャッシュ | 実装 | ◯ |
-| フィールド dynamic | 動的切替 | 実装 | ◯ |
-| フィールド translateChildren | 子への平行移動転送 | 実装 | ◯ |
-| 定数 DefaultAxis | [-0.5,0.5] | kDefaultAxis 同値 | ◯ |
-| 定数 BoundaryTolerance | 1e-4 | kBoundaryTolerance 同値 | ◯ |
-| コンストラクタ | 軸初期化＋preProcess要求 | 同等 | ◯ |
-| メソッド gridFormation getter | formation 返却 | 同等 | ◯ |
-| メソッド gridFormation setter | formation 設定 | 同等 | ◯ |
-| メソッド switchDynamic | dynamic 切替＋子再setup | 同等 | ◯ |
-| メソッド vertices() | vertexBuffer 参照返し | Deformable.vertices を返却 | ◯ |
-| メソッド rebuffer(Vec2Array) | 頂点から軸推定し採用/初期化 | 同等 | ◯ |
-| メソッド typeId | "GridDeformer" | 同等 | ◯ |
-| メソッド runPreProcessTask | transform 更新→逆行列→updateDeform | transform更新→有限確認→逆行列→updateDeform | ◯ |
-| メソッド build | 子 setup → self → super | 同等 | ◯ |
-| メソッド clearCache | no-op | no-op | ◯ |
-| メソッド setupChild | 有効グリッド時に再帰 setup | 同等 | ◯ |
-| メソッド releaseChild | 再帰解除 | 同等 | ◯ |
-| メソッド captureTarget | children_ref 追加＋setup | 同等 | ◯ |
-| メソッド releaseTarget | children_ref 解除＋release | 同等 | ◯ |
-| メソッド runRenderTask | GPU コマンドなし | 同等 | ◯ |
-| メソッド deformChildren | 逆行列→サンプル→グリッド補間→オフセット変換＋guard | フロー同等（有限チェック・長さ検証・無効サンプル中断） | ◯ |
-| メソッド applyDeformToChildren | dynamic 無効化＋binding 反映＋再帰伝搬 | 同等 | ◯ |
-| メソッド matrixIsFinite | 行列有限判定 | 同等 | ◯ |
-| メソッド computeCache | clamp→区間探索→u/v 計算 | 同等 | ◯ |
-| メソッド locateInterval | 軸から区間/重み取得 | 同等 | ◯ |
-| メソッド sampleGridPoints | バイリニア補間（SIMD/スカラ両方） | バイリニア補間（4レーンバッチ＋スカラ） | ◯ |
-| メソッド setupChildNoRecurse | dynamic/translateChildren に応じ pre/post hook 設定。Composite が propagateMeshGroup のときは hook を外す | 同等（Composite propagateMeshGroup では hook を外す） | ◯ |
-| メソッド releaseChildNoRecurse | hook 解除 | 同等 | ◯ |
-| hook 同一性管理 | `(stage, func)` 単位で登録/解除 | `stage + tag` 単位で登録/解除を一致化 | ◯ |
-| メソッド adoptGridFromAxes | 軸採用 | 同等 | ◯ |
-| メソッド adoptFromVertices | 頂点から軸採用（形状保持可） | 同等 | ◯ |
-| メソッド deriveAxes | 頂点から軸推定 | 同等 | ◯ |
-| メソッド fillDeformationFromPositions | 位置との差分で deformation 埋め | 同等 | ◯ |
-| メソッド setGridAxes | 軸正規化＋バッファ再構築 | 同等 | ◯ |
-| メソッド gridIndex | x,y から一次元 index | 同等 | ◯ |
-| メソッド serializeSelfImpl | 軸/formation/dynamic を保存 | 実装済 | ◯ |
-| メソッド deserializeFromFghj | 軸/formation/dynamic 復元＋軸設定 | 実装済 | ◯ |
+| D側対象 | C++対応 | 判定 | 差分/補足 | 対応Task |
+| --- | --- | --- | --- | --- |
+| `inInitGridDeformer` | `unity_native` 側で型登録 | △ | Dの package 初期化関数そのものは存在しないが、型登録自体は実施 | CP129 |
+| `gridFormation` getter/setter | `gridFormation()/setGridFormation()` | ◯ | 対応済み | - |
+| `switchDynamic` | `GridDeformer::switchDynamic` | ◯ | D同様に毎回 `setupChildNoRecurse` を再適用へ修正済み | CP129 |
+| `vertices()` override | `Deformable::vertices` フィールド使用 | △ | Dは `vertexBuffer` 明示、C++は基底 `vertices` を直接保持 | CP129 |
+| `rebuffer` | `GridDeformer::rebuffer` | ◯ | D同様の fallback (`DefaultAxis`) と `clearCache` | - |
+| `typeId` | `typeId() const` | ◯ | 一致 | - |
+| `runPreProcessTask` | `GridDeformer::runPreProcessTask` | ◯ | `transform` 更新後に inverse 再計算と `updateDeform` 実行 | - |
+| `build` | `GridDeformer::build` | ◯ | D同様 `setupChild -> setupSelf -> Node::build`。余計な `refresh()` を削除済み | CP129 |
+| `clearCache` | `GridDeformer::clearCache` | ◯ | D同様 no-op | - |
+| `setupChild` | `GridDeformer::setupChild` | ◯ | D同様に propagate 再帰 | - |
+| `releaseChild` | `GridDeformer::releaseChild` | ◯ | D同様に propagate 再帰解除 | - |
+| `captureTarget` | `GridDeformer::captureTarget` | ◯ | prepend で hook 追加 | - |
+| `releaseTarget` | `GridDeformer::releaseTarget` | ◯ | 一致 | - |
+| `runRenderTask` | `GridDeformer::runRenderTask` | ◯ | no-op 一致 | - |
+| `deformChildren` | `GridDeformer::deformChildren` | △ | `origDeformation.size()<origVertices.size()` 早期return と `cache.valid` invalid 扱いを削除し、非finiteのみ early return へ写経修正済み。残差分は実行結果差の継続調査 | CP129, CP147 |
+| `applyDeformToChildren` | `GridDeformer::applyDeformToChildren` | △ | `transferChildren` 内での keypoint 算出・`transferCondition()` 呼び出し・更新順を D `filter.d` 手順へ写経反映済み。残差分は実行結果差（`Midori-gridtest2` の queue count 差） | CP129, CP146 |
+| `copyFrom` | `GridDeformer::copyFrom` | ◯ | D同様 fallback と `clearCache` 追加済み | CP129 |
+| `coverOthers` | `coverOthers() const` | ◯ | 一致 | - |
+| `mustPropagate` | `mustPropagate() const` | ◯ | 一致 | - |
+| `serializeSelfImpl` | `GridDeformer::serializeSelfImpl` | ◯ | D同様に軸/formation/dynamic を常時書き込みへ修正済み | CP129 |
+| `deserializeFromFghj` | `GridDeformer::deserializeFromFghj` | ◯ | `formation` が文字列（`"Bilinear"`）のモデルで C++ が `int` 変換例外を起こしていた差分を修正し、D同様に文字列/数値の両方で復元可能にした | CP148 |
+| `cols/rows/hasValidGrid` | `cols()/rows()/hasValidGrid()` | ◯ | 一致 | - |
+| `gridIndex` | `gridIndex` | ◯ | 一致 | - |
+| `normalizeAxis` | `normalizeAxis` | ◯ | 一致 | - |
+| `axisIndexOfValue` | `axisIndexOfValue` | ◯ | 一致 | - |
+| `rebuildVertices/rebuildBuffers` | `setGridAxes` 内で統合 | △ | C++は独立関数を持たず同等処理を `setGridAxes` に集約 | CP129 |
+| `setGridAxes` | `setGridAxes` | ◯ | 一致 | - |
+| `adoptGridFromAxes` | `adoptGridFromAxes` | ◯ | 一致 | - |
+| `deriveAxes` | `deriveAxes` | ◯ | `xAt/yAt` ベースで一致 | - |
+| `adoptFromVertices` | `adoptFromVertices` | ◯ | 一致 | - |
+| `fillDeformationFromPositions` | `fillDeformationFromPositions` | ◯ | 一致 | - |
+| `matrixIsFinite` | `matrixIsFinite` | ◯ | 一致 | - |
+| `computeCache` | `computeCache` | ◯ | 一致 | - |
+| `locateInterval` | `locateInterval` | ◯ | 一致 | - |
+| `sampleGridPoints` | `sampleGridPoints` | ◯ | `xAt/yAt` 化済みで D と同等 | - |
+| `setupChildNoRecurse` | `setupChildNoRecurse` | ◯ | `stage+tag` 管理で Dの upsert/remove と同等契約 | - |
+| `releaseChildNoRecurse` | `releaseChildNoRecurse` | ◯ | 一致 | - |
 
+## C++側にのみ存在する補助
+| C++独自関数 | 内容 | 判定 |
+| --- | --- | --- |
+| `toVec2List/toVec2Array` | `Vec2Array` と `std::vector<Vec2>` 変換ヘルパ | △ |
+| `isFiniteMatrix` (namespace local) | 行列 finite 判定のローカル補助 | △ |
+| `locate(float x, float y)` | `computeCache` を `optional` で包む補助 | △ |
+
+## 重点残課題
+1. `Midori-gridtest2-20250426-1.6.2.inx` での `FRAME0/119 count` 差分（`nijilive: 244/234`, `nicxlive: 193/183`）要因を、`deformChildren` 入出力ログで点単位比較する。
+2. `Midori-gridtest2` 以外（Aka/Midori本体）でも `deformChildren` 差分観測を拡張し、count差の再現ノード集合を固定する。

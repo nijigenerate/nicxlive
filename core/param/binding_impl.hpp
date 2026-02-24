@@ -554,6 +554,12 @@ public:
         return 0.0f;
     }
 
+    void setRawValueAt(const Vec2u& point, float value) {
+        if (point.x >= values.size() || point.y >= values[point.x].size()) return;
+        values[point.x][point.y] = value;
+        isSetFlags[point.x][point.y] = true;
+    }
+
     void update(const Vec2u& point, float value) {
         setValue(point, value);
     }
@@ -638,6 +644,12 @@ public:
 
     DeformSlot sample(const Vec2u& leftKey, const Vec2& offset) {
         return this->interpolate(leftKey, offset);
+    }
+
+    void setRawOffsetsAt(const Vec2u& point, const Vec2Array& offsets) {
+        if (point.x >= values.size() || point.y >= values[point.x].size()) return;
+        values[point.x][point.y].vertexOffsets = offsets.dup();
+        isSetFlags[point.x][point.y] = true;
     }
 
     void update(const Vec2u& point, const Vec2Array& offsets) {

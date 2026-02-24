@@ -1103,7 +1103,9 @@ void Node::serializePartial(::nicxlive::core::serde::InochiSerializer& serialize
                 }
                 auto child = Node::inInstantiateNode(type, shared_from_this());
                 if (!child) continue;
-                child->deserializeFromFghj(childNode.second);
+                if (auto childErr = child->deserializeFromFghj(childNode.second)) {
+                    return childErr;
+                }
             }
         }
     } catch (const std::exception& e) {

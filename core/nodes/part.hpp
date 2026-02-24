@@ -20,10 +20,6 @@ enum class MaskingMode {
     DodgeMask,
 };
 
-struct MaskLink {
-    NodeId target{};
-};
-
 struct MaskBinding {
     NodeId maskSrcUUID{0};
     std::shared_ptr<Drawable> maskSrc{};
@@ -53,11 +49,6 @@ public:
     std::array<std::shared_ptr<::nicxlive::core::Texture>, 3> textures{};
     std::vector<int32_t> textureIds{};
     std::vector<MaskBinding> masks{};
-    // legacy masked_by support
-    std::vector<NodeId> maskedBy{};
-    MaskingMode maskedByMode{MaskingMode::Mask};
-    // legacy maskList support (unused in rendering, kept for compat)
-    std::vector<MaskLink> maskList{};
     BlendMode blendMode{BlendMode::Normal};
     float maskAlphaThreshold{0.5f};
     float opacity{1.0f};
