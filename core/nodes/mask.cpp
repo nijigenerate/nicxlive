@@ -1,6 +1,7 @@
 #include "mask.hpp"
 #include "../render/common.hpp"
 #include "../render/commands.hpp"
+#include "../render/backend_queue.hpp"
 #include "../puppet.hpp"
 #include "../runtime_state.hpp"
 
@@ -61,6 +62,14 @@ void Mask::fillMaskDrawPacket(::nicxlive::core::nodes::MaskDrawPacket& packet) c
     packet.indexBuffer = ibo;
     packet.indexCount = static_cast<uint32_t>(mesh->indices.size());
     packet.vertexCount = static_cast<uint32_t>(mesh->vertices.size());
+    // Keep queue backend IBO map in sync, same contract as Part::fillDrawPacket.
+    if (packet.indexBuffer != 0 && !mesh->indices.empty()) {
+        if (auto qb = std::dynamic_pointer_cast<core::render::QueueRenderBackend>(core::getCurrentRenderBackend())) {
+            if (!qb->hasDrawableIndices(packet.indexBuffer)) {
+                qb->uploadDrawableIndices(packet.indexBuffer, mesh->indices);
+            }
+        }
+    }
 }
 
 void Mask::runRenderTask(core::RenderContext&) {

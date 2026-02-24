@@ -9,6 +9,7 @@
 #include "../../fmt/fmt.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <cstddef>
 #include <cmath>
 #include <cstdio>
@@ -53,6 +54,20 @@ bool tracePartListEnabled() {
     }
     enabled = (std::strcmp(v, "1") == 0 || std::strcmp(v, "true") == 0 || std::strcmp(v, "TRUE") == 0) ? 1 : 0;
     return enabled != 0;
+}
+
+std::optional<MaskingMode> parseMaskingModeString(const std::string& raw) {
+    if (raw.empty()) return std::nullopt;
+    std::string key;
+    key.reserve(raw.size());
+    for (char ch : raw) {
+        if (std::isalnum(static_cast<unsigned char>(ch))) {
+            key.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
+        }
+    }
+    if (key == "mask") return MaskingMode::Mask;
+    if (key == "dodgemask") return MaskingMode::DodgeMask;
+    return std::nullopt;
 }
 
 }
@@ -327,6 +342,10 @@ void Part::serializeSelfImpl(::nicxlive::core::serde::InochiSerializer& serializ
         if (modeVal >= 0 && modeVal <= static_cast<int>(MaskingMode::DodgeMask)) {
             maskedByMode = static_cast<MaskingMode>(modeVal);
         }
+    } else if (auto ms = data.get_optional<std::string>("mask_mode")) {
+        if (auto parsed = parseMaskingModeString(*ms)) {
+            maskedByMode = *parsed;
+        }
     }
     if (auto pup = puppetRef()) {
         for (std::size_t i = 0; i < textureIds.size() && i < textures.size(); ++i) {
@@ -340,9 +359,13 @@ void Part::serializeSelfImpl(::nicxlive::core::serde::InochiSerializer& serializ
         for (const auto& e : *ml) {
             MaskBinding mb;
             mb.maskSrcUUID = e.second.get<uint32_t>("source", 0);
-            int modeVal = e.second.get<int>("mode", 0);
+            int modeVal = e.second.get<int>("mode", -1);
             if (modeVal >= 0 && modeVal <= static_cast<int>(MaskingMode::DodgeMask)) {
                 mb.mode = static_cast<MaskingMode>(modeVal);
+            } else if (auto modeText = e.second.get_optional<std::string>("mode")) {
+                if (auto parsed = parseMaskingModeString(*modeText)) {
+                    mb.mode = *parsed;
+                }
             }
             masks.push_back(mb);
         }
@@ -856,7 +879,6 @@ void Part::enqueueRenderCommands(core::RenderContext& ctx, const std::function<v
     for (const auto& m : maskBindings) {
         if (m.mode == MaskingMode::Mask) { useStencil = true; break; }
     }
-
     auto scopeHint = determineRenderScopeHint();
     if (scopeHint.skip) return;
     auto self = std::dynamic_pointer_cast<Part>(shared_from_this());

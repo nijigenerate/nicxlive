@@ -71,7 +71,7 @@ public:
     std::unique_ptr<PhysicsDriver> driver{};
     std::unique_ptr<Curve> originalCurve{};
     std::unique_ptr<Curve> deformedCurve{};
-    std::unordered_map<uint32_t, std::vector<float>> meshCaches{}; // key by node uuid for simplicity
+    std::unordered_map<const Node*, std::vector<float>> meshCaches{};
     std::unique_ptr<Curve> prevCurve{};
     Vec2 prevRoot{};
     bool prevRootSet{false};

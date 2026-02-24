@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <functional>
+#include <limits>
 
 namespace nicxlive::core::nodes {
 
@@ -10,61 +11,87 @@ using ::nicxlive::core::common::Vec2Array;
 
 namespace {
 float findLocalMin01(const std::function<float(float)>& f) {
-    // D std.numeric.findLocalMin parity intent:
-    // detect local basins on a coarse scan, refine each with golden-section,
-    // then choose the best refined minimum.
-    constexpr int kSamples = 128;
-    constexpr int kRefineIters = 32;
-    constexpr float kInvPhi = 0.6180339887498948f; // (sqrt(5)-1)/2
+    // D std.numeric.findLocalMin (Brent) parity.
+    constexpr float c = 0x0.61c8864680b583ea0c633f9fa31237p+0L; // (3-sqrt(5))/2
+    constexpr float cm1 = 0x0.9e3779b97f4a7c15f39cc0605cedc8p+0L;
+    const float relTolerance = std::sqrt(std::numeric_limits<float>::epsilon());
+    const float absTolerance = std::sqrt(std::numeric_limits<float>::epsilon());
 
-    std::array<float, kSamples + 1> ts{};
-    std::array<float, kSamples + 1> vs{};
-    for (int i = 0; i <= kSamples; ++i) {
-        ts[i] = static_cast<float>(i) / static_cast<float>(kSamples);
-        vs[i] = f(ts[i]);
+    float a = 0.0f;
+    float b = 1.0f;
+    float v = a * cm1 + b * c;
+    float fv = f(v);
+    if (!std::isfinite(fv) || fv == -std::numeric_limits<float>::infinity()) {
+        return std::clamp(v, 0.0f, 1.0f);
     }
-    const float span = 1.0f / static_cast<float>(kSamples);
-    float bestT = ts[0];
-    float bestV = vs[0];
+    float w = v;
+    float fw = fv;
+    float x = v;
+    float fx = fv;
+    float d = 0.0f;
+    float e = 0.0f;
 
-    auto refine = [&](float centerT) {
-        float a = std::max(0.0f, centerT - span);
-        float b = std::min(1.0f, centerT + span);
-        float c = b - (b - a) * kInvPhi;
-        float d = a + (b - a) * kInvPhi;
-        float fc = f(c);
-        float fd = f(d);
-        for (int it = 0; it < kRefineIters; ++it) {
-            if (fc < fd) {
-                b = d;
-                d = c;
-                fd = fc;
-                c = b - (b - a) * kInvPhi;
-                fc = f(c);
-            } else {
-                a = c;
-                c = d;
-                fc = fd;
-                d = a + (b - a) * kInvPhi;
-                fd = f(d);
+    for (;;) {
+        float m = (a + b) * 0.5f;
+        if (!std::isfinite(m)) {
+            m = a * 0.5f + b * 0.5f;
+            if (!std::isfinite(m)) return std::clamp(x, 0.0f, 1.0f);
+        }
+        float tolerance = absTolerance * std::fabs(x) + relTolerance;
+        float t2 = tolerance * 2.0f;
+        if (!(std::fabs(x - m) > t2 - (b - a) * 0.5f)) break;
+
+        float p = 0.0f;
+        float q = 0.0f;
+        float r = 0.0f;
+        if (std::fabs(e) > tolerance) {
+            const float xw = x - w;
+            const float fxw = fx - fw;
+            const float xv = x - v;
+            const float fxv = fx - fv;
+            const float xwfxv = xw * fxv;
+            const float xvfxw = xv * fxw;
+            p = xv * xvfxw - xw * xwfxv;
+            q = (xvfxw - xwfxv) * 2.0f;
+            if (q > 0.0f) p = -p; else q = -q;
+            r = e;
+            e = d;
+        }
+
+        float u = 0.0f;
+        if (std::fabs(p) < std::fabs(q * r * 0.5f) && p > q * (a - x) && p < q * (b - x)) {
+            d = p / q;
+            u = x + d;
+            if (u - a < t2 || b - u < t2) {
+                d = x < m ? tolerance : -tolerance;
+            }
+        } else {
+            e = (x < m ? b : a) - x;
+            d = c * e;
+        }
+
+        u = x + (std::fabs(d) >= tolerance ? d : (d > 0.0f ? tolerance : -tolerance));
+        const float fu = f(u);
+        if (!std::isfinite(fu) || fu == -std::numeric_limits<float>::infinity()) {
+            return std::clamp(u, 0.0f, 1.0f);
+        }
+
+        if (fu <= fx) {
+            if (u < x) b = x; else a = x;
+            v = w; fv = fw;
+            w = x; fw = fx;
+            x = u; fx = fu;
+        } else {
+            if (u < x) a = u; else b = u;
+            if (fu <= fw || w == x) {
+                v = w; fv = fw;
+                w = u; fw = fu;
+            } else if (fu <= fv || v == x || v == w) {
+                v = u; fv = fu;
             }
         }
-        const float t = std::clamp((a + b) * 0.5f, 0.0f, 1.0f);
-        const float v = f(t);
-        if (v < bestV) {
-            bestV = v;
-            bestT = t;
-        }
-    };
-
-    refine(0.0f);
-    for (int i = 1; i < kSamples; ++i) {
-        if (vs[i] <= vs[i - 1] && vs[i] <= vs[i + 1]) {
-            refine(ts[i]);
-        }
     }
-    refine(1.0f);
-    return bestT;
+    return std::clamp(x, 0.0f, 1.0f);
 }
 } // namespace
 
