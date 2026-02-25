@@ -52,7 +52,10 @@ if(BUILD_WASM)
     message(FATAL_ERROR "BUILD_WASM=ON requires Emscripten toolchain (use emcmake).")
   endif()
   message(STATUS "Configuring for WASM (Emscripten)")
-  add_compile_options(-sALLOW_MEMORY_GROWTH=1 -sWASM=1)
+  # Exceptions are used in fmt loader/unity_native error handling paths.
+  # Without this, thrown std::runtime_error becomes an abort numeric in JS.
+  add_compile_options(-sALLOW_MEMORY_GROWTH=1 -sWASM=1 -fexceptions)
+  add_link_options("SHELL:-sDISABLE_EXCEPTION_CATCHING=0")
 endif()
 
 set(NICXLIVE_SOURCES

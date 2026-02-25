@@ -35,7 +35,7 @@
 
   <script type="module">
     import { initWebGLBackend, renderCommands, NjgRenderCommandKind, MaskDrawableKind } from "../webgl_backend/webgl_backend.js";
-    const WASM_TEST_VERSION = "wasm-index-2026-02-25-07";
+    const WASM_TEST_VERSION = "wasm-index-2026-02-25-10";
 
     const logEl = document.getElementById("log");
     const canvas = document.getElementById("cv");
@@ -103,6 +103,15 @@
       logEl.textContent += s + "\n";
       logEl.scrollTop = logEl.scrollHeight;
       console.log("[wasm-test]", ...args);
+    }
+
+    function hexPreview(bytes, maxLen = 16) {
+      const n = Math.min(maxLen, bytes.length);
+      let out = "";
+      for (let i = 0; i < n; i += 1) {
+        out += bytes[i].toString(16).padStart(2, "0");
+      }
+      return out;
     }
 
     console.log("[wasm-test] version:", WASM_TEST_VERSION);
@@ -273,12 +282,19 @@
 
     async function stageInxToMemfs() {
       const srcName = "model.inx";
-      const modelUrl = "/models/model.inx";
-      const res = await fetch(modelUrl);
+      const modelUrl = `/models/model.inx?t=${Date.now()}`;
+      const dst = `/assets/${srcName}`;
+      // Always clear stale MEMFS content first. If fetch fails, old model must not remain visible.
+      try { Module.FS_unlink && Module.FS_unlink(dst); } catch (_) {}
+      const res = await fetch(modelUrl, {
+        cache: "no-store",
+        headers: { "Cache-Control": "no-cache" },
+      });
       if (!res.ok) {
         throw new Error(`failed to fetch model: ${res.status} ${modelUrl}`);
       }
       const bytes = new Uint8Array(await res.arrayBuffer());
+      log("model fetch:", modelUrl, "status", res.status, "bytes", bytes.length, "head", hexPreview(bytes));
 
       if (!Module.FS_createPath || !Module.FS_createDataFile) {
         throw new Error("Emscripten FS runtime methods are missing. Rebuild wasm with FS runtime enabled.");
@@ -286,9 +302,18 @@
 
       const dir = "/assets";
       try { Module.FS_createPath("/", "assets", true, true); } catch (_) {}
-      const dst = `${dir}/${srcName}`;
-      try { Module.FS_unlink && Module.FS_unlink(dst); } catch (_) {}
       Module.FS_createDataFile(dir, srcName, bytes, true, true);
+      try {
+        const rb = Module.FS_readFile ? Module.FS_readFile(dst) : null;
+        if (rb) {
+          const rbBytes = rb instanceof Uint8Array ? rb : new Uint8Array(rb);
+          log("memfs staged:", dst, "bytes", rbBytes.length, "head", hexPreview(rbBytes));
+        } else {
+          log("memfs staged:", dst, "bytes", "(FS_readFile unavailable)");
+        }
+      } catch (e) {
+        log("memfs staged check failed:", String(e));
+      }
       return dst;
     }
 
@@ -352,7 +377,18 @@
 
       const outPuppetPtr = getMalloc()(K.OutPtr);
       const pathPtr = writeCString(stagedPath);
-      const lr = fnLoadPuppet(renderer, pathPtr, outPuppetPtr);
+      let lr = K.Failure;
+      try {
+        lr = fnLoadPuppet(renderer, pathPtr, outPuppetPtr);
+      } catch (e) {
+        let stagedSize = -1;
+        try {
+          if (Module.FS_stat) stagedSize = Module.FS_stat(stagedPath).size | 0;
+          else if (Module.FS && Module.FS.stat) stagedSize = Module.FS.stat(stagedPath).size | 0;
+        } catch (_) {}
+        free(pathPtr);
+        throw new Error(`njgLoadPuppet threw: ${String(e)} path=${stagedPath} size=${stagedSize}`);
+      }
       free(pathPtr);
       if (lr !== K.Ok) throw new Error(`njgLoadPuppet failed: ${lr}`);
       const puppet = readU32(outPuppetPtr);

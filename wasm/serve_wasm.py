@@ -13,6 +13,13 @@ class ReusableTCPServer(socketserver.TCPServer):
 class NicxHandler(http.server.SimpleHTTPRequestHandler):
     model_path: pathlib.Path = None
 
+    def end_headers(self):
+        # Disable browser caching so /models/model.inx always reflects current file state.
+        self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+        self.send_header("Pragma", "no-cache")
+        self.send_header("Expires", "0")
+        super().end_headers()
+
     def do_HEAD(self):
         if self.path == "/models/model.inx":
             self.serve_model(head_only=True)
