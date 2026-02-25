@@ -1,0 +1,458 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>nicxlive wasm webgl test</title>
+  <style>
+    html, body { margin: 0; padding: 0; background: #111; color: #ddd; font-family: monospace; }
+    #ui { padding: 8px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    #cv { width: 100vw; height: calc(100vh - 110px); display: block; }
+    #log { margin: 0; padding: 8px; height: 70px; overflow: auto; white-space: pre-wrap; border-top: 1px solid #333; background: #0b0b0b; }
+    button { cursor: pointer; }
+  </style>
+</head>
+<body>
+  <div id="ui">
+    <span>Model: <code>/models/model.inx</code></span>
+    <button id="start">start</button>
+    <label>scale</label>
+    <input id="scale" type="range" min="0.2" max="3.0" step="0.01" value="1.0" />
+    <span id="scaleVal">1.00</span>
+  </div>
+  <canvas id="cv"></canvas>
+  <pre id="log"></pre>
+
+  <script>
+    // Emscripten module config (nicxlive.js reads global Module).
+    var Module = {
+      noInitialRun: true,
+      locateFile: (p) => `../build-wasm-check/${p}`,
+      onRuntimeInitialized: () => window.dispatchEvent(new Event("nicx-runtime-ready")),
+    };
+  </script>
+  <script src="../build-wasm-check/nicxlive.js"></script>
+
+  <script type="module">
+    import { initWebGLBackend, renderCommands, NjgRenderCommandKind, MaskDrawableKind } from "../webgl_backend/webgl_backend.js";
+    const WASM_TEST_VERSION = "wasm-index-2026-02-25-07";
+
+    const logEl = document.getElementById("log");
+    const canvas = document.getElementById("cv");
+    const startBtn = document.getElementById("start");
+    const scaleInput = document.getElementById("scale");
+    const scaleVal = document.getElementById("scaleVal");
+
+    const K = {
+      Ok: 0,
+      UnityRendererConfig: 8,
+      FrameConfig: 8,
+      UnityResourceCallbacks: 16,
+      CommandQueueView: 8,
+      SharedBufferSnapshot: 36,
+      OutPtr: 4,
+
+      OffQueuedPart: 4,
+      OffQueuedMaskApply: 248,
+      OffQueuedDynamic: 668,
+      OffQueuedUsesStencil: 732,
+      SizeQueued: 736,
+
+      SizeMat4: 64,
+      SizeVec2: 8,
+      SizeVec3: 12,
+
+      SizePart: 244,
+      SizeMaskDraw: 168,
+      SizeMaskApply: 420,
+      SizeDynamicPass: 64,
+
+      OffPartTextureHandles: 180,
+      OffPartTextureCount: 192,
+      OffPartOrigin: 196,
+      OffPartVertexOffset: 204,
+      OffPartVertexStride: 208,
+      OffPartUvOffset: 212,
+      OffPartUvStride: 216,
+      OffPartDeformOffset: 220,
+      OffPartDeformStride: 224,
+      OffPartIndexHandle: 228,
+      OffPartIndicesPtr: 232,
+      OffPartIndexCount: 236,
+      OffPartVertexCount: 240,
+
+      OffMaskKind: 0,
+      OffMaskIsDodge: 4,
+      OffMaskPartPacket: 8,
+      OffMaskMaskPacket: 252,
+
+      OffDynTextures: 0,
+      OffDynTextureCount: 12,
+      OffDynStencil: 16,
+      OffDynScale: 20,
+      OffDynRotationZ: 28,
+      OffDynAutoScaled: 32,
+      OffDynOrigBuffer: 36,
+      OffDynOrigViewport: 40,
+      OffDynDrawBufferCount: 56,
+      OffDynHasStencil: 60,
+    };
+
+    function log(...args) {
+      const s = args.map((x) => (typeof x === "string" ? x : JSON.stringify(x))).join(" ");
+      logEl.textContent += s + "\n";
+      logEl.scrollTop = logEl.scrollHeight;
+      console.log("[wasm-test]", ...args);
+    }
+
+    console.log("[wasm-test] version:", WASM_TEST_VERSION);
+    log("version:", WASM_TEST_VERSION);
+
+    function reqExport(name) {
+      const m = Module;
+      const f = m[`_${name}`] || m[name];
+      if (!f) throw new Error(`missing wasm export: ${name}`);
+      return f;
+    }
+
+    function getMalloc() {
+      const f = Module._malloc || Module.malloc;
+      if (!f) throw new Error("missing _malloc export");
+      return f;
+    }
+
+    function getFree() {
+      return Module._free || Module.free || (() => {});
+    }
+
+    function writeCString(s) {
+      const enc = new TextEncoder();
+      const bytes = enc.encode(s + "\0");
+      const p = getMalloc()(bytes.length);
+      Module.HEAPU8.set(bytes, p);
+      return p;
+    }
+
+    function readU32(p) { return Module.HEAPU32[p >>> 2] >>> 0; }
+    function readI32(p) { return Module.HEAP32[p >>> 2] | 0; }
+    function readF32(p) { return Module.HEAPF32[p >>> 2]; }
+    function readBool(p) { return Module.HEAPU8[p] !== 0; }
+
+    function readMat4(p) {
+      const o = p >>> 2;
+      return new Float32Array(Module.HEAPF32.subarray(o, o + 16));
+    }
+
+    function readVec2(p) {
+      const o = p >>> 2;
+      return [Module.HEAPF32[o], Module.HEAPF32[o + 1]];
+    }
+
+    function readVec3(p) {
+      const o = p >>> 2;
+      return [Module.HEAPF32[o], Module.HEAPF32[o + 1], Module.HEAPF32[o + 2]];
+    }
+
+    function decodePart(ptr) {
+      const textureHandles = [readU32(ptr + K.OffPartTextureHandles), readU32(ptr + K.OffPartTextureHandles + 4), readU32(ptr + K.OffPartTextureHandles + 8)];
+      const indicesPtr = readU32(ptr + K.OffPartIndicesPtr);
+      const indexCount = readU32(ptr + K.OffPartIndexCount);
+      const indices = indexCount ? new Uint16Array(Module.HEAPU16.slice(indicesPtr >>> 1, (indicesPtr >>> 1) + indexCount)) : null;
+      return {
+        isMask: readBool(ptr + 0),
+        renderable: readBool(ptr + 1),
+        modelMatrix: readMat4(ptr + 4),
+        renderMatrix: readMat4(ptr + 68),
+        renderRotation: readF32(ptr + 132),
+        clampedTint: readVec3(ptr + 136),
+        clampedScreen: readVec3(ptr + 148),
+        opacity: readF32(ptr + 160),
+        emissionStrength: readF32(ptr + 164),
+        maskThreshold: readF32(ptr + 168),
+        blendingMode: readI32(ptr + 172),
+        useMultistageBlend: readBool(ptr + 176),
+        hasEmissionOrBumpmap: readBool(ptr + 177),
+        textureHandles,
+        textureCount: readU32(ptr + K.OffPartTextureCount),
+        origin: readVec2(ptr + K.OffPartOrigin),
+        vertexOffset: readU32(ptr + K.OffPartVertexOffset),
+        vertexAtlasStride: readU32(ptr + K.OffPartVertexStride),
+        uvOffset: readU32(ptr + K.OffPartUvOffset),
+        uvAtlasStride: readU32(ptr + K.OffPartUvStride),
+        deformOffset: readU32(ptr + K.OffPartDeformOffset),
+        deformAtlasStride: readU32(ptr + K.OffPartDeformStride),
+        indexHandle: readU32(ptr + K.OffPartIndexHandle),
+        indices,
+        indexCount,
+        vertexCount: readU32(ptr + K.OffPartVertexCount),
+      };
+    }
+
+    function decodeMaskDraw(ptr) {
+      const indicesPtr = readU32(ptr + 156);
+      const indexCount = readU32(ptr + 160);
+      const indices = indexCount ? new Uint16Array(Module.HEAPU16.slice(indicesPtr >>> 1, (indicesPtr >>> 1) + indexCount)) : null;
+      return {
+        modelMatrix: readMat4(ptr),
+        mvp: readMat4(ptr + 64),
+        origin: readVec2(ptr + 128),
+        vertexOffset: readU32(ptr + 136),
+        vertexAtlasStride: readU32(ptr + 140),
+        deformOffset: readU32(ptr + 144),
+        deformAtlasStride: readU32(ptr + 148),
+        indexHandle: readU32(ptr + 152),
+        indices,
+        indexCount,
+        vertexCount: readU32(ptr + 164),
+      };
+    }
+
+    function decodeDynamicPass(ptr) {
+      return {
+        textures: [readU32(ptr + K.OffDynTextures), readU32(ptr + K.OffDynTextures + 4), readU32(ptr + K.OffDynTextures + 8)],
+        textureCount: readU32(ptr + K.OffDynTextureCount),
+        stencil: readU32(ptr + K.OffDynStencil),
+        scale: readVec2(ptr + K.OffDynScale),
+        rotationZ: readF32(ptr + K.OffDynRotationZ),
+        autoScaled: readBool(ptr + K.OffDynAutoScaled),
+        origBuffer: readU32(ptr + K.OffDynOrigBuffer),
+        origViewport: [
+          readI32(ptr + K.OffDynOrigViewport),
+          readI32(ptr + K.OffDynOrigViewport + 4),
+          readI32(ptr + K.OffDynOrigViewport + 8),
+          readI32(ptr + K.OffDynOrigViewport + 12),
+        ],
+        drawBufferCount: readI32(ptr + K.OffDynDrawBufferCount),
+        hasStencil: readBool(ptr + K.OffDynHasStencil),
+      };
+    }
+
+    function decodeMaskApply(ptr) {
+      const kind = readU32(ptr + K.OffMaskKind);
+      return {
+        kind,
+        isDodge: readBool(ptr + K.OffMaskIsDodge),
+        partPacket: decodePart(ptr + K.OffMaskPartPacket),
+        maskPacket: decodeMaskDraw(ptr + K.OffMaskMaskPacket),
+      };
+    }
+
+    function decodeCommands(ptr, count) {
+      const out = [];
+      for (let i = 0; i < count; i++) {
+        const base = ptr + i * K.SizeQueued;
+        const kind = readU32(base);
+        const cmd = { kind };
+        if (kind === NjgRenderCommandKind.DrawPart) {
+          cmd.partPacket = decodePart(base + K.OffQueuedPart);
+        } else if (kind === NjgRenderCommandKind.ApplyMask) {
+          cmd.maskApplyPacket = decodeMaskApply(base + K.OffQueuedMaskApply);
+        } else if (kind === NjgRenderCommandKind.BeginDynamicComposite || kind === NjgRenderCommandKind.EndDynamicComposite) {
+          cmd.dynamicPass = decodeDynamicPass(base + K.OffQueuedDynamic);
+        } else if (kind === NjgRenderCommandKind.BeginMask) {
+          cmd.usesStencil = readBool(base + K.OffQueuedUsesStencil);
+        }
+        out.push(cmd);
+      }
+      return out;
+    }
+
+    function decodeSnapshot(ptr) {
+      const vPtr = readU32(ptr + 0);
+      const vLen = readU32(ptr + 4);
+      const uvPtr = readU32(ptr + 8);
+      const uvLen = readU32(ptr + 12);
+      const dPtr = readU32(ptr + 16);
+      const dLen = readU32(ptr + 20);
+      return {
+        vertices: { data: new Float32Array(Module.HEAPF32.slice(vPtr >>> 2, (vPtr >>> 2) + vLen)) },
+        uvs: { data: new Float32Array(Module.HEAPF32.slice(uvPtr >>> 2, (uvPtr >>> 2) + uvLen)) },
+        deform: { data: new Float32Array(Module.HEAPF32.slice(dPtr >>> 2, (dPtr >>> 2) + dLen)) },
+      };
+    }
+
+    async function stageInxToMemfs() {
+      const srcName = "model.inx";
+      const modelUrl = "/models/model.inx";
+      const res = await fetch(modelUrl);
+      if (!res.ok) {
+        throw new Error(`failed to fetch model: ${res.status} ${modelUrl}`);
+      }
+      const bytes = new Uint8Array(await res.arrayBuffer());
+
+      if (!Module.FS_createPath || !Module.FS_createDataFile) {
+        throw new Error("Emscripten FS runtime methods are missing. Rebuild wasm with FS runtime enabled.");
+      }
+
+      const dir = "/assets";
+      try { Module.FS_createPath("/", "assets", true, true); } catch (_) {}
+      const dst = `${dir}/${srcName}`;
+      try { Module.FS_unlink && Module.FS_unlink(dst); } catch (_) {}
+      Module.FS_createDataFile(dir, srcName, bytes, true, true);
+      return dst;
+    }
+
+    async function main() {
+      await new Promise((resolve) => {
+        if (Module.calledRun || Module.HEAPU8) {
+          resolve();
+          return;
+        }
+        window.addEventListener("nicx-runtime-ready", () => resolve(), { once: true });
+      });
+
+      const glInit = initWebGLBackend(canvas, { debugLog: false });
+      const backendCallbacks = glInit.backend.createUnityResourceCallbacks();
+
+      const addFunction = Module.addFunction;
+      if (!addFunction) throw new Error("addFunction is missing. Rebuild wasm with exported runtime method addFunction.");
+
+      const free = getFree();
+      const fnRtInit = reqExport("njgRuntimeInit");
+      const fnRtTerm = reqExport("njgRuntimeTerm");
+      const fnCreateRenderer = reqExport("njgCreateRenderer");
+      const fnDestroyRenderer = reqExport("njgDestroyRenderer");
+      const fnLoadPuppet = reqExport("njgLoadPuppet");
+      const fnUnloadPuppet = reqExport("njgUnloadPuppet");
+      const fnBeginFrame = reqExport("njgBeginFrame");
+      const fnTickPuppet = reqExport("njgTickPuppet");
+      const fnEmitCommands = reqExport("njgEmitCommands");
+      const fnGetSharedBuffers = reqExport("njgGetSharedBuffers");
+      const fnSetPuppetScale = reqExport("njgSetPuppetScale");
+
+      const createTexturePtr = addFunction((w, h, ch, mip, fmt, rt, st, userData) => {
+        return backendCallbacks.createTexture(w, h, ch, mip, fmt, !!rt, !!st) >>> 0;
+      }, "iiiiiiiii");
+      const updateTexturePtr = addFunction((handle, data, dataLen, w, h, ch, userData) => {
+        const bytes = dataLen ? Module.HEAPU8.subarray(data, data + dataLen) : null;
+        backendCallbacks.updateTexture(handle >>> 0, bytes, dataLen >>> 0, w | 0, h | 0, ch | 0);
+      }, "viiiiiii");
+      const releaseTexturePtr = addFunction((handle, userData) => {
+        backendCallbacks.releaseTexture(handle >>> 0);
+      }, "vii");
+
+      const cfgPtr = getMalloc()(K.UnityRendererConfig);
+      const cbPtr = getMalloc()(K.UnityResourceCallbacks);
+      const outRendererPtr = getMalloc()(K.OutPtr);
+      Module.HEAP32[(cfgPtr >>> 2) + 0] = canvas.width | 0;
+      Module.HEAP32[(cfgPtr >>> 2) + 1] = canvas.height | 0;
+      Module.HEAPU32[(cbPtr >>> 2) + 0] = 0;
+      Module.HEAPU32[(cbPtr >>> 2) + 1] = createTexturePtr >>> 0;
+      Module.HEAPU32[(cbPtr >>> 2) + 2] = updateTexturePtr >>> 0;
+      Module.HEAPU32[(cbPtr >>> 2) + 3] = releaseTexturePtr >>> 0;
+
+      fnRtInit();
+      const cr = fnCreateRenderer(cfgPtr, cbPtr, outRendererPtr);
+      if (cr !== K.Ok) throw new Error(`njgCreateRenderer failed: ${cr}`);
+      const renderer = readU32(outRendererPtr);
+      if (!renderer) throw new Error("renderer handle is null");
+
+      const stagedPath = await stageInxToMemfs();
+      log("model staged:", stagedPath);
+
+      const outPuppetPtr = getMalloc()(K.OutPtr);
+      const pathPtr = writeCString(stagedPath);
+      const lr = fnLoadPuppet(renderer, pathPtr, outPuppetPtr);
+      free(pathPtr);
+      if (lr !== K.Ok) throw new Error(`njgLoadPuppet failed: ${lr}`);
+      const puppet = readU32(outPuppetPtr);
+      if (!puppet) throw new Error("puppet handle is null");
+
+      const frameCfgPtr = getMalloc()(K.FrameConfig);
+      const cmdViewPtr = getMalloc()(K.CommandQueueView);
+      const snapshotPtr = getMalloc()(K.SharedBufferSnapshot);
+
+      let last = performance.now();
+      let alive = true;
+      let debugFrame = 0;
+      const cleanup = () => {
+        if (!alive) return;
+        alive = false;
+        try { fnUnloadPuppet(renderer, puppet); } catch (_) {}
+        try { fnDestroyRenderer(renderer); } catch (_) {}
+        try { fnRtTerm(); } catch (_) {}
+      };
+      window.addEventListener("beforeunload", cleanup);
+
+      function resizeCanvas() {
+        const dpr = Math.max(1, window.devicePixelRatio || 1);
+        const w = Math.max(64, Math.floor(canvas.clientWidth * dpr));
+        const h = Math.max(64, Math.floor(canvas.clientHeight * dpr));
+        if (canvas.width !== w || canvas.height !== h) {
+          canvas.width = w;
+          canvas.height = h;
+          glInit.drawableW = w;
+          glInit.drawableH = h;
+        }
+      }
+
+      function frame(now) {
+        if (!alive) return;
+        try {
+          resizeCanvas();
+
+          const dt = Math.min(0.05, Math.max(0.0, (now - last) / 1000.0));
+          last = now;
+
+          const s = Number(scaleInput.value || "1");
+          scaleVal.textContent = s.toFixed(2);
+          fnSetPuppetScale && fnSetPuppetScale(puppet, s, s);
+
+          Module.HEAP32[(frameCfgPtr >>> 2) + 0] = canvas.width | 0;
+          Module.HEAP32[(frameCfgPtr >>> 2) + 1] = canvas.height | 0;
+
+          if (fnBeginFrame(renderer, frameCfgPtr) !== K.Ok) {
+            log("njgBeginFrame failed");
+            requestAnimationFrame(frame);
+            return;
+          }
+          fnTickPuppet(puppet, dt);
+
+          if (fnEmitCommands(renderer, cmdViewPtr) !== K.Ok) {
+            log("njgEmitCommands failed");
+            requestAnimationFrame(frame);
+            return;
+          }
+          if (fnGetSharedBuffers(renderer, snapshotPtr) !== K.Ok) {
+            log("njgGetSharedBuffers failed");
+            requestAnimationFrame(frame);
+            return;
+          }
+
+          const commandsPtr = readU32(cmdViewPtr + 0);
+          const commandsCount = readU32(cmdViewPtr + 4);
+          const commands = decodeCommands(commandsPtr, commandsCount);
+          const snapshot = decodeSnapshot(snapshotPtr);
+          let drawPartCount = 0;
+          for (let i = 0; i < commands.length; i += 1) {
+            if (Number(commands[i]?.kind) === NjgRenderCommandKind.DrawPart) drawPartCount += 1;
+          }
+
+          debugFrame += 1;
+          if (debugFrame <= 5 || (debugFrame % 60) === 0) {
+            const firstKind = commandsCount > 0 ? commands[0]?.kind : -1;
+            log("frame", debugFrame, "cmdCount", commandsCount, "firstKind", firstKind,
+              "drawPart", drawPartCount, "v/uv/d", snapshot.vertices.data.length, snapshot.uvs.data.length, snapshot.deform.data.length);
+          }
+
+          renderCommands(glInit, snapshot, { commands });
+        } catch (e) {
+          log("frame error:", String(e && e.message ? e.message : e));
+        }
+        requestAnimationFrame(frame);
+      }
+
+      log("renderer ready, commands loop started");
+      requestAnimationFrame(frame);
+    }
+
+    startBtn.addEventListener("click", () => {
+      startBtn.disabled = true;
+      main().catch((e) => {
+        log("ERROR:", String(e && e.message ? e.message : e));
+        startBtn.disabled = false;
+      });
+    });
+  </script>
+</body>
+</html>
