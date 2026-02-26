@@ -477,6 +477,8 @@ void Composite::dynamicRenderBegin(core::RenderContext& ctx) {
         passData,
         zSort());
     dynamicScopeActive = true;
+    NJCX_DBG_LOG("[nicxlive] comp.pushDynamic name=%s uuid=%u token=%zu texCount=%zu hasStencil=%d\n",
+                 name.c_str(), uuid, dynamicScopeToken, passData.surface->textureCount, passData.surface->stencil ? 1 : 0);
 
     bool applyScreenSpace = !hasProjectableAncestorNode(this);
     Mat4 renderMatrix = applyScreenSpace ? offscreenRenderMatrix() : Mat4::identity();
@@ -490,6 +492,8 @@ void Composite::dynamicRenderBegin(core::RenderContext& ctx) {
             child->clearOffscreenRenderMatrix();
         }
         if (auto dynChild = std::dynamic_pointer_cast<Projectable>(child)) {
+            NJCX_DBG_LOG("[nicxlive] comp.nestedOffscreen parent=%s(%u) child=%s(%u) type=%s\n",
+                         name.c_str(), uuid, child->name.c_str(), child->uuid, child->typeId().c_str());
             dynChild->renderNestedOffscreen(ctx);
         } else {
             child->enqueueRenderCommands(ctx);

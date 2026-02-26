@@ -10,7 +10,7 @@
 | `vertices()` override | `Deformable::vertices` フィールド使用 | △ | Dは `vertexBuffer` 明示、C++は基底 `vertices` を直接保持 | CP129 |
 | `rebuffer` | `GridDeformer::rebuffer` | ◯ | D同様の fallback (`DefaultAxis`) と `clearCache` | - |
 | `typeId` | `typeId() const` | ◯ | 一致 | - |
-| `runPreProcessTask` | `GridDeformer::runPreProcessTask` | ◯ | `transform` 更新後に inverse 再計算と `updateDeform` 実行 | - |
+| `runPreProcessTask` | `GridDeformer::runPreProcessTask` | ◯ | `inverseMatrix = globalTransform.toMat4().inverse()` へ修正済み | - |
 | `build` | `GridDeformer::build` | ◯ | D同様 `setupChild -> setupSelf -> Node::build`。余計な `refresh()` を削除済み | CP129 |
 | `clearCache` | `GridDeformer::clearCache` | ◯ | D同様 no-op | - |
 | `setupChild` | `GridDeformer::setupChild` | ◯ | D同様に propagate 再帰 | - |
@@ -18,8 +18,8 @@
 | `captureTarget` | `GridDeformer::captureTarget` | ◯ | prepend で hook 追加 | - |
 | `releaseTarget` | `GridDeformer::releaseTarget` | ◯ | 一致 | - |
 | `runRenderTask` | `GridDeformer::runRenderTask` | ◯ | no-op 一致 | - |
-| `deformChildren` | `GridDeformer::deformChildren` | △ | `origDeformation.size()<origVertices.size()` 早期return と `cache.valid` invalid 扱いを削除し、非finiteのみ early return へ写経修正済み。残差分は実行結果差の継続調査 | CP129, CP147 |
-| `applyDeformToChildren` | `GridDeformer::applyDeformToChildren` | △ | `transferChildren` 内での keypoint 算出・`transferCondition()` 呼び出し・更新順を D `filter.d` 手順へ写経反映済み。残差分は実行結果差（`Midori-gridtest2` の queue count 差） | CP129, CP146 |
+| `deformChildren` | `GridDeformer::deformChildren` | ◯ | 戻り値/受け渡し型を D と同じ (`Vec2Array`, `mat4*`, `bool`) に統一済み | CP129, CP147 |
+| `applyDeformToChildren` | `GridDeformer::applyDeformToChildren` | ◯ | `applyDeformToChildrenInternal` 経由で D 同等の転送処理へ統合済み | CP129, CP146 |
 | `copyFrom` | `GridDeformer::copyFrom` | ◯ | D同様 fallback と `clearCache` 追加済み | CP129 |
 | `coverOthers` | `coverOthers() const` | ◯ | 一致 | - |
 | `mustPropagate` | `mustPropagate() const` | ◯ | 一致 | - |
@@ -39,16 +39,47 @@
 | `computeCache` | `computeCache` | ◯ | 一致 | - |
 | `locateInterval` | `locateInterval` | ◯ | 一致 | - |
 | `sampleGridPoints` | `sampleGridPoints` | ◯ | `xAt/yAt` 化済みで D と同等 | - |
-| `setupChildNoRecurse` | `setupChildNoRecurse` | ◯ | `stage+tag` 管理で Dの upsert/remove と同等契約 | - |
-| `releaseChildNoRecurse` | `releaseChildNoRecurse` | ◯ | 一致 | - |
+| `setupChildNoRecurse` | `setupChildNoRecurse` | △ | Dは関数ポインタ同値で upsert/remove。C++は `stage+tag` と lambda bridge | - |
+| `releaseChildNoRecurse` | `releaseChildNoRecurse` | △ | Dは関数ポインタ同値 remove。C++は `stage+tag` remove | - |
 
 ## C++側にのみ存在する補助
 | C++独自関数 | 内容 | 判定 |
 | --- | --- | --- |
-| `toVec2List/toVec2Array` | `Vec2Array` と `std::vector<Vec2>` 変換ヘルパ | △ |
 | `isFiniteMatrix` (namespace local) | 行列 finite 判定のローカル補助 | △ |
 | `locate(float x, float y)` | `computeCache` を `optional` で包む補助 | △ |
 
+## 行単位差分（フィルタ関連）
+1. `applyDeformToChildren` の呼び出し構造
+`nijilive/source/nijilive/core/nodes/deformer/grid.d:257-272`
+`nicxlive/core/nodes/grid_deformer.cpp:370-390`
+差分:
+- D: `_applyDeformToChildren(tuple(1,&deformChildren), &update, &transfer, ...)`。
+- C++: `applyDeformToChildrenInternal(...)` 呼び出しで同等処理。
+
+2. `setupChildNoRecurse` の hook 形式
+`nijilive/source/nijilive/core/nodes/deformer/grid.d:751-774`
+`nicxlive/core/nodes/grid_deformer.cpp:323-359`
+差分:
+- D: `tuple(1, &deformChildren)` を pre/post に upsert/remove。
+- C++: `FilterHook{stage=1, tag=this}` + lambda (`deformChildren`) を登録。
+
+3. `releaseChildNoRecurse` の hook 解除方式
+`nijilive/source/nijilive/core/nodes/deformer/grid.d:778-780`
+`nicxlive/core/nodes/grid_deformer.cpp:361-368`
+差分:
+- D: `removeByValue(tuple(1,&deformChildren))`。
+- C++: `erase_if(stage==1 && tag==this)`。
+
+4. `deformChildren` の戻り型・受け渡し型
+`nijilive/source/nijilive/core/nodes/deformer/grid.d:167-254`
+`nicxlive/core/nodes/grid_deformer.cpp:200-292`
+差分: なし（C++ も `DeformResult{Vec2Array, Mat4*, bool}` に移行済み）。
+
+5. `runPreProcessTask` の inverse 行列元
+`nijilive/source/nijilive/core/nodes/deformer/grid.d:94-100`
+`nicxlive/core/nodes/grid_deformer.cpp:294-301`
+差分: なし（C++ も `globalTransform.toMat4().inverse()` に修正済み）。
+
 ## 重点残課題
-1. `Midori-gridtest2-20250426-1.6.2.inx` での `FRAME0/119 count` 差分（`nijilive: 244/234`, `nicxlive: 193/183`）要因を、`deformChildren` 入出力ログで点単位比較する。
-2. `Midori-gridtest2` 以外（Aka/Midori本体）でも `deformChildren` 差分観測を拡張し、count差の再現ノード集合を固定する。
+1. hook同一性判定（delegate同値 vs `stage+tag`）の厳密一致要否を判断する。
+2. Grid/Path で共通化可能な補助（finite判定・cache補助）の整理方針を決める。

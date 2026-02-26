@@ -1,24 +1,27 @@
 #include "deformable.hpp"
 #include "../puppet.hpp"
-#include "../render/shared_deform_buffer.hpp"
 #include "../debug_log.hpp"
 #include <cstdio>
 #include <cmath>
 
 namespace nicxlive::core::nodes {
 namespace {
-std::vector<Vec2> toStdVec(const Vec2Array& src) {
-    std::vector<Vec2> out;
-    out.reserve(src.size());
-    for (std::size_t i = 0; i < src.size(); ++i) out.push_back(src[i]);
-    return out;
+const char* traceDeformChainTarget() {
+    static const char* cached = nullptr;
+    static bool init = false;
+    if (!init) {
+        cached = std::getenv("NJCX_TRACE_DEFORM_CHAIN");
+        init = true;
+    }
+    return cached;
 }
 
-void fromStdVec(Vec2Array& dst, const std::vector<Vec2>& src) {
-    dst.resize(src.size());
-    for (std::size_t i = 0; i < src.size(); ++i) {
-        dst.set(i, src[i]);
+float maxAbsVec2Array(const Vec2Array& arr) {
+    float maxAbs = 0.0f;
+    for (std::size_t i = 0; i < arr.size(); ++i) {
+        maxAbs = std::max(maxAbs, std::max(std::fabs(arr.xAt(i)), std::fabs(arr.yAt(i))));
     }
+    return maxAbs;
 }
 } // namespace
 
@@ -36,23 +39,15 @@ Deformation Deformation::operator-() const {
 
 Deformation Deformation::operator+(const Deformation& other) const {
     Deformation out;
-    auto n = std::min(vertexOffsets.size(), other.vertexOffsets.size());
-    out.vertexOffsets.resize(n);
-    for (std::size_t i = 0; i < n; ++i) {
-        out.vertexOffsets.xAt(i) = vertexOffsets.xAt(i) + other.vertexOffsets.xAt(i);
-        out.vertexOffsets.yAt(i) = vertexOffsets.yAt(i) + other.vertexOffsets.yAt(i);
-    }
+    out.vertexOffsets = vertexOffsets;
+    out.vertexOffsets += other.vertexOffsets;
     return out;
 }
 
 Deformation Deformation::operator-(const Deformation& other) const {
     Deformation out;
-    auto n = std::min(vertexOffsets.size(), other.vertexOffsets.size());
-    out.vertexOffsets.resize(n);
-    for (std::size_t i = 0; i < n; ++i) {
-        out.vertexOffsets.xAt(i) = vertexOffsets.xAt(i) - other.vertexOffsets.xAt(i);
-        out.vertexOffsets.yAt(i) = vertexOffsets.yAt(i) - other.vertexOffsets.yAt(i);
-    }
+    out.vertexOffsets = vertexOffsets;
+    out.vertexOffsets -= other.vertexOffsets;
     return out;
 }
 
@@ -159,33 +154,43 @@ void Deformable::remapDeformationBindings(const std::vector<std::size_t>& remap,
 void Deformable::preProcess() {
     if (preProcessed) return;
     preProcessed = true;
+    const char* traceTarget = traceDeformChainTarget();
+    const bool traceThisNode = traceTarget && name.find(traceTarget) != std::string::npos;
     for (const auto& hook : preProcessFilters) {
+        const float beforeAbs = traceThisNode ? maxAbsVec2Array(deformation) : 0.0f;
         Mat4 matrix = overrideTransformMatrix ? *overrideTransformMatrix : transform().toMat4();
-        auto verts = toStdVec(vertices);
-        auto deform = toStdVec(deformation);
-        auto result = hook.func(shared_from_this(), verts, deform, &matrix);
+        auto result = hook.func(shared_from_this(), vertices, deformation, &matrix);
         const auto& newDeform = std::get<0>(result);
         const auto& newMat = std::get<1>(result);
         bool notify = std::get<2>(result);
-        if (!newDeform.empty()) {
-            fromStdVec(deformation, newDeform);
-            ::nicxlive::core::render::sharedDeformMarkDirty();
-            float maxAbs = 0.0f;
-            for (std::size_t i = 0; i < deformation.size(); ++i) {
-                maxAbs = std::max(maxAbs, std::max(std::fabs(deformation.xAt(i)), std::fabs(deformation.yAt(i))));
-            }
-            if (maxAbs > 50.0f) {
-                NJCX_DBG_LOG("[nicxlive][Deformable][PreFilterLarge] node=%s uuid=%u stage=%zu maxAbs=%.6f first=(%.6f,%.6f)\n",
-                             name.c_str(), uuid, hook.stage, maxAbs,
-                             deformation.size() ? deformation.xAt(0) : 0.0f,
-                             deformation.size() ? deformation.yAt(0) : 0.0f);
-            }
+        if (traceThisNode) {
+            const float resultAbs = maxAbsVec2Array(newDeform);
+            NJCX_DBG_LOG("[nicxlive][DeformChain][Pre] node=%s uuid=%u tag=%zu stage=%d before=%.6f result=%.6f resultSize=%zu notify=%d\n",
+                         name.c_str(),
+                         uuid,
+                         static_cast<std::size_t>(hook.tag),
+                         hook.stage,
+                         beforeAbs,
+                         resultAbs,
+                         newDeform.size(),
+                         notify ? 1 : 0);
         }
-        if (newMat.has_value()) {
-            overrideTransformMatrix = newMat;
+        if (!newDeform.empty()) {
+            deformation = newDeform;
+        }
+        if (newMat != nullptr) {
+            overrideTransformMatrix = *newMat;
         }
         if (notify) {
             notifyChange(shared_from_this());
+        }
+        if (traceThisNode) {
+            const float afterAbs = maxAbsVec2Array(deformation);
+            NJCX_DBG_LOG("[nicxlive][DeformChain][PreAfter] node=%s uuid=%u after=%.6f size=%zu\n",
+                         name.c_str(),
+                         uuid,
+                         afterAbs,
+                         deformation.size());
         }
     }
 }
@@ -196,28 +201,15 @@ void Deformable::postProcess(int id) {
     for (const auto& hook : postProcessFilters) {
         if (hook.stage != id) continue;
         Mat4 matrix = overrideTransformMatrix ? *overrideTransformMatrix : transform().toMat4();
-        auto verts = toStdVec(vertices);
-        auto deform = toStdVec(deformation);
-        auto result = hook.func(shared_from_this(), verts, deform, &matrix);
+        auto result = hook.func(shared_from_this(), vertices, deformation, &matrix);
         const auto& newDeform = std::get<0>(result);
         const auto& newMat = std::get<1>(result);
         bool notify = std::get<2>(result);
         if (!newDeform.empty()) {
-            fromStdVec(deformation, newDeform);
-            ::nicxlive::core::render::sharedDeformMarkDirty();
-            float maxAbs = 0.0f;
-            for (std::size_t i = 0; i < deformation.size(); ++i) {
-                maxAbs = std::max(maxAbs, std::max(std::fabs(deformation.xAt(i)), std::fabs(deformation.yAt(i))));
-            }
-            if (maxAbs > 50.0f) {
-                NJCX_DBG_LOG("[nicxlive][Deformable][PostFilterLarge] node=%s uuid=%u stage=%zu maxAbs=%.6f first=(%.6f,%.6f)\n",
-                             name.c_str(), uuid, hook.stage, maxAbs,
-                             deformation.size() ? deformation.xAt(0) : 0.0f,
-                             deformation.size() ? deformation.yAt(0) : 0.0f);
-            }
+            deformation = newDeform;
         }
-        if (newMat.has_value()) {
-            overrideTransformMatrix = newMat;
+        if (newMat != nullptr) {
+            overrideTransformMatrix = *newMat;
         }
         if (notify) {
             notifyChange(shared_from_this());

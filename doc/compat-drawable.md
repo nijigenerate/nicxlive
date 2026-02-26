@@ -43,9 +43,33 @@
 | `copyFromDrawable` | 全データコピー | 頂点/UV/idx/gridAxes等＋フラグをコピー | ◯ |
 | `setupChildDrawable` | 子セットアップ（フィルタ登録等） | pinToMesh子にpreProcess hook追加 | ◯ |
 | `releaseChildDrawable` | 子解放（フィルタ解除等） | stage0 hook削除＋attachedIndex削除 | ◯ |
-| `setupChildDrawable/releaseChildDrawable` のhook同一性 | `(stage, func)` で重複回避/解除 | `stage + tag` で重複回避/解除を一致化 | ◯ |
-| `registerWeldFilter/unregisterWeldFilter` のhook解除 | `(stage, func)` で解除 | `stage + targetUUID由来tag` で解除を一致化 | ◯ |
+| `setupChildDrawable/releaseChildDrawable` のhook同一性 | `(stage, func)` で重複回避/解除 | `stage + tag` で重複回避/解除 | △ |
+| `registerWeldFilter/unregisterWeldFilter` のhook解除 | `(stage, func)` で解除 | `stage + targetUUID由来tag` で解除 | △ |
 | `buildDrawable` | force判定＋再計算＋shared/buffer | force時のみIBO/共有を更新しdraw呼び出し | ◯ |
 | `mustPropagateDrawable` | true | true | ◯ |
 | `fillDrawPacket` | modelMatrix 等設定 | 行列/オフセット＋色/ブレンド/テクスチャ等を設定 | ◯ |
 
+## 行単位差分（フィルタ関連）
+1. `nodeAttachProcessor` の hook ブリッジ
+`nijilive/source/nijilive/core/nodes/drawable.d:723-724`
+`nicxlive/core/nodes/drawable.cpp:759-764`
+差分: なし（`Vec2Array`/`Mat4*` をそのまま中継）。
+
+2. `weldingProcessor` の hook ブリッジ
+`nijilive/source/nijilive/core/nodes/drawable.d:599-600`
+`nicxlive/core/nodes/drawable.cpp:856-860`
+差分: なし（`Vec2Array`/`Mat4*` をそのまま中継）。
+
+3. `setupChild/releaseChild` の attach filter 同一性判定
+`nijilive/source/nijilive/core/nodes/drawable.d:720-733`
+`nicxlive/core/nodes/drawable.cpp:747-792`
+差分:
+- D: `tuple(0, &nodeAttachProcessor)` の関数同値で判定/解除。
+- C++: `stage=0 && tag==kNodeAttachFilterTag` で判定/解除（同一性表現のみ差異、挙動は同等）。
+
+4. weld filter の登録/解除キー
+`nijilive/source/nijilive/core/nodes/drawable.d:599-613`
+`nicxlive/core/nodes/drawable.cpp:861-896`
+差分:
+- D: `tuple(2, &weldingProcessor)` を upsert/remove。
+- C++: `stage=2 && tag=(base|targetUUID)` で upsert/remove（同一性表現のみ差異、挙動は同等）。

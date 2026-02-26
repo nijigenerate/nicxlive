@@ -427,12 +427,12 @@ void Drawable::updateIndices() {
     backend->uploadDrawableIndices(ibo, mesh->indices);
 }
 
-std::tuple<Vec2Array, std::optional<Mat4>, bool> Drawable::nodeAttachProcessor(const std::shared_ptr<Node>& node,
+std::tuple<Vec2Array, Mat4*, bool> Drawable::nodeAttachProcessor(const std::shared_ptr<Node>& node,
                                                                                const Vec2Array& origVertices,
-                                                                               const Vec2Array& origDeformation,
+                                                                               Vec2Array origDeformation,
                                                                                const Mat4* origTransform) {
     bool changed = false;
-    if (!node || mesh->indices.size() < 3) return {origDeformation, std::nullopt, false};
+    if (!node || mesh->indices.size() < 3) return {origDeformation, nullptr, false};
     Mat4 inv = Mat4::inverse(transform().toMat4());
     Vec3 localNode = inv.transformPoint(Vec3{node->transform().translation.x, node->transform().translation.y, 0});
     Vec2 nodeOrigin{localNode.x, localNode.y};
@@ -441,7 +441,7 @@ std::tuple<Vec2Array, std::optional<Mat4>, bool> Drawable::nodeAttachProcessor(c
     std::array<std::size_t, 3> tri{};
     if (triIt == attachedIndex.end()) {
         auto triFound = findSurroundingTriangle(nodeOrigin, static_cast<const MeshData&>(*mesh));
-        if (!triFound) return {origDeformation, std::nullopt, false};
+        if (!triFound) return {origDeformation, nullptr, false};
         tri = *triFound;
         attachedIndex[node->uuid] = tri;
     } else {
@@ -451,15 +451,15 @@ std::tuple<Vec2Array, std::optional<Mat4>, bool> Drawable::nodeAttachProcessor(c
     Vec2 targetPrime{};
     float rotVert = 0.0f, rotHorz = 0.0f;
     if (!calculateTransformInTriangle(*mesh, tri, deformation, nodeOrigin, targetPrime, rotVert, rotHorz)) {
-        return {origDeformation, std::nullopt, false};
+        return {origDeformation, nullptr, false};
     }
     Vec2 delta{targetPrime.x - nodeOrigin.x, targetPrime.y - nodeOrigin.y};
     node->setValue("transform.t.x", delta.x);
     node->setValue("transform.t.y", delta.y);
     node->setValue("transform.r.z", (rotVert + rotHorz) / 2.0f);
-    node->transformChanged();
+    transformChanged();
     changed = true;
-    return {Vec2Array{}, std::nullopt, changed};
+    return {Vec2Array{}, nullptr, changed};
 }
 
 void Drawable::updateVertices() {
@@ -506,17 +506,17 @@ bool Drawable::isWeldedBy(NodeId target) const {
     return std::any_of(weldedLinks.begin(), weldedLinks.end(), [&](const WeldingLink& l) { return l.targetUUID == target; });
 }
 
-std::tuple<Vec2Array, std::optional<Mat4>, bool> Drawable::weldingProcessor(const std::shared_ptr<Node>& target,
+std::tuple<Vec2Array, Mat4*, bool> Drawable::weldingProcessor(const std::shared_ptr<Node>& target,
                                                                             const Vec2Array& origVertices,
-                                                                            const Vec2Array& origDeformation,
+                                                                            Vec2Array origDeformation,
                                                                             const Mat4* origTransform) {
     auto targetDrawable = std::dynamic_pointer_cast<Drawable>(target);
-    if (!targetDrawable) return {origDeformation, std::nullopt, false};
+    if (!targetDrawable) return {origDeformation, nullptr, false};
     auto it = std::find_if(weldedLinks.begin(), weldedLinks.end(), [&](const WeldingLink& l) { return l.targetUUID == targetDrawable->uuid; });
-    if (it == weldedLinks.end()) return {origDeformation, std::nullopt, false};
-    if (postProcessed < 2) return {Vec2Array{}, std::nullopt, false};
+    if (it == weldedLinks.end()) return {origDeformation, nullptr, false};
+    if (postProcessed < 2) return {Vec2Array{}, nullptr, false};
     if (weldingApplied.count(targetDrawable->uuid) || targetDrawable->weldingApplied.count(uuid)) {
-        return {Vec2Array{}, std::nullopt, false};
+        return {Vec2Array{}, nullptr, false};
     }
     weldingApplied.insert(targetDrawable->uuid);
     targetDrawable->weldingApplied.insert(uuid);
@@ -524,7 +524,7 @@ std::tuple<Vec2Array, std::optional<Mat4>, bool> Drawable::weldingProcessor(cons
     const auto& link = *it;
     bool changed = false;
     auto pairCount = std::min<std::size_t>(link.indices.size(), vertices.size());
-    if (pairCount == 0) return {origDeformation, std::nullopt, false};
+    if (pairCount == 0) return {origDeformation, nullptr, false};
 
     std::vector<std::size_t> selfIndices;
     std::vector<std::size_t> targetIndices;
@@ -538,7 +538,7 @@ std::tuple<Vec2Array, std::optional<Mat4>, bool> Drawable::weldingProcessor(cons
         selfIndices.push_back(i);
         targetIndices.push_back(tIdx);
     }
-    if (selfIndices.empty()) return {origDeformation, std::nullopt, false};
+    if (selfIndices.empty()) return {origDeformation, nullptr, false};
 
     Vec2Array selfLocal = gatherVec2(vertices, selfIndices);
     Vec2Array selfDelta = gatherVec2(deformation, selfIndices);
@@ -582,7 +582,7 @@ std::tuple<Vec2Array, std::optional<Mat4>, bool> Drawable::weldingProcessor(cons
     Vec2Array targetDeformOut = origDeformation;
     scatterAddVec2(localTarget, targetIndices, targetDeformOut, changed);
     sharedDeformMarkDirty();
-    return {targetDeformOut, std::nullopt, changed};
+    return {targetDeformOut, nullptr, changed};
 }
 
 void Drawable::addWeldedTarget(const std::shared_ptr<Drawable>& target,
@@ -756,27 +756,11 @@ void Drawable::setupChildDrawable() {
         FilterHook hook;
         hook.stage = 0;
         hook.tag = kNodeAttachFilterTag;
-        hook.func = [weakSelf](std::shared_ptr<Node> self, const std::vector<Vec2>& verts, const std::vector<Vec2>& deform, const Mat4* mat) {
+        hook.func = [weakSelf](std::shared_ptr<Node> self, const Vec2Array& verts, Vec2Array deform, const Mat4* mat)
+            -> std::tuple<Vec2Array, Mat4*, bool> {
             auto owner = weakSelf.lock();
-            if (!owner) return std::make_tuple(std::vector<Vec2>{}, std::optional<Mat4>{}, false);
-            Vec2Array v;
-            v.resize(verts.size());
-            for (std::size_t i = 0; i < verts.size(); ++i) {
-                v.set(i, verts[i]);
-            }
-            Vec2Array d;
-            d.resize(deform.size());
-            for (std::size_t i = 0; i < deform.size(); ++i) {
-                d.set(i, deform[i]);
-            }
-            auto res = owner->nodeAttachProcessor(self, v, d, mat);
-            std::vector<Vec2> out;
-            const auto& def = std::get<0>(res);
-            out.reserve(def.size());
-            for (std::size_t i = 0; i < def.size(); ++i) {
-                out.push_back(Vec2{def.xAt(i), def.yAt(i)});
-            }
-            return std::make_tuple(out, std::optional<Mat4>{}, std::get<2>(res));
+            if (!owner) return std::make_tuple(Vec2Array{}, static_cast<Mat4*>(nullptr), false);
+            return owner->nodeAttachProcessor(self, verts, deform, mat);
         };
         child->preProcessFilters.push_back(std::move(hook));
     }
@@ -815,6 +799,8 @@ void Drawable::buildDrawable(bool force) {
 }
 
 bool Drawable::mustPropagateDrawable() const { return true; }
+
+bool Drawable::mustPropagate() const { return mustPropagateDrawable(); }
 
 void Drawable::fillDrawPacket(const Node& header, PartDrawPacket& packet, bool /*isMask*/) const {
     packet.renderable = header.enabled && mesh->isReady();
@@ -868,19 +854,11 @@ void Drawable::registerWeldFilter(const std::shared_ptr<Drawable>& target) {
     hook.stage = 2;
     hook.tag = tag;
     std::weak_ptr<Drawable> weakTarget = target;
-    hook.func = [weakTarget](std::shared_ptr<Node> self, const std::vector<Vec2>& verts, const std::vector<Vec2>& deform, const Mat4* mat) {
+    hook.func = [weakTarget](std::shared_ptr<Node> self, const Vec2Array& verts, Vec2Array deform, const Mat4* mat)
+        -> std::tuple<Vec2Array, Mat4*, bool> {
         auto tgt = weakTarget.lock();
-        if (!tgt) return std::make_tuple(std::vector<Vec2>{}, std::optional<Mat4>{}, false);
-        Vec2Array v; v.resize(verts.size());
-        for (std::size_t i = 0; i < verts.size(); ++i) { v.set(i, verts[i]); }
-        Vec2Array d; d.resize(deform.size());
-        for (std::size_t i = 0; i < deform.size(); ++i) { d.set(i, deform[i]); }
-        auto res = tgt->weldingProcessor(self, v, d, mat);
-        std::vector<Vec2> out;
-        const auto& def = std::get<0>(res);
-        out.reserve(def.size());
-        for (std::size_t i = 0; i < def.size(); ++i) out.push_back(Vec2{def.xAt(i), def.yAt(i)});
-        return std::make_tuple(out, std::optional<Mat4>{}, std::get<2>(res));
+        if (!tgt) return std::make_tuple(Vec2Array{}, static_cast<Mat4*>(nullptr), false);
+        return tgt->weldingProcessor(self, verts, deform, mat);
     };
     postProcessFilters.push_back(std::move(hook));
 }

@@ -52,7 +52,10 @@ if(BUILD_WASM)
     message(FATAL_ERROR "BUILD_WASM=ON requires Emscripten toolchain (use emcmake).")
   endif()
   message(STATUS "Configuring for WASM (Emscripten)")
-  add_compile_options(-sALLOW_MEMORY_GROWTH=1 -sWASM=1)
+  # Exceptions are used in fmt loader/unity_native error handling paths.
+  # Without this, thrown std::runtime_error becomes an abort numeric in JS.
+  add_compile_options(-sALLOW_MEMORY_GROWTH=1 -sWASM=1 -fexceptions)
+  add_link_options("SHELL:-sDISABLE_EXCEPTION_CATCHING=0")
 endif()
 
 set(NICXLIVE_SOURCES
@@ -150,7 +153,7 @@ if(NICXLIVE_BUILD_TESTS)
       "SHELL:-sNO_EXIT_RUNTIME=1"
       "SHELL:-sALLOW_TABLE_GROWTH=1"
       "SHELL:-sFORCE_FILESYSTEM=1"
-      "SHELL:-sEXPORTED_FUNCTIONS=['_main','_malloc','_free','_njgRuntimeInit','_njgRuntimeTerm','_njgCreateRenderer','_njgDestroyRenderer','_njgLoadPuppet','_njgUnloadPuppet','_njgBeginFrame','_njgTickPuppet','_njgEmitCommands','_njgGetSharedBuffers','_njgGetRenderTargets','_njgSetLogCallback','_njgFlushCommandBuffer','_njgGetGcHeapSize','_njgGetTextureStats','_njgSetPuppetScale','_njgSetPuppetTranslation','_njgGetParameters','_njgUpdateParameters','_njgGetPuppetExtData','_njgPlayAnimation','_njgPauseAnimation','_njgStopAnimation','_njgSeekAnimation']"
+      "SHELL:-sEXPORTED_FUNCTIONS=['_main','_malloc','_free','_njgRuntimeInit','_njgRuntimeTerm','_njgCreateRenderer','_njgDestroyRenderer','_njgLoadPuppet','_njgUnloadPuppet','_njgBeginFrame','_njgTickPuppet','_njgEmitCommands','_njgGetSharedBuffers','_njgGetRenderTargets','_njgSetLogCallback','_njgFlushCommandBuffer','_njgGetGcHeapSize','_njgGetTextureStats','_njgSetPuppetScale','_njgSetPuppetTranslation','_njgGetParameters','_njgUpdateParameters','_njgGetPuppetExtData','_njgPlayAnimation','_njgPauseAnimation','_njgStopAnimation','_njgSeekAnimation','_njgGetWasmLayout']"
       "SHELL:-sEXPORTED_RUNTIME_METHODS=['addFunction','removeFunction','ccall','cwrap','UTF8ToString','stringToUTF8','lengthBytesUTF8','FS_createPath','FS_createDataFile','FS_unlink','HEAP8','HEAPU8','HEAP16','HEAPU16','HEAP32','HEAPU32','HEAPF32','HEAPF64']"
     )
   endif()

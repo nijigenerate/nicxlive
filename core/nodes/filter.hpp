@@ -3,6 +3,7 @@
 #include "node.hpp"
 #include "../param/parameter.hpp"
 
+#include <functional>
 #include <type_traits>
 
 namespace nicxlive::core::nodes {
@@ -16,6 +17,15 @@ public:
     virtual void releaseTarget(const std::shared_ptr<Node>& target);
     virtual void dispose();
     virtual void applyDeformToChildren(const std::vector<std::shared_ptr<Parameter>>& params, bool recursive = true);
+
+protected:
+    void applyDeformToChildrenInternal(
+        const std::shared_ptr<Node>& self,
+        const Node::FilterHook::Func& filterChildren,
+        const std::function<void(const Vec2Array&)>& update,
+        const std::function<bool()>& transferCondition,
+        const std::vector<std::shared_ptr<Parameter>>& params,
+        bool recursive);
 };
 
 // CRTP mixin: assume the derived is also a Node (as in D mixin template)

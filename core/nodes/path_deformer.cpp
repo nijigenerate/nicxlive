@@ -777,8 +777,8 @@ void PathDeformer::logInvalidIndex(const std::string& context, std::size_t index
 }
 
 DeformResult PathDeformer::deformChildren(const std::shared_ptr<Node>& target,
-                                          const std::vector<Vec2>& origVertices,
-                                          const std::vector<Vec2>& origDeformation,
+                                          const Vec2Array& origVertices,
+                                          Vec2Array origDeformation,
                                           const Mat4* origTransform) {
     static std::unordered_map<uint32_t, uint64_t> sChangedCount;
     static uint64_t sSummaryTick = 0;
@@ -786,7 +786,7 @@ DeformResult PathDeformer::deformChildren(const std::shared_ptr<Node>& target,
     // D parity: unchanged path filter returns empty deformation payload.
     // Returning original vertices/deformation here causes caller-side overwrite.
     res.vertices.clear();
-    res.transform = std::nullopt;
+    res.transform = nullptr;
     res.changed = false;
 
     bool diagStarted = beginDiagnosticFrame();
@@ -810,19 +810,8 @@ DeformResult PathDeformer::deformChildren(const std::shared_ptr<Node>& target,
         return res;
     }
 
-    Vec2Array verts;
-    verts.resize(origVertices.size());
-    for (std::size_t i = 0; i < origVertices.size(); ++i) {
-        verts.xAt(i) = origVertices[i].x;
-        verts.yAt(i) = origVertices[i].y;
-    }
-
-    Vec2Array deformInput;
-    deformInput.resize(origDeformation.size());
-    for (std::size_t i = 0; i < origDeformation.size(); ++i) {
-        deformInput.xAt(i) = origDeformation[i].x;
-        deformInput.yAt(i) = origDeformation[i].y;
-    }
+    Vec2Array verts = origVertices.dup();
+    Vec2Array deformInput = origDeformation.dup();
     sanitizeOffsets(deformInput);
 
     Vec2Array sample;
@@ -924,12 +913,14 @@ DeformResult PathDeformer::deformChildren(const std::shared_ptr<Node>& target,
     res.vertices.resize(deformOut.size());
     float maxAbs = 0.0f;
     for (std::size_t i = 0; i < deformOut.size(); ++i) {
-        res.vertices[i] = Vec2{deformOut.xAt(i), deformOut.yAt(i)};
-        if (!std::isfinite(res.vertices[i].x) || !std::isfinite(res.vertices[i].y)) {
-            recordInvalid("resultNaN", i, res.vertices[i]);
-            res.vertices[i] = Vec2{0, 0};
+        res.vertices.xAt(i) = deformOut.xAt(i);
+        res.vertices.yAt(i) = deformOut.yAt(i);
+        if (!std::isfinite(res.vertices.xAt(i)) || !std::isfinite(res.vertices.yAt(i))) {
+            recordInvalid("resultNaN", i, Vec2{res.vertices.xAt(i), res.vertices.yAt(i)});
+            res.vertices.xAt(i) = 0.0f;
+            res.vertices.yAt(i) = 0.0f;
         }
-        maxAbs = std::max(maxAbs, std::max(std::fabs(res.vertices[i].x), std::fabs(res.vertices[i].y)));
+        maxAbs = std::max(maxAbs, std::max(std::fabs(res.vertices.xAt(i)), std::fabs(res.vertices.yAt(i))));
     }
     res.changed = true;
     if (maxAbs > 10.0f) {
@@ -937,8 +928,8 @@ DeformResult PathDeformer::deformChildren(const std::shared_ptr<Node>& target,
                 " target=", (target ? target->name : std::string("<null>")),
                 " targetUuid=", (target ? target->uuid : 0u),
                 " maxAbs=", maxAbs,
-                " first=(", (res.vertices.empty() ? 0.0f : res.vertices[0].x),
-                ",", (res.vertices.empty() ? 0.0f : res.vertices[0].y), ")");
+                " first=(", (res.vertices.empty() ? 0.0f : res.vertices.xAt(0)),
+                ",", (res.vertices.empty() ? 0.0f : res.vertices.yAt(0)), ")");
     }
     if (driver && target) {
         target->notifyChange(target);
@@ -1178,9 +1169,12 @@ bool PathDeformer::setupChildNoRecurse(const std::shared_ptr<Node>& node, bool p
     Node::FilterHook hook;
     hook.stage = kPathFilterStage;
     hook.tag = reinterpret_cast<std::uintptr_t>(this);
-    hook.func = [this](auto t, auto v, auto d, auto mat) {
+    hook.func = [this](std::shared_ptr<Node> t,
+                       const Vec2Array& v,
+                       Vec2Array d,
+                       const Mat4* mat) {
         auto res = deformChildren(t, v, d, mat);
-        return std::make_tuple(res.vertices, std::optional<Mat4>{}, res.changed);
+        return std::make_tuple(res.vertices, res.transform, res.changed);
     };
 
     auto& pre = node->preProcessFilters;
@@ -1219,62 +1213,37 @@ void PathDeformer::applyDeformToChildren(const std::vector<std::shared_ptr<core:
         return;
     }
     if (dynamicDeformation) return;
-    bool diagStarted = beginDiagnosticFrame();
-    std::function<void(const std::shared_ptr<Node>&)> apply;
-    apply = [&](const std::shared_ptr<Node>& c) {
-        if (auto deformable = std::dynamic_pointer_cast<Deformable>(c)) {
-            for (auto& param : params) {
-                if (!param) continue;
-                auto binding = std::dynamic_pointer_cast<core::param::DeformationParameterBinding>(param->getBinding(c, "deform"));
-                if (!binding) continue;
-                core::param::Vec2u left{};
-                Vec2 sub{};
-                param->findOffset(param->value, left, sub);
-                auto slot = binding->sample(left, sub);
-                if (slot.vertexOffsets.size() == deformable->deformation.size()) {
-                    deformable->deformation = slot.vertexOffsets;
-                }
-            }
-            auto m = c->transform().toMat4();
-    auto res = deformChildren(c, toVec2List(deformable->vertices), toVec2List(deformable->deformation), &m);
-            if (res.changed && res.vertices.size() == deformable->deformation.size()) {
-                deformable->deformation = toVec2Array(res.vertices);
-                deformable->transformChanged();
-            }
-        } else {
-            if (translateChildren) {
-                auto parentNode = c->parentPtr();
-                Mat4 m = parentNode ? parentNode->transform().toMat4() : Mat4::identity();
-                Vec2Array verts;
-                verts.resize(1);
-                verts.xAt(0) = c->localTransform.translation.x;
-                verts.yAt(0) = c->localTransform.translation.y;
-                Vec2Array deform;
-                deform.resize(1);
-                deform.xAt(0) = c->offsetTransform.translation.x;
-                deform.yAt(0) = c->offsetTransform.translation.y;
-                auto res = deformChildren(c, toVec2List(verts), toVec2List(deform), &m);
-                if (res.changed && !res.vertices.empty()) {
-                    c->offsetTransform.translation.x = res.vertices[0].x;
-                    c->offsetTransform.translation.y = res.vertices[0].y;
-                    c->transformChanged();
-                }
-            }
+    bool diagnosticsStarted = beginDiagnosticFrame();
+
+    auto update = [&](const Vec2Array& deformationValues) {
+        Vec2Array sanitized = deformationValues.dup();
+        sanitizeOffsets(sanitized);
+        if (vertices.size() >= 2) {
+            Vec2Array candidate = vertices.dup();
+            candidate += sanitized;
+            sanitizeOffsets(candidate);
+            deform(candidate);
+            logCurveState("applyDeformToChildren");
         }
-        if (recursive && c->mustPropagate()) {
-            for (auto& gc : c->childrenRef()) apply(gc);
-        }
+        refreshInverseMatrix("applyDeformToChildren:update");
     };
-    refreshInverseMatrix("applyDeformToChildren");
-    for (auto& c : children) apply(c);
-    if (invalidThisFrame) ++invalidFrameCount;
-    if (diagnosticsEnabled && invalidThisFrame) {
-        pathLog("[PathDeformer][Diag] frame=", frameCounter, " invalidFrames=", invalidFrameCount,
-                " totalInvalid=", totalInvalidCount, " lastCtx=", lastInvalidContext);
-    }
+
+    applyDeformToChildrenInternal(
+        std::dynamic_pointer_cast<Node>(shared_from_this()),
+        [this](std::shared_ptr<Node> target, const Vec2Array& verticesIn, Vec2Array deformationIn, const Mat4* transformIn) {
+            auto res = deformChildren(target, verticesIn, deformationIn, transformIn);
+            return std::make_tuple(res.vertices, res.transform, res.changed);
+        },
+        update,
+        []() { return false; },
+        params,
+        recursive);
+
     physicsOnly = true;
     rebuffer(std::vector<Vec2>{});
-    if (diagStarted) endDiagnosticFrame();
+    if (diagnosticsStarted) {
+        endDiagnosticFrame();
+    }
 }
 
 void PathDeformer::copyFrom(const Node& src, bool clone, bool deepCopy) {

@@ -623,6 +623,8 @@ void Projectable::dynamicRenderBegin(core::RenderContext& ctx) {
     }
     dynamicScopeToken = ctx.renderGraph->pushDynamicComposite(std::dynamic_pointer_cast<Projectable>(shared_from_this()), pass, zSort());
     dynamicScopeActive = true;
+    NJCX_DBG_LOG("[nicxlive] proj.pushDynamic name=%s uuid=%u token=%zu texCount=%zu hasStencil=%d\n",
+                 name.c_str(), uuid, dynamicScopeToken, pass.surface->textureCount, pass.surface->stencil ? 1 : 0);
 
     Mat4 translate = Mat4::translation(Vec3{-textureOffset.x, -textureOffset.y, 0});
     Mat4 correction = Mat4::multiply(fullTransformMatrix(), Mat4::inverse(transform().toMat4()));
@@ -636,6 +638,8 @@ void Projectable::dynamicRenderBegin(core::RenderContext& ctx) {
         Mat4 finalMatrix = Mat4::multiply(childBasis, childMatrix);
         p->setOffscreenModelMatrix(finalMatrix);
         if (auto dynChild = std::dynamic_pointer_cast<Projectable>(p)) {
+            NJCX_DBG_LOG("[nicxlive] proj.nestedOffscreen parent=%s(%u) child=%s(%u) type=%s\n",
+                         name.c_str(), uuid, p->name.c_str(), p->uuid, p->typeId().c_str());
             dynChild->renderNestedOffscreen(ctx);
         } else {
             p->enqueueRenderCommands(ctx);
@@ -833,6 +837,22 @@ void Projectable::runPostTaskImpl(std::size_t priority, core::RenderContext& ctx
 }
 
 void Projectable::notifyChange(const std::shared_ptr<Node>& target, NotifyReason reason) {
+    if (name.find("Iris") != std::string::npos) {
+        const char* reasonText = "Unknown";
+        switch (reason) {
+        case NotifyReason::Initialized: reasonText = "Initialized"; break;
+        case NotifyReason::AttributeChanged: reasonText = "AttributeChanged"; break;
+        case NotifyReason::Transformed: reasonText = "Transformed"; break;
+        case NotifyReason::StructureChanged: reasonText = "StructureChanged"; break;
+        }
+        NJCX_DBG_LOG("[nicxlive] iris.notify self=%s(%u) target=%s(%u,%s) reason=%s before invalid=%d valid=%d deferred=%d\n",
+                     name.c_str(), uuid,
+                     target ? target->name.c_str() : "(null)",
+                     target ? target->uuid : 0u,
+                     target ? target->typeId().c_str() : "(null)",
+                     reasonText,
+                     textureInvalidated ? 1 : 0, hasValidOffscreenContent ? 1 : 0, deferred);
+    }
     if (target != shared_from_this()) {
         if (reason == NotifyReason::AttributeChanged) {
             scanSubParts(childrenRef());
@@ -870,6 +890,11 @@ void Projectable::notifyChange(const std::shared_ptr<Node>& target, NotifyReason
     }
 
     Part::notifyChange(target, reason);
+    if (name.find("Iris") != std::string::npos) {
+        NJCX_DBG_LOG("[nicxlive] iris.notify.after self=%s(%u) invalid=%d valid=%d deferred=%d\n",
+                     name.c_str(), uuid,
+                     textureInvalidated ? 1 : 0, hasValidOffscreenContent ? 1 : 0, deferred);
+    }
 }
 
 void Projectable::rebuffer(const MeshData& data) {

@@ -98,6 +98,7 @@ public:
     void runDynamicTask(core::RenderContext& ctx) override;
     void runBeginTask(core::RenderContext& ctx) override;
     void runPostTaskImpl(std::size_t priority, core::RenderContext& ctx) override;
+    bool mustPropagate() const override { return false; }
     void notifyChange(const std::shared_ptr<Node>& target, NotifyReason reason = NotifyReason::AttributeChanged) override;
     void rebuffer(const MeshData& data) override;
     bool setupChild(const std::shared_ptr<Node>& child) override;

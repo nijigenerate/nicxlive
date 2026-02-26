@@ -9,12 +9,82 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <limits>
+#include <unordered_map>
 
 namespace nicxlive::core::nodes {
 
 using nicxlive::core::common::transformAssign;
 using nicxlive::core::common::transformAdd;
+
+namespace {
+bool invertMat3(const Mat3& in, Mat3& out) {
+    const float a00 = in.m[0][0], a01 = in.m[0][1], a02 = in.m[0][2];
+    const float a10 = in.m[1][0], a11 = in.m[1][1], a12 = in.m[1][2];
+    const float a20 = in.m[2][0], a21 = in.m[2][1], a22 = in.m[2][2];
+    const float c00 = (a11 * a22 - a12 * a21);
+    const float c01 = (a12 * a20 - a10 * a22);
+    const float c02 = (a10 * a21 - a11 * a20);
+    const float c10 = (a02 * a21 - a01 * a22);
+    const float c11 = (a00 * a22 - a02 * a20);
+    const float c12 = (a01 * a20 - a00 * a21);
+    const float c20 = (a01 * a12 - a02 * a11);
+    const float c21 = (a02 * a10 - a00 * a12);
+    const float c22 = (a00 * a11 - a01 * a10);
+    const float det = a00 * c00 + a01 * c01 + a02 * c02;
+    if (std::fabs(det) <= 1e-12f) {
+        return false;
+    }
+    const float invDet = 1.0f / det;
+    out.m[0][0] = c00 * invDet;
+    out.m[0][1] = c10 * invDet;
+    out.m[0][2] = c20 * invDet;
+    out.m[1][0] = c01 * invDet;
+    out.m[1][1] = c11 * invDet;
+    out.m[1][2] = c21 * invDet;
+    out.m[2][0] = c02 * invDet;
+    out.m[2][1] = c12 * invDet;
+    out.m[2][2] = c22 * invDet;
+    return true;
+}
+
+bool traceMeshGroupChainEnabled() {
+    static int enabled = -1;
+    if (enabled >= 0) return enabled != 0;
+    const char* v = std::getenv("NJCX_TRACE_MESHGROUP_CHAIN");
+    if (!v) {
+        enabled = 0;
+        return false;
+    }
+    enabled = (std::strcmp(v, "1") == 0 || std::strcmp(v, "true") == 0 || std::strcmp(v, "TRUE") == 0) ? 1 : 0;
+    return enabled != 0;
+}
+
+bool traceMeshGroupEffectEnabled() {
+    static int enabled = -1;
+    if (enabled >= 0) return enabled != 0;
+    const char* v = std::getenv("NJCX_TRACE_MESHGROUP_EFFECT");
+    if (!v) {
+        enabled = 0;
+        return false;
+    }
+    enabled = (std::strcmp(v, "1") == 0 || std::strcmp(v, "true") == 0 || std::strcmp(v, "TRUE") == 0) ? 1 : 0;
+    return enabled != 0;
+}
+
+const char* meshGroupTargetTraceName() {
+    static const char* cached = nullptr;
+    static bool init = false;
+    if (!init) {
+        cached = std::getenv("NJCX_TRACE_MESHGROUP_TARGET");
+        init = true;
+    }
+    return cached;
+}
+
+std::unordered_map<const MeshGroup*, std::size_t> gMeshGroupFilterCallCount;
+} // namespace
 
 MeshGroup::MeshGroup() {
     requirePreProcessTask();
@@ -57,119 +127,15 @@ void MeshGroup::applyDeformToChildren(const std::vector<std::shared_ptr<core::pa
         }
     };
 
-    auto resetOffset = [&](const std::shared_ptr<Node>& node, const auto& selfRef) -> void {
-        if (!node) return;
-        node->offsetTransform.clear();
-        node->offsetSort = 0.0f;
-        node->transformChanged();
-        for (auto& c : node->childrenRef()) {
-            selfRef(c, selfRef);
-        }
-    };
-
-    for (auto& param : params) {
-        if (!param) continue;
-        auto selfBinding = std::dynamic_pointer_cast<core::param::DeformationParameterBinding>(
-            param->getBinding(shared_from_this(), "deform"));
-        if (!selfBinding) continue;
-
-        const auto xCount = param->axisPointCount(0);
-        const auto yCount = param->axisPointCount(1);
-        if (xCount == 0 || yCount == 0) continue;
-
-        for (std::size_t x = 0; x < xCount; ++x) {
-            for (std::size_t y = 0; y < yCount; ++y) {
-                if (auto pup = puppetRef()) {
-                    if (pup->root) resetOffset(pup->root, resetOffset);
-                }
-
-                core::param::Vec2u key{x, y};
-                Vec2 ofs{0.0f, 0.0f};
-                if (x + 1 == xCount && x > 0) { key.x = x - 1; ofs.x = 1.0f; }
-                if (param->isVec2 && y + 1 == yCount && y > 0) { key.y = y - 1; ofs.y = 1.0f; }
-
-                core::param::DeformSlot selfSlot;
-                if (selfBinding->isSetAt(core::param::Vec2u{x, y})) {
-                    selfSlot = selfBinding->valueAt(core::param::Vec2u{x, y});
-                } else {
-                    selfSlot = selfBinding->sample(key, ofs);
-                }
-                update(selfSlot.vertexOffsets);
-
-                auto transfer = [&](const std::shared_ptr<Node>& node, const auto& selfRef) -> void {
-                    if (!node) return;
-                    auto deformable = std::dynamic_pointer_cast<Deformable>(node);
-                    auto composite = std::dynamic_pointer_cast<Composite>(node);
-                    bool isComposite = static_cast<bool>(composite);
-                    bool shouldTransferTranslate = translateChildren;
-                    if (deformable) {
-                        static const char* kTransformBindingNames[] = {
-                            "transform.t.x",
-                            "transform.t.y",
-                            "transform.r.z",
-                            "transform.s.x",
-                            "transform.s.y",
-                        };
-                        for (const char* bindingName : kTransformBindingNames) {
-                            for (auto& kv : param->bindingMap) {
-                                auto& binding = kv.second;
-                                if (!binding) continue;
-                                if (binding->getName() != bindingName) continue;
-                                if (binding->getNodeUUID() != node->uuid) continue;
-                                binding->apply(key, ofs);
-                            }
-                        }
-                        node->transformChanged();
-
-                        auto nodeBinding = std::dynamic_pointer_cast<core::param::DeformationParameterBinding>(
-                            param->getOrAddBinding(node, "deform"));
-                        if (nodeBinding) {
-                            Vec2Array nodeDeform = nodeBinding->valueAt(core::param::Vec2u{x, y}).vertexOffsets;
-                            auto matrix = node->transform().toMat4();
-                            auto filtered = filterChildren(node, deformable->vertices, nodeDeform, &matrix);
-                            const auto& outDeform = std::get<0>(filtered);
-                            if (outDeform.size() > 0) {
-                                nodeBinding->setRawOffsetsAt(core::param::Vec2u{x, y}, outDeform);
-                            }
-                        }
-                    } else if (shouldTransferTranslate && !isComposite) {
-                        Vec2Array oneVertex;
-                        oneVertex.resize(1);
-                        oneVertex.xAt(0) = node->localTransform.translation.x;
-                        oneVertex.yAt(0) = node->localTransform.translation.y;
-
-                        auto parentNode = node->parent.lock();
-                        Mat4 matrix = parentNode ? parentNode->transform().toMat4() : Mat4::identity();
-
-                        auto nodeBindingX = std::dynamic_pointer_cast<core::param::ValueParameterBinding>(
-                            param->getOrAddBinding(node, "transform.t.x"));
-                        auto nodeBindingY = std::dynamic_pointer_cast<core::param::ValueParameterBinding>(
-                            param->getOrAddBinding(node, "transform.t.y"));
-                        Vec2Array nodeDeform;
-                        nodeDeform.resize(1);
-                        nodeDeform.xAt(0) = node->offsetTransform.translation.x;
-                        nodeDeform.yAt(0) = node->offsetTransform.translation.y;
-
-                        auto filtered = filterChildren(node, oneVertex, nodeDeform, &matrix);
-                        const auto& outDeform = std::get<0>(filtered);
-                        if (outDeform.size() > 0 && nodeBindingX && nodeBindingY) {
-                            float curX = nodeBindingX->valueAt(core::param::Vec2u{x, y});
-                            float curY = nodeBindingY->valueAt(core::param::Vec2u{x, y});
-                            nodeBindingX->setRawValueAt(core::param::Vec2u{x, y}, curX + outDeform.xAt(0));
-                            nodeBindingY->setRawValueAt(core::param::Vec2u{x, y}, curY + outDeform.yAt(0));
-                        }
-                    }
-
-                    if (recursive && node->mustPropagate()) {
-                        for (auto& c : node->childrenRef()) selfRef(c, selfRef);
-                    }
-                };
-
-                for (auto& c : children) transfer(c, transfer);
-            }
-        }
-        param->removeBinding(selfBinding);
-    }
+    applyDeformToChildrenInternal(
+        std::dynamic_pointer_cast<Node>(shared_from_this()),
+        [this](std::shared_ptr<Node> target, const Vec2Array& verticesIn, Vec2Array deformationIn, const Mat4* transformIn) {
+            return filterChildren(target, verticesIn, deformationIn, transformIn);
+        },
+        update,
+        [this]() { return translateChildren; },
+        params,
+        recursive);
 
     // After deform transfer, clear own mesh and disable translateChildren like D 実装
     *mesh = MeshData{};
@@ -200,15 +166,33 @@ void MeshGroup::postProcess(int id) { Drawable::postProcess(id); }
 
 void MeshGroup::runPreProcessTask(core::RenderContext& ctx) {
     Drawable::runPreProcessTask(ctx);
+    if (traceMeshGroupChainEnabled()) {
+        gMeshGroupFilterCallCount[this] = 0;
+    }
     if (mesh->indices.empty()) return;
     if (!precalculated) precalculate();
     // update transformedVertices and triangle matrices
     transformedVertices = vertices;
     transformedVertices += deformation;
-    for (std::size_t i = 0; i + 2 < mesh->indices.size() && i / 3 < triangles.size(); ++i) {
-        auto i0 = mesh->indices[i];
-        auto i1 = mesh->indices[i + 1];
-        auto i2 = mesh->indices[i + 2];
+    if (traceMeshGroupEffectEnabled()) {
+        float deformMaxAbs = 0.0f;
+        for (std::size_t i = 0; i < deformation.size(); ++i) {
+            deformMaxAbs = std::max(deformMaxAbs, std::max(std::fabs(deformation.xAt(i)), std::fabs(deformation.yAt(i))));
+        }
+        NJCX_DBG_LOG("[nicxlive][MeshGroup][Pre] node=%s(%u) verts=%zu deform=%zu deformMaxAbs=%.6f precalc=%d\n",
+                     name.c_str(),
+                     uuid,
+                     vertices.size(),
+                     deformation.size(),
+                     deformMaxAbs,
+                     precalculated ? 1 : 0);
+    }
+    for (std::size_t tri = 0; tri < triangles.size(); ++tri) {
+        const std::size_t base = tri * 3;
+        if (base + 2 >= mesh->indices.size()) break;
+        auto i0 = mesh->indices[base];
+        auto i1 = mesh->indices[base + 1];
+        auto i2 = mesh->indices[base + 2];
         Vec2 p1{transformedVertices.xAt(i0), transformedVertices.yAt(i0)};
         Vec2 p2{transformedVertices.xAt(i1), transformedVertices.yAt(i1)};
         Vec2 p3{transformedVertices.xAt(i2), transformedVertices.yAt(i2)};
@@ -216,10 +200,50 @@ void MeshGroup::runPreProcessTask(core::RenderContext& ctx) {
         mat[0][0] = p2.x - p1.x; mat[0][1] = p3.x - p1.x; mat[0][2] = p1.x;
         mat[1][0] = p2.y - p1.y; mat[1][1] = p3.y - p1.y; mat[1][2] = p1.y;
         mat[2][0] = 0; mat[2][1] = 0; mat[2][2] = 1;
-        triangles[i / 3].transformMatrix = mat * triangles[i / 3].offsetMatrices;
+        triangles[tri].transformMatrix = mat * triangles[tri].offsetMatrices;
     }
     forwardMatrix = transform().toMat4();
     inverseMatrix = globalTransform.toMat4().inverse();
+
+    if (traceMeshGroupChainEnabled()) {
+        std::size_t taggedPre = 0;
+        std::size_t taggedPost = 0;
+        std::size_t taggedNodes = 0;
+        std::size_t visited = 0;
+        const auto tag = reinterpret_cast<std::uintptr_t>(this);
+        auto walk = [&](const std::shared_ptr<Node>& n, const auto& selfRef) -> void {
+            if (!n) return;
+            ++visited;
+            std::size_t localPre = 0;
+            std::size_t localPost = 0;
+            for (const auto& h : n->preProcessFilters) {
+                if (h.stage == kMeshGroupFilterStage && h.tag == tag) ++localPre;
+            }
+            for (const auto& h : n->postProcessFilters) {
+                if (h.stage == kMeshGroupFilterStage && h.tag == tag) ++localPost;
+            }
+            if (localPre || localPost) ++taggedNodes;
+            taggedPre += localPre;
+            taggedPost += localPost;
+            for (auto& c : n->childrenRef()) {
+                selfRef(c, selfRef);
+            }
+        };
+        for (auto& c : children) {
+            walk(c, walk);
+        }
+        const auto calls = gMeshGroupFilterCallCount[this];
+        NJCX_DBG_LOG("[nicxlive][MeshGroup][Chain] node=%s uuid=%u visited=%zu taggedNodes=%zu hooks(pre=%zu post=%zu) filterCalls=%zu dynamic=%d translateChildren=%d\n",
+                     name.c_str(),
+                     uuid,
+                     visited,
+                     taggedNodes,
+                     taggedPre,
+                     taggedPost,
+                     calls,
+                     dynamic ? 1 : 0,
+                     translateChildren ? 1 : 0);
+    }
 }
 
 void MeshGroup::runRenderTask(core::RenderContext&) {
@@ -259,32 +283,33 @@ void MeshGroup::setTranslateChildren(bool value) {
     }
 }
 
-std::tuple<Vec2Array, std::optional<Mat4>, bool> MeshGroup::filterChildren(const std::shared_ptr<Node>& target,
-                                                                          const Vec2Array& origVertices,
-                                                                          const Vec2Array& origDeformation,
-                                                                          const Mat4* origTransform) {
-    if (!precalculated || !origTransform) return {Vec2Array{}, std::nullopt, false};
+std::tuple<Vec2Array, Mat4*, bool> MeshGroup::filterChildren(const std::shared_ptr<Node>& target,
+                                                             const Vec2Array& origVertices,
+                                                             Vec2Array origDeformation,
+                                                             const Mat4* origTransform) {
+    if (traceMeshGroupChainEnabled()) {
+        ++gMeshGroupFilterCallCount[this];
+    }
+    if (!precalculated || !origTransform) return {Vec2Array{}, nullptr, false};
     if (auto deformer = std::dynamic_pointer_cast<Deformer>(target)) {
         if (std::dynamic_pointer_cast<PathDeformer>(deformer)) {
             auto pd = std::dynamic_pointer_cast<PathDeformer>(deformer);
-            if (pd && !pd->physicsEnabled()) return {Vec2Array{}, std::nullopt, false};
+            if (pd && !pd->physicsEnabled()) return {Vec2Array{}, nullptr, false};
         } else if (!std::dynamic_pointer_cast<GridDeformer>(deformer)) {
-            return {Vec2Array{}, std::nullopt, false};
+            return {Vec2Array{}, nullptr, false};
         }
     }
 
     Mat4 centerMatrix = Mat4::multiply(inverseMatrix, *origTransform);
+    const char* traceTarget = meshGroupTargetTraceName();
+    const bool traceThisTarget = traceTarget && target && target->name.find(traceTarget) != std::string::npos;
     Vec2Array centered;
     transformAssign(centered, origVertices, centerMatrix);
     if (dynamic && origDeformation.size()) {
         transformAdd(centered, origDeformation, centerMatrix);
     }
 
-    Vec2Array mapped = centered;
-    auto cx = centered.x;
-    auto cy = centered.y;
-    auto mx = mapped.x;
-    auto my = mapped.y;
+    Vec2Array mapped = centered.dup();
     const float minX = bounds.x;
     const float maxX = bounds.z;
     const float minY = bounds.y;
@@ -292,12 +317,16 @@ std::tuple<Vec2Array, std::optional<Mat4>, bool> MeshGroup::filterChildren(const
     std::size_t maskWidth = static_cast<std::size_t>(std::ceil(bounds.z) - std::floor(bounds.x) + 1);
     std::size_t maskHeight = static_cast<std::size_t>(std::ceil(bounds.w) - std::floor(bounds.y) + 1);
     bool anyChanged = false;
+    std::size_t inBoundsCount = 0;
+    std::size_t triHitCount = 0;
+    float maxLocalDelta = 0.0f;
     for (std::size_t i = 0; i < centered.size(); ++i) {
-        float vx = cx[i];
-        float vy = cy[i];
+        float vx = centered.xAt(i);
+        float vy = centered.yAt(i);
         float outX = vx, outY = vy;
         if (vx >= minX && vx < maxX && vy >= minY && vy < maxY &&
             maskWidth && maskHeight && !bitMask.empty()) {
+            ++inBoundsCount;
             auto localX = static_cast<std::ptrdiff_t>(std::floor(vx - minX));
             auto localY = static_cast<std::ptrdiff_t>(std::floor(vy - minY));
             if (localX >= 0 && localY >= 0) {
@@ -308,31 +337,57 @@ std::tuple<Vec2Array, std::optional<Mat4>, bool> MeshGroup::filterChildren(const
                     if (maskIndex < bitMask.size()) {
                         uint16_t bit = bitMask[maskIndex];
                         int triIndex = bit ? (bit - 1) : -1;
-        if (triIndex >= 0 && static_cast<std::size_t>(triIndex) < triangles.size()) {
-            const auto& m = triangles[triIndex].transformMatrix;
-            float nx = m[0][0] * vx + m[0][1] * vy + m[0][2];
-            float ny = m[1][0] * vx + m[1][1] * vy + m[1][2];
-            outX = nx;
-                            outY = ny;
+                        if (triIndex >= 0 && static_cast<std::size_t>(triIndex) < triangles.size()) {
+                            ++triHitCount;
+                            const auto& m = triangles[triIndex].transformMatrix;
+                            outX = m[0][0] * vx + m[0][1] * vy + m[0][2];
+                            outY = m[1][0] * vx + m[1][1] * vy + m[1][2];
                         }
                     }
                 }
             }
         }
-        mx[i] = outX;
-        my[i] = outY;
+        mapped.xAt(i) = outX;
+        mapped.yAt(i) = outY;
+        const float dx = outX - vx;
+        const float dy = outY - vy;
+        maxLocalDelta = std::max(maxLocalDelta, std::max(std::fabs(dx), std::fabs(dy)));
         if (outX != vx || outY != vy) anyChanged = true;
     }
-    if (!anyChanged) return {origDeformation, std::nullopt, false};
-    Vec2Array offsetLocal = mapped;
+    if (traceMeshGroupEffectEnabled()) {
+        NJCX_DBG_LOG("[nicxlive][MeshGroup][Effect] group=%s(%u) target=%s(%u) verts=%zu inBounds=%zu triHit=%zu anyChanged=%d maxLocalDelta=%.6f precalc=%d triCount=%zu bitMask=%zu\n",
+                     name.c_str(),
+                     uuid,
+                     target ? target->name.c_str() : "<null>",
+                     target ? target->uuid : 0u,
+                     centered.size(),
+                     inBoundsCount,
+                     triHitCount,
+                     anyChanged ? 1 : 0,
+                     maxLocalDelta,
+                     precalculated ? 1 : 0,
+                     triangles.size(),
+                     bitMask.size());
+        if (traceThisTarget && centered.size() > 0) {
+            NJCX_DBG_LOG("[nicxlive][MeshGroup][Target] group=%s target=%s centerM=[%.6f %.6f %.6f %.6f | %.6f %.6f %.6f %.6f | %.6f %.6f %.6f %.6f | %.6f %.6f %.6f %.6f] inM=[%.6f %.6f %.6f %.6f]\n",
+                         name.c_str(),
+                         target->name.c_str(),
+                         centerMatrix[0][0], centerMatrix[0][1], centerMatrix[0][2], centerMatrix[0][3],
+                         centerMatrix[1][0], centerMatrix[1][1], centerMatrix[1][2], centerMatrix[1][3],
+                         centerMatrix[2][0], centerMatrix[2][1], centerMatrix[2][2], centerMatrix[2][3],
+                         centerMatrix[3][0], centerMatrix[3][1], centerMatrix[3][2], centerMatrix[3][3],
+                         centered.xAt(0), centered.yAt(0), mapped.xAt(0), mapped.yAt(0));
+        }
+    }
+    if (!anyChanged) return {origDeformation, nullptr, false};
+    Vec2Array offsetLocal = mapped.dup();
     offsetLocal -= centered;
     Mat4 inv = centerMatrix.inverse();
     inv[0][3] = inv[1][3] = inv[2][3] = 0.0f;
-    Vec2Array out = origDeformation;
-    transformAdd(out, offsetLocal, inv);
+    transformAdd(origDeformation, offsetLocal, inv, offsetLocal.size());
     float maxAbs = 0.0f;
-    for (std::size_t i = 0; i < out.size(); ++i) {
-        maxAbs = std::max(maxAbs, std::max(std::fabs(out.xAt(i)), std::fabs(out.yAt(i))));
+    for (std::size_t i = 0; i < origDeformation.size(); ++i) {
+        maxAbs = std::max(maxAbs, std::max(std::fabs(origDeformation.xAt(i)), std::fabs(origDeformation.yAt(i))));
     }
     if (maxAbs > 10.0f) {
         NJCX_DBG_LOG("[nicxlive][MeshGroup][LargeOffset] node=%s target=%s targetUuid=%u maxAbs=%.6f first=(%.6f,%.6f)\n",
@@ -340,10 +395,10 @@ std::tuple<Vec2Array, std::optional<Mat4>, bool> MeshGroup::filterChildren(const
                      target ? target->name.c_str() : "<null>",
                      target ? target->uuid : 0u,
                      maxAbs,
-                     out.size() ? out.xAt(0) : 0.0f,
-                     out.size() ? out.yAt(0) : 0.0f);
+                     origDeformation.size() ? origDeformation.xAt(0) : 0.0f,
+                     origDeformation.size() ? origDeformation.yAt(0) : 0.0f);
     }
-    return {out, std::nullopt, true};
+    return {origDeformation, nullptr, true};
 }
 
 void MeshGroup::precalculate() {
@@ -385,42 +440,21 @@ void MeshGroup::precalculate() {
         Vec2 p2 = mesh->vertices[i1];
         Vec2 p3 = mesh->vertices[i2];
 
-        Vec2 axis0{p2.x - p1.x, p2.y - p1.y};
-        float axis0len = std::sqrt(axis0.x * axis0.x + axis0.y * axis0.y);
-        if (axis0len != 0.0f) {
-            axis0.x /= axis0len;
-            axis0.y /= axis0len;
-        }
-        Vec2 axis1{p3.x - p1.x, p3.y - p1.y};
-        float axis1len = std::sqrt(axis1.x * axis1.x + axis1.y * axis1.y);
-        if (axis1len != 0.0f) {
-            axis1.x /= axis1len;
-            axis1.y /= axis1len;
-        }
-
-        Vec2 rotated{axis1.x * axis0.x + axis1.y * (-axis0.y), axis1.x * axis0.y + axis1.y * axis0.x};
-        float cosA = rotated.x;
-        float sinA = rotated.y;
+        Mat3 base{};
+        base[0][0] = p2.x - p1.x;
+        base[0][1] = p3.x - p1.x;
+        base[0][2] = p1.x;
+        base[1][0] = p2.y - p1.y;
+        base[1][1] = p3.y - p1.y;
+        base[1][2] = p1.y;
+        base[2][0] = 0.0f;
+        base[2][1] = 0.0f;
+        base[2][2] = 1.0f;
 
         TriangleMapping t{};
-        Mat3 scale{};
-        scale[0][0] = axis0len > 0 ? 1.0f / axis0len : 0.0f;
-        scale[1][1] = axis1len > 0 ? 1.0f / axis1len : 0.0f;
-        Mat3 shear{};
-        shear[0][0] = 1.0f;
-        shear[0][1] = (sinA != 0.0f) ? -cosA / sinA : 0.0f;
-        shear[1][0] = 0.0f;
-        shear[1][1] = (sinA != 0.0f) ? 1.0f / sinA : 0.0f;
-        Mat3 rot{};
-        rot[0][0] = axis0.x;
-        rot[0][1] = axis0.y;
-        rot[1][0] = -axis0.y;
-        rot[1][1] = axis0.x;
-        Mat3 translate{};
-        translate[0][2] = -p1.x;
-        translate[1][2] = -p1.y;
-
-        t.offsetMatrices = scale * shear * rot * translate;
+        if (!invertMat3(base, t.offsetMatrices)) {
+            t.offsetMatrices = Mat3{};
+        }
         triangles.push_back(t);
     }
 
@@ -601,6 +635,7 @@ void MeshGroup::serializeSelfImpl(::nicxlive::core::serde::InochiSerializer& ser
     if (auto dyn = data.get_child_optional("dynamic_deformation")) {
         dynamic = dyn->get_value<bool>();
     }
+    translateChildren = false;
     if (auto tc = data.get_child_optional("translate_children")) {
         translateChildren = tc->get_value<bool>();
     }
@@ -620,28 +655,66 @@ void MeshGroup::setupChildNoRecurse(const std::shared_ptr<Node>& node, bool prep
     Node::FilterHook hook{};
     hook.stage = kMeshGroupFilterStage;
     hook.tag = reinterpret_cast<std::uintptr_t>(this);
-    hook.func = [this](auto t, auto v, auto d, auto mat) {
-                                                     Vec2Array verts; verts.resize(v.size());
-                                                     for (std::size_t i = 0; i < v.size(); ++i) { verts.xAt(i) = v[i].x; verts.yAt(i) = v[i].y; }
-                                                     Vec2Array def; def.resize(d.size());
-                                                     for (std::size_t i = 0; i < d.size(); ++i) { def.xAt(i) = d[i].x; def.yAt(i) = d[i].y; }
-                                                     auto res = filterChildren(t, verts, def, mat);
-                                                     std::vector<Vec2> out;
-                                                     const auto& defOut = std::get<0>(res);
-                                                     out.reserve(defOut.size());
-                                                     for (std::size_t i = 0; i < defOut.size(); ++i) out.push_back(Vec2{defOut.xAt(i), defOut.yAt(i)});
-                                                     return std::make_tuple(out, std::get<1>(res), std::get<2>(res));
-                                                  };
+    hook.func = [this](std::shared_ptr<Node> t,
+                       const Vec2Array& verts,
+                       Vec2Array def,
+                       const Mat4* mat) {
+        return filterChildren(t, verts, def, mat);
+    };
     auto& pre = node->preProcessFilters;
     auto& post = node->postProcessFilters;
     const auto tag = reinterpret_cast<std::uintptr_t>(this);
-    pre.erase(std::remove_if(pre.begin(), pre.end(), [&](const auto& h) { return h.stage == kMeshGroupFilterStage && h.tag == tag; }), pre.end());
-    post.erase(std::remove_if(post.begin(), post.end(), [&](const auto& h) { return h.stage == kMeshGroupFilterStage && h.tag == tag; }), post.end());
+    auto removeTagged = [&](std::vector<Node::FilterHook>& dst) {
+        dst.erase(std::remove_if(dst.begin(), dst.end(), [&](const auto& h) {
+            return h.stage == kMeshGroupFilterStage && h.tag == tag;
+        }), dst.end());
+    };
+    auto upsertTagged = [&](std::vector<Node::FilterHook>& dst) {
+        const bool exists = std::any_of(dst.begin(), dst.end(), [&](const auto& h) {
+            return h.stage == kMeshGroupFilterStage && h.tag == tag;
+        });
+        if (!exists) {
+            if (prepend) {
+                dst.insert(dst.begin(), hook);
+            } else {
+                dst.push_back(hook);
+            }
+        }
+    };
 
-    if (isDeformable && dynamic) {
-        if (prepend) post.insert(post.begin(), hook); else post.push_back(hook);
-    } else if (translateChildren || isDeformable) {
-        if (prepend) pre.insert(pre.begin(), hook); else pre.push_back(hook);
+    if (translateChildren || isDeformable) {
+        if (isDeformable && dynamic) {
+            removeTagged(pre);
+            upsertTagged(post);
+        } else {
+            upsertTagged(pre);
+            removeTagged(post);
+        }
+    } else {
+        removeTagged(pre);
+        removeTagged(post);
+    }
+
+    if (traceMeshGroupChainEnabled()) {
+        std::size_t localPre = 0;
+        std::size_t localPost = 0;
+        for (const auto& h : pre) {
+            if (h.stage == kMeshGroupFilterStage && h.tag == tag) ++localPre;
+        }
+        for (const auto& h : post) {
+            if (h.stage == kMeshGroupFilterStage && h.tag == tag) ++localPost;
+        }
+        NJCX_DBG_LOG("[nicxlive][MeshGroup][SetupChild] group=%s(%u) target=%s(%u) deformable=%d dynamic=%d translateChildren=%d prepend=%d hooks(pre=%zu post=%zu)\n",
+                     name.c_str(),
+                     uuid,
+                     node ? node->name.c_str() : "<null>",
+                     node ? node->uuid : 0u,
+                     isDeformable ? 1 : 0,
+                     dynamic ? 1 : 0,
+                     translateChildren ? 1 : 0,
+                     prepend ? 1 : 0,
+                     localPre,
+                     localPost);
     }
 }
 
@@ -658,10 +731,12 @@ bool MeshGroup::pointInTriangle(const Vec2& p, const Vec2& a, const Vec2& b, con
     auto sign = [](const Vec2& p1, const Vec2& p2, const Vec2& p3) {
         return (p1.x - p3.x) * (p2.y - p3.y) - (p2.x - p3.x) * (p1.y - p3.y);
     };
-    bool b1 = sign(p, a, b) < 0.0f;
-    bool b2 = sign(p, b, c) < 0.0f;
-    bool b3 = sign(p, c, a) < 0.0f;
-    return ((b1 == b2) && (b2 == b3));
+    const float d1 = sign(p, a, b);
+    const float d2 = sign(p, b, c);
+    const float d3 = sign(p, c, a);
+    const bool hasNeg = (d1 < 0.0f) || (d2 < 0.0f) || (d3 < 0.0f);
+    const bool hasPos = (d1 > 0.0f) || (d2 > 0.0f) || (d3 > 0.0f);
+    return !(hasNeg && hasPos);
 }
 
 } // namespace nicxlive::core::nodes

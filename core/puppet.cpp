@@ -207,6 +207,11 @@ void Puppet::update() {
     renderContext.gpuState = RenderGpuState::init();
 
     bool pendingStructure = pendingFrameChanges.structureDirty;
+    NJCX_DBG_LOG("[nicxlive] frameChange pending structure=%d attr=%d force=%d cache=%d\n",
+                 pendingFrameChanges.structureDirty ? 1 : 0,
+                 pendingFrameChanges.attributeDirty ? 1 : 0,
+                 forceFullRebuild ? 1 : 0,
+                 schedulerCacheValid ? 1 : 0);
     if (forceFullRebuild || !schedulerCacheValid || pendingStructure) {
         rebuildRenderTasks(rootNode);
     }
@@ -214,10 +219,16 @@ void Puppet::update() {
     renderScheduler.executeRange(renderContext, TaskOrder::Init, TaskOrder::Parameters);
 
     auto frameChanges = consumeFrameChanges();
+    NJCX_DBG_LOG("[nicxlive] frameChange consumed1 structure=%d attr=%d\n",
+                 frameChanges.structureDirty ? 1 : 0,
+                 frameChanges.attributeDirty ? 1 : 0);
     if (frameChanges.structureDirty) {
         rebuildRenderTasks(rootNode);
         renderScheduler.executeRange(renderContext, TaskOrder::Init, TaskOrder::Parameters);
         auto additional = consumeFrameChanges();
+        NJCX_DBG_LOG("[nicxlive] frameChange consumed2 structure=%d attr=%d\n",
+                     additional.structureDirty ? 1 : 0,
+                     additional.attributeDirty ? 1 : 0);
         frameChanges.attributeDirty = frameChanges.attributeDirty || additional.attributeDirty;
         frameChanges.structureDirty = frameChanges.structureDirty || additional.structureDirty;
     }
@@ -454,6 +465,7 @@ void Puppet::setRootNode(const std::shared_ptr<Node>& node) {
 }
 
 void Puppet::recordNodeChange(nodes::NotifyReason reason) {
+    NJCX_DBG_LOG("[nicxlive] recordNodeChange reason=%d\n", static_cast<int>(reason));
     pendingFrameChanges.mark(reason);
     if (reason == nodes::NotifyReason::StructureChanged) {
         forceFullRebuild = true;
