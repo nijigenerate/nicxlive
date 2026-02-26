@@ -81,6 +81,57 @@ struct SharedBufferSnapshot {
     size_t deformCount;
 };
 
+struct NjgWasmLayout {
+    uint32_t sizeQueued;
+    uint32_t offQueuedPart;
+    uint32_t offQueuedMaskApply;
+    uint32_t offQueuedDynamic;
+    uint32_t offQueuedUsesStencil;
+
+    uint32_t sizePart;
+    uint32_t offPartTextureHandles;
+    uint32_t offPartTextureCount;
+    uint32_t offPartOrigin;
+    uint32_t offPartVertexOffset;
+    uint32_t offPartVertexStride;
+    uint32_t offPartUvOffset;
+    uint32_t offPartUvStride;
+    uint32_t offPartDeformOffset;
+    uint32_t offPartDeformStride;
+    uint32_t offPartIndexHandle;
+    uint32_t offPartIndicesPtr;
+    uint32_t offPartIndexCount;
+    uint32_t offPartVertexCount;
+
+    uint32_t sizeMaskDraw;
+    uint32_t offMaskDrawIndicesPtr;
+    uint32_t offMaskDrawIndexCount;
+    uint32_t offMaskDrawVertexOffset;
+    uint32_t offMaskDrawVertexStride;
+    uint32_t offMaskDrawDeformOffset;
+    uint32_t offMaskDrawDeformStride;
+    uint32_t offMaskDrawIndexHandle;
+    uint32_t offMaskDrawVertexCount;
+
+    uint32_t sizeMaskApply;
+    uint32_t offMaskKind;
+    uint32_t offMaskIsDodge;
+    uint32_t offMaskPartPacket;
+    uint32_t offMaskMaskPacket;
+
+    uint32_t sizeDynamicPass;
+    uint32_t offDynTextures;
+    uint32_t offDynTextureCount;
+    uint32_t offDynStencil;
+    uint32_t offDynScale;
+    uint32_t offDynRotationZ;
+    uint32_t offDynAutoScaled;
+    uint32_t offDynOrigBuffer;
+    uint32_t offDynOrigViewport;
+    uint32_t offDynDrawBufferCount;
+    uint32_t offDynHasStencil;
+};
+
 struct TextureStats {
     size_t created;
     size_t released;
@@ -203,5 +254,6 @@ void njgSetLogCallback(NjgLogFn callback, void* userData);
 void njgFlushCommandBuffer(void* renderer);
 size_t njgGetGcHeapSize();
 TextureStats njgGetTextureStats(void* renderer);
+NjgResult njgGetWasmLayout(NjgWasmLayout* outLayout);
 
 } // extern "C"

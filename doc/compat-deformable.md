@@ -18,11 +18,27 @@
 | `DeformationStack::update` | `refreshDeform()` 呼び出し | 同等に修正済み | ◯ |
 | `mustPropagate` | true | true | ◯ |
 | `updateDeform` | deformation 長を vertices に合わせゼロ初期化 | 同等 | ◯ |
-| `preProcess` | filter適用・override行列・notify | 同等（deformation更新時 sharedDeform dirty を反映） | ◯ |
-| `postProcess(int)` | stage一致filter適用・override行列・notify | 同等（deformation更新時 sharedDeform dirty を反映） | ◯ |
+| `preProcess` | filter適用・override行列・notify | `Vec2Array` を直接 filter へ渡す | ◯ |
+| `postProcess(int)` | stage一致filter適用・override行列・notify | `Vec2Array` を直接 filter へ渡す | ◯ |
 | `remapDeformationBindings` | Puppet 内 deform binding をリマップ | remapOffsets 追加で同等処理 | ◯ |
 | `runBeginTask` | deformStack.preUpdate＋overrideTransform クリア＋super | 同等 | ◯ |
 | `runPreProcessTask` | super 後に deformStack.update | 同等 | ◯ |
 | `runPostTaskImpl` | super 後に updateDeform | 同等 | ◯ |
 | `onDeformPushed` | フック（デフォルト空） | フック（空） | ◯ |
 | `notifyDeformPushed` | onDeformPushed 呼び出し | 同等 | ◯ |
+
+## 行単位差分（フィルタ関連）
+1. `preProcess` filter 呼び出し経路
+`nijilive/source/nijilive/core/nodes/deformable.d:171-179`
+`nicxlive/core/nodes/deformable.cpp:148-159`
+差分: なし（`Vec2Array` を直接渡し、戻りの `Vec2Array` を直接反映）。
+
+2. `postProcess` filter 呼び出し経路
+`nijilive/source/nijilive/core/nodes/deformable.d:192-200`
+`nicxlive/core/nodes/deformable.cpp:169-181`
+差分: なし（`Vec2Array` を直接渡し、戻りの `Vec2Array` を直接反映）。
+
+3. by-value / by-ref セマンティクス
+`nijilive/source/nijilive/core/nodes/deformable.d:173-175`
+`nicxlive/core/nodes/node.hpp:37-43`
+差分: D 側 `Filter` と同じく、C++ 側も `vertices` は `const Vec2Array&`（参照）、`deformation` は `Vec2Array`（値）で統一済み。

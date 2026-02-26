@@ -87,8 +87,8 @@ public:
     struct FilterHook {
         int stage{0};
         std::uintptr_t tag{0};
-        using Func = std::function<std::tuple<std::vector<Vec2>, std::optional<Mat4>, bool>(
-            std::shared_ptr<Node>, const std::vector<Vec2>&, const std::vector<Vec2>&, const Mat4*)>;
+        using Func = std::function<std::tuple<Vec2Array, Mat4*, bool>(
+            std::shared_ptr<Node>, const Vec2Array&, Vec2Array, const Mat4*)>;
         Func func{};
     };
 

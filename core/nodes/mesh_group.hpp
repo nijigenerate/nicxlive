@@ -67,8 +67,8 @@ public:
     void setParent(const std::shared_ptr<Node>& p);
     std::shared_ptr<Node> parentPtr() const;
 
-    void preProcess();
-    void postProcess(int id = 0);
+    void preProcess() override;
+    void postProcess(int id = 0) override;
     void runPreProcessTask(core::RenderContext& ctx) override;
     void runRenderTask(core::RenderContext& ctx) override;
     void draw() override;
@@ -95,10 +95,10 @@ private:
     void precalculate();
     void setupChildNoRecurse(const std::shared_ptr<Node>& node, bool prepend = false);
     void releaseChildNoRecurse(const std::shared_ptr<Node>& node);
-    std::tuple<Vec2Array, std::optional<Mat4>, bool> filterChildren(const std::shared_ptr<Node>& target,
-                                                                    const Vec2Array& origVertices,
-                                                                    const Vec2Array& origDeformation,
-                                                                    const Mat4* origTransform);
+    std::tuple<Vec2Array, Mat4*, bool> filterChildren(const std::shared_ptr<Node>& target,
+                                                      const Vec2Array& origVertices,
+                                                      Vec2Array origDeformation,
+                                                      const Mat4* origTransform);
     static bool pointInTriangle(const Vec2& p, const Vec2& a, const Vec2& b, const Vec2& c);
 };
 

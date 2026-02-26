@@ -4,7 +4,8 @@
 
 | メソッド | D 実装 | C++ 現状 | 互換性評価 |
 | --- | --- | --- | --- |
-| `FilterHook` 同一性 | `(stage, func)` 単位で管理 | `stage + tag` で一意管理（関数同値判定不能なC++事情に対応） | ◯ |
+| `FilterHook` 同一性 | `(stage, func)` 単位で管理 | `stage + tag` で一意管理 | △ |
+| `FilterHook` シグネチャ | `delegate(Node, Vec2Array, Vec2Array, mat4*) -> Tuple!(Vec2Array, mat4*, bool)` | `std::function(... const std::vector<Vec2>&, const std::vector<Vec2>&, const Mat4*) -> tuple<vector<Vec2>, optional<Mat4>, bool>` | ✗ |
 | `serializeSelfImpl` | あり（flags対応） | transform/offset/子/型マップ対応 | ◯ |
 | `serializeSelf` | あり | 同等 | ◯ |
 | `serializePartial` | あり | 同等 | ◯ |
@@ -51,3 +52,19 @@
 - ノードファクトリ／型登録 (`inRegisterNodeType`/`inHasNodeType`/`inInstantiateNode`) をC++側に実装済み。未知型はスキップし、Tmpノードも登録。
 - UUID管理 (`inCreateUUID`/`inUnloadUUID`/`inClearUUIDs`) を実装済み。
 - 残る差分はデバッグ描画バックエンドが未接続な点と、D側にある詳細コメント/DBG呼び出しによる行数増のみ。実装機能としては概ねパリティ達成。
+
+### 行単位差分（フィルタ関連）
+1. `Filter` 型定義
+`nijilive/source/nijilive/core/nodes/node.d:244`
+`nicxlive/core/nodes/node.hpp:90-92`
+差分: D は `Vec2Array/mat4*`、C++ は `std::vector<Vec2>/std::optional<Mat4>`。
+
+2. `preProcess` の filter 入出力型
+`nijilive/source/nijilive/core/nodes/node.d:282-293`
+`nicxlive/core/nodes/node.cpp:216-234`
+差分: D は `Vec2Array localTrans/offsetTrans` をそのまま渡す。C++ は `std::vector<Vec2>` へ変換して渡す。
+
+3. `postProcess` の filter 入出力型
+`nijilive/source/nijilive/core/nodes/node.d:304-317`
+`nicxlive/core/nodes/node.cpp:244-264`
+差分: 上記と同様に C++ 側が `std::vector<Vec2>` 変換経路。

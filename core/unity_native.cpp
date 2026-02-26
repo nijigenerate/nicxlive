@@ -6,6 +6,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <algorithm>
+#include <cstddef>
 #include <exception>
 #include <string>
 #if defined(_WIN32)
@@ -962,6 +963,63 @@ TextureStats njgGetTextureStats(void* renderer) {
     auto it = gRenderers.find(renderer);
     if (it == gRenderers.end()) return TextureStats{0, 0, 0};
     return it->second->stats;
+}
+
+NjgResult njgGetWasmLayout(NjgWasmLayout* outLayout) {
+    if (!outLayout) return NjgResult::InvalidArgument;
+
+    NjgWasmLayout out{};
+    out.sizeQueued = static_cast<uint32_t>(sizeof(NjgQueuedCommand));
+    out.offQueuedPart = static_cast<uint32_t>(offsetof(NjgQueuedCommand, partPacket));
+    out.offQueuedMaskApply = static_cast<uint32_t>(offsetof(NjgQueuedCommand, maskApplyPacket));
+    out.offQueuedDynamic = static_cast<uint32_t>(offsetof(NjgQueuedCommand, dynamicPass));
+    out.offQueuedUsesStencil = static_cast<uint32_t>(offsetof(NjgQueuedCommand, usesStencil));
+
+    out.sizePart = static_cast<uint32_t>(sizeof(NjgPartDrawPacket));
+    out.offPartTextureHandles = static_cast<uint32_t>(offsetof(NjgPartDrawPacket, textureHandles));
+    out.offPartTextureCount = static_cast<uint32_t>(offsetof(NjgPartDrawPacket, textureCount));
+    out.offPartOrigin = static_cast<uint32_t>(offsetof(NjgPartDrawPacket, origin));
+    out.offPartVertexOffset = static_cast<uint32_t>(offsetof(NjgPartDrawPacket, vertexOffset));
+    out.offPartVertexStride = static_cast<uint32_t>(offsetof(NjgPartDrawPacket, vertexAtlasStride));
+    out.offPartUvOffset = static_cast<uint32_t>(offsetof(NjgPartDrawPacket, uvOffset));
+    out.offPartUvStride = static_cast<uint32_t>(offsetof(NjgPartDrawPacket, uvAtlasStride));
+    out.offPartDeformOffset = static_cast<uint32_t>(offsetof(NjgPartDrawPacket, deformOffset));
+    out.offPartDeformStride = static_cast<uint32_t>(offsetof(NjgPartDrawPacket, deformAtlasStride));
+    out.offPartIndexHandle = static_cast<uint32_t>(offsetof(NjgPartDrawPacket, indexHandle));
+    out.offPartIndicesPtr = static_cast<uint32_t>(offsetof(NjgPartDrawPacket, indices));
+    out.offPartIndexCount = static_cast<uint32_t>(offsetof(NjgPartDrawPacket, indexCount));
+    out.offPartVertexCount = static_cast<uint32_t>(offsetof(NjgPartDrawPacket, vertexCount));
+
+    out.sizeMaskDraw = static_cast<uint32_t>(sizeof(NjgMaskDrawPacket));
+    out.offMaskDrawIndicesPtr = static_cast<uint32_t>(offsetof(NjgMaskDrawPacket, indices));
+    out.offMaskDrawIndexCount = static_cast<uint32_t>(offsetof(NjgMaskDrawPacket, indexCount));
+    out.offMaskDrawVertexOffset = static_cast<uint32_t>(offsetof(NjgMaskDrawPacket, vertexOffset));
+    out.offMaskDrawVertexStride = static_cast<uint32_t>(offsetof(NjgMaskDrawPacket, vertexAtlasStride));
+    out.offMaskDrawDeformOffset = static_cast<uint32_t>(offsetof(NjgMaskDrawPacket, deformOffset));
+    out.offMaskDrawDeformStride = static_cast<uint32_t>(offsetof(NjgMaskDrawPacket, deformAtlasStride));
+    out.offMaskDrawIndexHandle = static_cast<uint32_t>(offsetof(NjgMaskDrawPacket, indexHandle));
+    out.offMaskDrawVertexCount = static_cast<uint32_t>(offsetof(NjgMaskDrawPacket, vertexCount));
+
+    out.sizeMaskApply = static_cast<uint32_t>(sizeof(NjgMaskApplyPacket));
+    out.offMaskKind = static_cast<uint32_t>(offsetof(NjgMaskApplyPacket, kind));
+    out.offMaskIsDodge = static_cast<uint32_t>(offsetof(NjgMaskApplyPacket, isDodge));
+    out.offMaskPartPacket = static_cast<uint32_t>(offsetof(NjgMaskApplyPacket, partPacket));
+    out.offMaskMaskPacket = static_cast<uint32_t>(offsetof(NjgMaskApplyPacket, maskPacket));
+
+    out.sizeDynamicPass = static_cast<uint32_t>(sizeof(NjgDynamicCompositePass));
+    out.offDynTextures = static_cast<uint32_t>(offsetof(NjgDynamicCompositePass, textures));
+    out.offDynTextureCount = static_cast<uint32_t>(offsetof(NjgDynamicCompositePass, textureCount));
+    out.offDynStencil = static_cast<uint32_t>(offsetof(NjgDynamicCompositePass, stencil));
+    out.offDynScale = static_cast<uint32_t>(offsetof(NjgDynamicCompositePass, scale));
+    out.offDynRotationZ = static_cast<uint32_t>(offsetof(NjgDynamicCompositePass, rotationZ));
+    out.offDynAutoScaled = static_cast<uint32_t>(offsetof(NjgDynamicCompositePass, autoScaled));
+    out.offDynOrigBuffer = static_cast<uint32_t>(offsetof(NjgDynamicCompositePass, origBuffer));
+    out.offDynOrigViewport = static_cast<uint32_t>(offsetof(NjgDynamicCompositePass, origViewport));
+    out.offDynDrawBufferCount = static_cast<uint32_t>(offsetof(NjgDynamicCompositePass, drawBufferCount));
+    out.offDynHasStencil = static_cast<uint32_t>(offsetof(NjgDynamicCompositePass, hasStencil));
+
+    *outLayout = out;
+    return NjgResult::Ok;
 }
 
 } // extern "C"

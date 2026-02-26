@@ -129,6 +129,7 @@ export class WebGLRenderBackend {
   constructor(gl, opts = {}) {
     this.gl = gl;
     this.debugLog = !!opts.debugLog;
+    this.forceMaskStencil = !!opts.forceMaskStencil;
     this.extAnisotropy = gl.getExtension("EXT_texture_filter_anisotropic")
       || gl.getExtension("MOZ_EXT_texture_filter_anisotropic")
       || gl.getExtension("WEBKIT_EXT_texture_filter_anisotropic");
@@ -138,11 +139,17 @@ export class WebGLRenderBackend {
 
     this.texturesByHandle = new Map();
     this.indexBuffersByHandle = new Map();
+    this.indexBuffersByHash = new Map();
+    this.indexHandleMeta = new Map();
     this.dynamicFramebufferCache = new Map();
 
     this.sharedVertexBuffer = null;
     this.sharedUvBuffer = null;
     this.sharedDeformBuffer = null;
+    this.sharedVertexFloatLength = 0;
+    this.sharedUvFloatLength = 0;
+    this.sharedDeformFloatLength = 0;
+    this.packetValidationWarns = 0;
     this.viewportWidthStack = [];
     this.viewportHeightStack = [];
 
@@ -451,6 +458,11 @@ void main() {
       gl.deleteBuffer(ibo);
     }
     this.indexBuffersByHandle.clear();
+    for (const ibo of this.indexBuffersByHash.values()) {
+      gl.deleteBuffer(ibo);
+    }
+    this.indexBuffersByHash.clear();
+    this.indexHandleMeta.clear();
 
     for (const fbo of this.dynamicFramebufferCache.values()) {
       gl.deleteFramebuffer(fbo);
@@ -1385,20 +1397,115 @@ void main() {
 
   uploadSharedVertexBuffer(data) {
     const gl = this.gl;
+    const a = asFloat32(data);
+    this.sharedVertexFloatLength = a.length;
     gl.bindBuffer(gl.ARRAY_BUFFER, this.sharedVertexBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, asFloat32(data), gl.DYNAMIC_DRAW);
+    gl.bufferData(gl.ARRAY_BUFFER, a, gl.DYNAMIC_DRAW);
   }
 
   uploadSharedUvBuffer(data) {
     const gl = this.gl;
+    const a = asFloat32(data);
+    this.sharedUvFloatLength = a.length;
     gl.bindBuffer(gl.ARRAY_BUFFER, this.sharedUvBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, asFloat32(data), gl.DYNAMIC_DRAW);
+    gl.bufferData(gl.ARRAY_BUFFER, a, gl.DYNAMIC_DRAW);
   }
 
   uploadSharedDeformBuffer(data) {
     const gl = this.gl;
+    const a = asFloat32(data);
+    this.sharedDeformFloatLength = a.length;
     gl.bindBuffer(gl.ARRAY_BUFFER, this.sharedDeformBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, asFloat32(data), gl.DYNAMIC_DRAW);
+    gl.bufferData(gl.ARRAY_BUFFER, a, gl.DYNAMIC_DRAW);
+  }
+
+  _warnPacketValidation(...args) {
+    if (this.packetValidationWarns >= 64) return;
+    this.packetValidationWarns += 1;
+    // eslint-disable-next-line no-console
+    console.warn("[nicx-webgl][packet]", ...args);
+  }
+
+  _indicesForCount(indices, indexCount) {
+    const count = Number(indexCount || 0);
+    if (count <= 0) return new Uint16Array(0);
+    const src = asU16(indices || []);
+    if (src.length < count) return new Uint16Array(0);
+    return src.subarray(0, count);
+  }
+
+  _quickIndexSignature(idx) {
+    let h = 1469598103934665603n;
+    if (!idx.length) return h;
+    const len = idx.length;
+    const picks = [
+      0,
+      Math.floor(len / 7),
+      Math.floor((len * 2) / 7),
+      Math.floor((len * 3) / 7),
+      Math.floor((len * 4) / 7),
+      Math.floor((len * 5) / 7),
+      Math.floor((len * 6) / 7),
+      len - 1,
+    ];
+    for (const p of picks) {
+      h ^= BigInt(idx[p] || 0);
+      h *= 1099511628211n;
+    }
+    return h;
+  }
+
+  _fullIndexHash(idx) {
+    let h = 1469598103934665603n;
+    for (let i = 0; i < idx.length; i += 1) {
+      h ^= BigInt(idx[i] || 0);
+      h *= 1099511628211n;
+    }
+    return h;
+  }
+
+  _validatePartPacketRanges(packet) {
+    const idx = this._indicesForCount(packet.indices, packet.indexCount);
+    if (!idx.length) return false;
+    let maxIndex = 0;
+    for (let i = 0; i < idx.length; i += 1) {
+      if (idx[i] > maxIndex) maxIndex = idx[i];
+    }
+
+    const vertexCount = Number(packet.vertexCount || 0);
+    if (maxIndex >= vertexCount) {
+      this._warnPacketValidation("index out of vertexCount", { maxIndex, vertexCount, indexCount: idx.length });
+      return false;
+    }
+
+    const vOff = Number(packet.vertexOffset || 0);
+    const uvOff = Number(packet.uvOffset || 0);
+    const dOff = Number(packet.deformOffset || 0);
+    const vStride = Number(packet.vertexAtlasStride || 0);
+    const uvStride = Number(packet.uvAtlasStride || 0);
+    const dStride = Number(packet.deformAtlasStride || 0);
+
+    const vNeed0 = vOff + maxIndex;
+    const vNeed1 = vStride + vOff + maxIndex;
+    const uvNeed0 = uvOff + maxIndex;
+    const uvNeed1 = uvStride + uvOff + maxIndex;
+    const dNeed0 = dOff + maxIndex;
+    const dNeed1 = dStride + dOff + maxIndex;
+
+    if (vNeed1 >= this.sharedVertexFloatLength ||
+        uvNeed1 >= this.sharedUvFloatLength ||
+        dNeed1 >= this.sharedDeformFloatLength) {
+      this._warnPacketValidation("soa range overflow", {
+        maxIndex,
+        vertexCount,
+        vNeed0, vNeed1, vLen: this.sharedVertexFloatLength,
+        uvNeed0, uvNeed1, uvLen: this.sharedUvFloatLength,
+        dNeed0, dNeed1, dLen: this.sharedDeformFloatLength,
+      });
+      return false;
+    }
+
+    return true;
   }
 
   createTexture(width, height, channels, _mipLevels, _format, _renderTarget, stencil) {
@@ -1756,18 +1863,39 @@ void main() {
   getOrCreateIboByHandle(indexHandle, indices, indexCount) {
     const gl = this.gl;
     const h = Number(indexHandle || 0);
-    if (!h || !indexCount) return null;
+    if (!indexCount || !indices) return null;
+
+    const idx = this._indicesForCount(indices, indexCount);
+    if (!idx.length) return null;
+
+    if (!h) {
+      const key = `${this._fullIndexHash(idx).toString(16)}:${idx.length}`;
+      let cached = this.indexBuffersByHash.get(key);
+      if (!cached) {
+        cached = gl.createBuffer();
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, cached);
+        gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, idx, gl.DYNAMIC_DRAW);
+        this.indexBuffersByHash.set(key, cached);
+      }
+      return cached;
+    }
+
+    const qsig = this._quickIndexSignature(idx);
+    const meta = this.indexHandleMeta.get(h);
+    if (meta && meta.count === idx.length && meta.qsig === qsig) {
+      const cached = this.indexBuffersByHandle.get(h);
+      if (cached) return cached;
+    }
 
     let ibo = this.indexBuffersByHandle.get(h);
     if (!ibo) {
       ibo = gl.createBuffer();
-      this.indexBuffersByHandle.set(h, ibo);
     }
+    this.indexBuffersByHandle.set(h, ibo);
 
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ibo);
-    if (indices) {
-      gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, asU16(indices), gl.DYNAMIC_DRAW);
-    }
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, idx, gl.DYNAMIC_DRAW);
+    this.indexHandleMeta.set(h, { count: idx.length, qsig });
     return ibo;
   }
 
@@ -1882,6 +2010,7 @@ void main() {
   renderStage(packet, advanced) {
     if (!packet || !packet.indexCount || !packet.vertexCount) return;
     if (!packet.vertexAtlasStride || !packet.uvAtlasStride || !packet.deformAtlasStride) return;
+    if (!this._validatePartPacketRanges(packet)) return;
 
     const ibo = this.getOrCreateIboByHandle(packet.indexHandle, packet.indices, packet.indexCount);
     if (!ibo) return;
@@ -1906,16 +2035,11 @@ void main() {
     if (!albedo) return;
 
     if (this.boundAlbedoHandle !== albedoHandle) {
-      const rtTextures = this._collectColorAttachmentTextures();
       for (let i = 0; i < textureCount; i += 1) {
         const h = Number(packet.textureHandles?.[i] || 0);
         const tex = texturesByHandle.get(h);
         gl.activeTexture(gl.TEXTURE0 + i);
-        if (this.activeRenderTargetHandles.has(h) || (tex?.texture && rtTextures.has(tex.texture))) {
-          gl.bindTexture(gl.TEXTURE_2D, null);
-        } else {
-          gl.bindTexture(gl.TEXTURE_2D, tex ? tex.texture : null);
-        }
+        gl.bindTexture(gl.TEXTURE_2D, tex ? tex.texture : null);
       }
       this.boundAlbedoHandle = albedoHandle;
     }
@@ -2177,7 +2301,7 @@ void main() {
   beginMask(useStencil) {
     const gl = this.gl;
     this.pendingMask = true;
-    this.pendingMaskUsesStencil = !!useStencil;
+    this.pendingMaskUsesStencil = this.forceMaskStencil ? true : !!useStencil;
 
     gl.enable(gl.STENCIL_TEST);
     gl.clearStencil(this.pendingMaskUsesStencil ? 0 : 1);
@@ -2219,6 +2343,7 @@ void main() {
     }
 
     gl.colorMask(true, true, true, true);
+    gl.stencilOp(gl.KEEP, gl.KEEP, gl.KEEP);
   }
 
   _allocTextureHandle() {

@@ -7,21 +7,46 @@
   <style>
     html, body { margin: 0; padding: 0; background: #111; color: #ddd; font-family: monospace; }
     #ui { padding: 8px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-    #cv { width: 100vw; height: calc(100vh - 110px); display: block; }
-    #log { margin: 0; padding: 8px; height: 70px; overflow: auto; white-space: pre-wrap; border-top: 1px solid #333; background: #0b0b0b; }
+    #workspace { display: flex; width: 100vw; height: calc(100vh - 64px); min-height: 480px; }
+    #paramPanel {
+      box-sizing: border-box;
+      width: 360px;
+      min-width: 360px;
+      max-width: 360px;
+      padding: 8px;
+      border-top: 1px solid #333;
+      border-right: 1px solid #333;
+      overflow: auto;
+      background: #101010;
+    }
+    #viewer { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+    .paramRow { display: grid; grid-template-columns: minmax(180px, 260px) 1fr 180px; align-items: center; gap: 8px; margin-bottom: 6px; }
+    .paramRow code { color: #9ad; }
+    .paramVal { color: #9f9; }
+    #cv { flex: 1; width: 100%; min-height: 240px; display: block; }
+    #log { margin: 0; padding: 8px; height: 90px; overflow: auto; white-space: pre-wrap; border-top: 1px solid #333; background: #0b0b0b; }
     button { cursor: pointer; }
+    select { min-width: 320px; background: #181818; color: #ddd; border: 1px solid #444; padding: 4px 6px; }
   </style>
 </head>
 <body>
   <div id="ui">
-    <span>Model: <code>/models/model.inx</code></span>
+    <label>Model</label>
+    <select id="modelSelect"></select>
+    <button id="refreshModels">refresh</button>
     <button id="start">start</button>
+    <button id="stop" disabled>stop</button>
     <label>scale</label>
-    <input id="scale" type="range" min="0.2" max="3.0" step="0.01" value="1.0" />
-    <span id="scaleVal">1.00</span>
+    <input id="scale" type="range" min="0.05" max="2.0" step="0.01" value="0.1" />
+    <span id="scaleVal">0.10</span>
   </div>
-  <canvas id="cv"></canvas>
-  <pre id="log"></pre>
+  <div id="workspace">
+    <div id="paramPanel"></div>
+    <div id="viewer">
+      <canvas id="cv"></canvas>
+      <pre id="log"></pre>
+    </div>
+  </div>
 
   <script>
     // Emscripten module config (nicxlive.js reads global Module).
@@ -35,13 +60,18 @@
 
   <script type="module">
     import { initWebGLBackend, renderCommands, NjgRenderCommandKind, MaskDrawableKind } from "../webgl_backend/webgl_backend.js";
-    const WASM_TEST_VERSION = "wasm-index-2026-02-25-10";
+    const WASM_TEST_VERSION = "wasm-index-2026-02-26-05";
 
     const logEl = document.getElementById("log");
     const canvas = document.getElementById("cv");
     const startBtn = document.getElementById("start");
+    const stopBtn = document.getElementById("stop");
     const scaleInput = document.getElementById("scale");
     const scaleVal = document.getElementById("scaleVal");
+    const modelSelect = document.getElementById("modelSelect");
+    const refreshModelsBtn = document.getElementById("refreshModels");
+    const paramPanel = document.getElementById("paramPanel");
+    let runtimeControl = null;
 
     const K = {
       Ok: 0,
@@ -51,6 +81,8 @@
       CommandQueueView: 8,
       SharedBufferSnapshot: 36,
       OutPtr: 4,
+      SizeNjgParameterInfo: 40,
+      SizePuppetParameterUpdate: 12,
 
       OffQueuedPart: 4,
       OffQueuedMaskApply: 248,
@@ -81,6 +113,15 @@
       OffPartIndexCount: 236,
       OffPartVertexCount: 240,
 
+      OffMaskDrawIndicesPtr: 156,
+      OffMaskDrawIndexCount: 160,
+      OffMaskDrawVertexOffset: 136,
+      OffMaskDrawVertexStride: 140,
+      OffMaskDrawDeformOffset: 144,
+      OffMaskDrawDeformStride: 148,
+      OffMaskDrawIndexHandle: 152,
+      OffMaskDrawVertexCount: 164,
+
       OffMaskKind: 0,
       OffMaskIsDodge: 4,
       OffMaskPartPacket: 8,
@@ -96,6 +137,8 @@
       OffDynOrigViewport: 40,
       OffDynDrawBufferCount: 56,
       OffDynHasStencil: 60,
+
+      SizeWasmLayout: 176,
     };
 
     function log(...args) {
@@ -114,6 +157,38 @@
       return out;
     }
 
+    async function fetchModelList() {
+      const res = await fetch(`/models/__list?t=${Date.now()}`, {
+        cache: "no-store",
+        headers: { "Cache-Control": "no-cache" },
+      });
+      if (!res.ok) {
+        throw new Error(`failed to list models: ${res.status}`);
+      }
+      const body = await res.json();
+      const arr = Array.isArray(body?.models) ? body.models : [];
+      return arr.filter((m) => typeof m === "string");
+    }
+
+    function fillModelSelect(models) {
+      modelSelect.innerHTML = "";
+      for (const m of models) {
+        const opt = document.createElement("option");
+        opt.value = m;
+        opt.textContent = m;
+        modelSelect.appendChild(opt);
+      }
+      if (!models.length) {
+        const opt = document.createElement("option");
+        opt.value = "";
+        opt.textContent = "(no .inx/.inp found)";
+        modelSelect.appendChild(opt);
+      }
+      const defaultPath = "/models/model.inx";
+      const hasDefault = models.includes(defaultPath);
+      modelSelect.value = hasDefault ? defaultPath : (models[0] || "");
+    }
+
     console.log("[wasm-test] version:", WASM_TEST_VERSION);
     log("version:", WASM_TEST_VERSION);
 
@@ -122,6 +197,11 @@
       const f = m[`_${name}`] || m[name];
       if (!f) throw new Error(`missing wasm export: ${name}`);
       return f;
+    }
+
+    function optExport(name) {
+      const m = Module;
+      return m[`_${name}`] || m[name] || null;
     }
 
     function getMalloc() {
@@ -147,6 +227,12 @@
     function readF32(p) { return Module.HEAPF32[p >>> 2]; }
     function readBool(p) { return Module.HEAPU8[p] !== 0; }
 
+    function readCString(ptr, length) {
+      if (!ptr || !length) return "";
+      const bytes = Module.HEAPU8.subarray(ptr, ptr + length);
+      return new TextDecoder().decode(bytes);
+    }
+
     function readMat4(p) {
       const o = p >>> 2;
       return new Float32Array(Module.HEAPF32.subarray(o, o + 16));
@@ -162,11 +248,127 @@
       return [Module.HEAPF32[o], Module.HEAPF32[o + 1], Module.HEAPF32[o + 2]];
     }
 
+    function applyWasmLayout(layoutPtr) {
+      const L = {
+        sizeQueued: readU32(layoutPtr + 0),
+        offQueuedPart: readU32(layoutPtr + 4),
+        offQueuedMaskApply: readU32(layoutPtr + 8),
+        offQueuedDynamic: readU32(layoutPtr + 12),
+        offQueuedUsesStencil: readU32(layoutPtr + 16),
+
+        sizePart: readU32(layoutPtr + 20),
+        offPartTextureHandles: readU32(layoutPtr + 24),
+        offPartTextureCount: readU32(layoutPtr + 28),
+        offPartOrigin: readU32(layoutPtr + 32),
+        offPartVertexOffset: readU32(layoutPtr + 36),
+        offPartVertexStride: readU32(layoutPtr + 40),
+        offPartUvOffset: readU32(layoutPtr + 44),
+        offPartUvStride: readU32(layoutPtr + 48),
+        offPartDeformOffset: readU32(layoutPtr + 52),
+        offPartDeformStride: readU32(layoutPtr + 56),
+        offPartIndexHandle: readU32(layoutPtr + 60),
+        offPartIndicesPtr: readU32(layoutPtr + 64),
+        offPartIndexCount: readU32(layoutPtr + 68),
+        offPartVertexCount: readU32(layoutPtr + 72),
+
+        sizeMaskDraw: readU32(layoutPtr + 76),
+        offMaskDrawIndicesPtr: readU32(layoutPtr + 80),
+        offMaskDrawIndexCount: readU32(layoutPtr + 84),
+        offMaskDrawVertexOffset: readU32(layoutPtr + 88),
+        offMaskDrawVertexStride: readU32(layoutPtr + 92),
+        offMaskDrawDeformOffset: readU32(layoutPtr + 96),
+        offMaskDrawDeformStride: readU32(layoutPtr + 100),
+        offMaskDrawIndexHandle: readU32(layoutPtr + 104),
+        offMaskDrawVertexCount: readU32(layoutPtr + 108),
+
+        sizeMaskApply: readU32(layoutPtr + 112),
+        offMaskKind: readU32(layoutPtr + 116),
+        offMaskIsDodge: readU32(layoutPtr + 120),
+        offMaskPartPacket: readU32(layoutPtr + 124),
+        offMaskMaskPacket: readU32(layoutPtr + 128),
+
+        sizeDynamicPass: readU32(layoutPtr + 132),
+        offDynTextures: readU32(layoutPtr + 136),
+        offDynTextureCount: readU32(layoutPtr + 140),
+        offDynStencil: readU32(layoutPtr + 144),
+        offDynScale: readU32(layoutPtr + 148),
+        offDynRotationZ: readU32(layoutPtr + 152),
+        offDynAutoScaled: readU32(layoutPtr + 156),
+        offDynOrigBuffer: readU32(layoutPtr + 160),
+        offDynOrigViewport: readU32(layoutPtr + 164),
+        offDynDrawBufferCount: readU32(layoutPtr + 168),
+        offDynHasStencil: readU32(layoutPtr + 172),
+      };
+
+      K.SizeQueued = L.sizeQueued;
+      K.OffQueuedPart = L.offQueuedPart;
+      K.OffQueuedMaskApply = L.offQueuedMaskApply;
+      K.OffQueuedDynamic = L.offQueuedDynamic;
+      K.OffQueuedUsesStencil = L.offQueuedUsesStencil;
+
+      K.SizePart = L.sizePart;
+      K.OffPartTextureHandles = L.offPartTextureHandles;
+      K.OffPartTextureCount = L.offPartTextureCount;
+      K.OffPartOrigin = L.offPartOrigin;
+      K.OffPartVertexOffset = L.offPartVertexOffset;
+      K.OffPartVertexStride = L.offPartVertexStride;
+      K.OffPartUvOffset = L.offPartUvOffset;
+      K.OffPartUvStride = L.offPartUvStride;
+      K.OffPartDeformOffset = L.offPartDeformOffset;
+      K.OffPartDeformStride = L.offPartDeformStride;
+      K.OffPartIndexHandle = L.offPartIndexHandle;
+      K.OffPartIndicesPtr = L.offPartIndicesPtr;
+      K.OffPartIndexCount = L.offPartIndexCount;
+      K.OffPartVertexCount = L.offPartVertexCount;
+
+      K.SizeMaskDraw = L.sizeMaskDraw;
+      K.OffMaskDrawIndicesPtr = L.offMaskDrawIndicesPtr;
+      K.OffMaskDrawIndexCount = L.offMaskDrawIndexCount;
+      K.OffMaskDrawVertexOffset = L.offMaskDrawVertexOffset;
+      K.OffMaskDrawVertexStride = L.offMaskDrawVertexStride;
+      K.OffMaskDrawDeformOffset = L.offMaskDrawDeformOffset;
+      K.OffMaskDrawDeformStride = L.offMaskDrawDeformStride;
+      K.OffMaskDrawIndexHandle = L.offMaskDrawIndexHandle;
+      K.OffMaskDrawVertexCount = L.offMaskDrawVertexCount;
+
+      K.SizeMaskApply = L.sizeMaskApply;
+      K.OffMaskKind = L.offMaskKind;
+      K.OffMaskIsDodge = L.offMaskIsDodge;
+      K.OffMaskPartPacket = L.offMaskPartPacket;
+      K.OffMaskMaskPacket = L.offMaskMaskPacket;
+
+      K.SizeDynamicPass = L.sizeDynamicPass;
+      K.OffDynTextures = L.offDynTextures;
+      K.OffDynTextureCount = L.offDynTextureCount;
+      K.OffDynStencil = L.offDynStencil;
+      K.OffDynScale = L.offDynScale;
+      K.OffDynRotationZ = L.offDynRotationZ;
+      K.OffDynAutoScaled = L.offDynAutoScaled;
+      K.OffDynOrigBuffer = L.offDynOrigBuffer;
+      K.OffDynOrigViewport = L.offDynOrigViewport;
+      K.OffDynDrawBufferCount = L.offDynDrawBufferCount;
+      K.OffDynHasStencil = L.offDynHasStencil;
+
+      log("wasm-layout:", L);
+    }
+
+    function decodeIndices(indicesPtr, indexCount, tag) {
+      if (!indexCount) return { indices: null, indexCount: 0 };
+      if (!indicesPtr) {
+        log("WARN", "null indices ptr", tag, "count", indexCount, "-> skip draw");
+        return { indices: null, indexCount: 0 };
+      }
+      return {
+        indices: new Uint16Array(Module.HEAPU16.slice(indicesPtr >>> 1, (indicesPtr >>> 1) + indexCount)),
+        indexCount,
+      };
+    }
+
     function decodePart(ptr) {
       const textureHandles = [readU32(ptr + K.OffPartTextureHandles), readU32(ptr + K.OffPartTextureHandles + 4), readU32(ptr + K.OffPartTextureHandles + 8)];
       const indicesPtr = readU32(ptr + K.OffPartIndicesPtr);
       const indexCount = readU32(ptr + K.OffPartIndexCount);
-      const indices = indexCount ? new Uint16Array(Module.HEAPU16.slice(indicesPtr >>> 1, (indicesPtr >>> 1) + indexCount)) : null;
+      const decoded = decodeIndices(indicesPtr, indexCount, "part");
       return {
         isMask: readBool(ptr + 0),
         renderable: readBool(ptr + 1),
@@ -191,28 +393,28 @@
         deformOffset: readU32(ptr + K.OffPartDeformOffset),
         deformAtlasStride: readU32(ptr + K.OffPartDeformStride),
         indexHandle: readU32(ptr + K.OffPartIndexHandle),
-        indices,
-        indexCount,
+        indices: decoded.indices,
+        indexCount: decoded.indexCount,
         vertexCount: readU32(ptr + K.OffPartVertexCount),
       };
     }
 
     function decodeMaskDraw(ptr) {
-      const indicesPtr = readU32(ptr + 156);
-      const indexCount = readU32(ptr + 160);
-      const indices = indexCount ? new Uint16Array(Module.HEAPU16.slice(indicesPtr >>> 1, (indicesPtr >>> 1) + indexCount)) : null;
+      const indicesPtr = readU32(ptr + K.OffMaskDrawIndicesPtr);
+      const indexCount = readU32(ptr + K.OffMaskDrawIndexCount);
+      const decoded = decodeIndices(indicesPtr, indexCount, "mask");
       return {
         modelMatrix: readMat4(ptr),
         mvp: readMat4(ptr + 64),
         origin: readVec2(ptr + 128),
-        vertexOffset: readU32(ptr + 136),
-        vertexAtlasStride: readU32(ptr + 140),
-        deformOffset: readU32(ptr + 144),
-        deformAtlasStride: readU32(ptr + 148),
-        indexHandle: readU32(ptr + 152),
-        indices,
-        indexCount,
-        vertexCount: readU32(ptr + 164),
+        vertexOffset: readU32(ptr + K.OffMaskDrawVertexOffset),
+        vertexAtlasStride: readU32(ptr + K.OffMaskDrawVertexStride),
+        deformOffset: readU32(ptr + K.OffMaskDrawDeformOffset),
+        deformAtlasStride: readU32(ptr + K.OffMaskDrawDeformStride),
+        indexHandle: readU32(ptr + K.OffMaskDrawIndexHandle),
+        indices: decoded.indices,
+        indexCount: decoded.indexCount,
+        vertexCount: readU32(ptr + K.OffMaskDrawVertexCount),
       };
     }
 
@@ -266,6 +468,166 @@
       return out;
     }
 
+    function maxIndexOf(indices) {
+      if (!indices || !indices.length) return -1;
+      let m = 0;
+      for (let i = 0; i < indices.length; i += 1) {
+        if (indices[i] > m) m = indices[i];
+      }
+      return m;
+    }
+
+    function validateDrawPartRanges(commands, snapshot) {
+      const vLen = snapshot.vertices.data.length | 0;
+      const uvLen = snapshot.uvs.data.length | 0;
+      const dLen = snapshot.deform.data.length | 0;
+      let checked = 0;
+      let bad = 0;
+      let firstBad = null;
+
+      for (let i = 0; i < commands.length; i += 1) {
+        const cmd = commands[i];
+        if (Number(cmd?.kind) !== NjgRenderCommandKind.DrawPart) continue;
+        const p = cmd.partPacket;
+        if (!p || !p.indices || !p.indices.length) continue;
+        checked += 1;
+        const maxIdx = maxIndexOf(p.indices);
+        const needV1 = (p.vertexAtlasStride | 0) + (p.vertexOffset | 0) + maxIdx;
+        const needUv1 = (p.uvAtlasStride | 0) + (p.uvOffset | 0) + maxIdx;
+        const needD1 = (p.deformAtlasStride | 0) + (p.deformOffset | 0) + maxIdx;
+        const outOfRange = needV1 >= vLen || needUv1 >= uvLen || needD1 >= dLen || maxIdx >= (p.vertexCount | 0);
+        if (outOfRange) {
+          bad += 1;
+          if (!firstBad) {
+            firstBad = {
+              cmdIndex: i,
+              maxIdx,
+              vertexCount: p.vertexCount | 0,
+              needV1, vLen,
+              needUv1, uvLen,
+              needD1, dLen,
+              vertexOffset: p.vertexOffset | 0,
+              uvOffset: p.uvOffset | 0,
+              deformOffset: p.deformOffset | 0,
+              vertexAtlasStride: p.vertexAtlasStride | 0,
+              uvAtlasStride: p.uvAtlasStride | 0,
+              deformAtlasStride: p.deformAtlasStride | 0,
+              indexCount: p.indexCount | 0,
+            };
+          }
+        }
+      }
+
+      return { checked, bad, firstBad };
+    }
+
+    function commandKindHistogram(commands) {
+      const hist = {};
+      for (let i = 0; i < commands.length; i += 1) {
+        const k = Number(commands[i]?.kind ?? -1);
+        hist[k] = (hist[k] || 0) + 1;
+      }
+      return hist;
+    }
+
+    function beginMaskStencilStats(commands) {
+      let beginMaskCount = 0;
+      let usesStencilTrue = 0;
+      let usesStencilFalse = 0;
+      for (let i = 0; i < commands.length; i += 1) {
+        const c = commands[i];
+        if (Number(c?.kind) !== NjgRenderCommandKind.BeginMask) continue;
+        beginMaskCount += 1;
+        if (c.usesStencil) usesStencilTrue += 1;
+        else usesStencilFalse += 1;
+      }
+      return { beginMaskCount, usesStencilTrue, usesStencilFalse };
+    }
+
+    function analyzeVertexRanges(commands, snapshot, maxParts = 8) {
+      const vx = snapshot.vertices.data;
+      const dx = snapshot.deform.data;
+      const vLen = vx.length | 0;
+      const dLen = dx.length | 0;
+      let partSeen = 0;
+      let minX = Number.POSITIVE_INFINITY;
+      let maxX = Number.NEGATIVE_INFINITY;
+      let minY = Number.POSITIVE_INFINITY;
+      let maxY = Number.NEGATIVE_INFINITY;
+
+      for (let i = 0; i < commands.length; i += 1) {
+        if (partSeen >= maxParts) break;
+        const cmd = commands[i];
+        if (Number(cmd?.kind) !== NjgRenderCommandKind.DrawPart) continue;
+        const p = cmd.partPacket;
+        if (!p || !p.indices || !p.indices.length) continue;
+        partSeen += 1;
+
+        const vOff = p.vertexOffset | 0;
+        const vStride = p.vertexAtlasStride | 0;
+        const dOff = p.deformOffset | 0;
+        const dStride = p.deformAtlasStride | 0;
+
+        for (let j = 0; j < p.indices.length; j += 1) {
+          const idx = p.indices[j] | 0;
+          const x0 = vOff + idx;
+          const y0 = vStride + vOff + idx;
+          const dx0 = dOff + idx;
+          const dy0 = dStride + dOff + idx;
+          if (x0 < 0 || y0 < 0 || dx0 < 0 || dy0 < 0) continue;
+          if (x0 >= vLen || y0 >= vLen || dx0 >= dLen || dy0 >= dLen) continue;
+          const x = vx[x0] + dx[dx0];
+          const y = vx[y0] + dx[dy0];
+          if (x < minX) minX = x;
+          if (x > maxX) maxX = x;
+          if (y < minY) minY = y;
+          if (y > maxY) maxY = y;
+        }
+      }
+
+      if (!Number.isFinite(minX)) return null;
+      return { partSeen, minX, maxX, minY, maxY };
+    }
+
+    function analyzeDeformUsage(commands, snapshot, maxParts = 32) {
+      const d = snapshot.deform.data;
+      const dLen = d.length | 0;
+      let partSeen = 0;
+      let totalSamples = 0;
+      let nonZeroSamples = 0;
+      let maxAbs = 0.0;
+      for (let i = 0; i < commands.length; i += 1) {
+        if (partSeen >= maxParts) break;
+        const cmd = commands[i];
+        if (Number(cmd?.kind) !== NjgRenderCommandKind.DrawPart) continue;
+        const p = cmd.partPacket;
+        if (!p || !p.indices || !p.indices.length) continue;
+        partSeen += 1;
+        const dOff = p.deformOffset | 0;
+        const dStride = p.deformAtlasStride | 0;
+        for (let j = 0; j < p.indices.length; j += 1) {
+          const idx = p.indices[j] | 0;
+          const dx0 = dOff + idx;
+          const dy0 = dStride + dOff + idx;
+          if (dx0 < 0 || dy0 < 0 || dx0 >= dLen || dy0 >= dLen) continue;
+          const dx = d[dx0];
+          const dy = d[dy0];
+          const a = Math.max(Math.abs(dx), Math.abs(dy));
+          totalSamples += 1;
+          if (a > 1e-6) nonZeroSamples += 1;
+          if (a > maxAbs) maxAbs = a;
+        }
+      }
+      let globalMaxAbs = 0.0;
+      let globalNonZero = 0;
+      for (let i = 0; i < dLen; i += 1) {
+        const a = Math.abs(d[i]);
+        if (a > 1e-6) globalNonZero += 1;
+        if (a > globalMaxAbs) globalMaxAbs = a;
+      }
+      return { partSeen, totalSamples, nonZeroSamples, maxAbs, globalNonZero, globalMaxAbs, deformLen: dLen };
+    }
+
     function decodeSnapshot(ptr) {
       const vPtr = readU32(ptr + 0);
       const vLen = readU32(ptr + 4);
@@ -280,9 +642,86 @@
       };
     }
 
-    async function stageInxToMemfs() {
+    function decodeParameterInfo(base) {
+      const uuid = readU32(base + 0);
+      const isVec2 = readBool(base + 4);
+      const min = readVec2(base + 8);
+      const max = readVec2(base + 16);
+      const defaults = readVec2(base + 24);
+      const namePtr = readU32(base + 32);
+      const nameLen = readU32(base + 36);
+      return { uuid, isVec2, min, max, defaults, name: readCString(namePtr, nameLen) };
+    }
+
+    function createParameterControls(params, onUpdate) {
+      paramPanel.innerHTML = "";
+      if (!params.length) {
+        paramPanel.textContent = "parameters: none";
+        return;
+      }
+      for (const p of params) {
+        const makeRow = (axis, minV, maxV, defV, onInput) => {
+          const row = document.createElement("div");
+          row.className = "paramRow";
+
+          const label = document.createElement("code");
+          label.textContent = `${p.name || "param"} (${p.uuid})${axis ? `.${axis}` : ""}`;
+          row.appendChild(label);
+
+          const input = document.createElement("input");
+          input.type = "range";
+          input.min = Number.isFinite(minV) ? String(minV) : "0";
+          input.max = Number.isFinite(maxV) ? String(maxV) : "1";
+          input.step = "0.001";
+          input.value = Number.isFinite(defV) ? String(defV) : "0";
+          row.appendChild(input);
+
+          const val = document.createElement("span");
+          val.className = "paramVal";
+          val.textContent = `${Number(input.value).toFixed(3)} [${input.min}..${input.max}]`;
+          row.appendChild(val);
+
+          input.addEventListener("input", () => {
+            val.textContent = `${Number(input.value).toFixed(3)} [${input.min}..${input.max}]`;
+            onInput(Number(input.value));
+          });
+
+          paramPanel.appendChild(row);
+          return input;
+        };
+
+        if (p.isVec2) {
+          const initialX = Number(p.defaults[0]);
+          const initialY = Number(p.defaults[1]);
+          const minX = Number(p.min[0]);
+          const maxX = Number(p.max[0]);
+          const minY = Number(p.min[1]);
+          const maxY = Number(p.max[1]);
+          let curX = Number.isFinite(initialX) ? initialX : 0;
+          let curY = Number.isFinite(initialY) ? initialY : 0;
+
+          makeRow("x", minX, maxX, curX, (v) => {
+            curX = v;
+            onUpdate(p, curX, curY);
+          });
+          makeRow("y", minY, maxY, curY, (v) => {
+            curY = v;
+            onUpdate(p, curX, curY);
+          });
+        } else {
+          const min = Number(p.min[0]);
+          const max = Number(p.max[0]);
+          const def = Number(p.defaults[0]);
+          makeRow("", min, max, def, (v) => {
+            onUpdate(p, v, 0.0);
+          });
+        }
+      }
+    }
+
+    async function stageInxToMemfs(modelUrlBase) {
       const srcName = "model.inx";
-      const modelUrl = `/models/model.inx?t=${Date.now()}`;
+      const modelUrl = `${modelUrlBase}${modelUrlBase.includes("?") ? "&" : "?"}t=${Date.now()}`;
       const dst = `/assets/${srcName}`;
       // Always clear stale MEMFS content first. If fetch fails, old model must not remain visible.
       try { Module.FS_unlink && Module.FS_unlink(dst); } catch (_) {}
@@ -344,6 +783,15 @@
       const fnEmitCommands = reqExport("njgEmitCommands");
       const fnGetSharedBuffers = reqExport("njgGetSharedBuffers");
       const fnSetPuppetScale = reqExport("njgSetPuppetScale");
+      const fnGetWasmLayout = reqExport("njgGetWasmLayout");
+      const fnGetParameters = optExport("njgGetParameters");
+      const fnUpdateParameters = optExport("njgUpdateParameters");
+
+      const layoutPtr = getMalloc()(K.SizeWasmLayout);
+      const layoutRes = fnGetWasmLayout(layoutPtr);
+      if (layoutRes === K.Ok) applyWasmLayout(layoutPtr);
+      else log("WARN", "njgGetWasmLayout failed:", layoutRes);
+      free(layoutPtr);
 
       const createTexturePtr = addFunction((w, h, ch, mip, fmt, rt, st, userData) => {
         return backendCallbacks.createTexture(w, h, ch, mip, fmt, !!rt, !!st) >>> 0;
@@ -372,7 +820,9 @@
       const renderer = readU32(outRendererPtr);
       if (!renderer) throw new Error("renderer handle is null");
 
-      const stagedPath = await stageInxToMemfs();
+      const modelUrl = String(modelSelect.value || "").trim();
+      if (!modelUrl) throw new Error("model is not selected");
+      const stagedPath = await stageInxToMemfs(modelUrl);
       log("model staged:", stagedPath);
 
       const outPuppetPtr = getMalloc()(K.OutPtr);
@@ -394,16 +844,66 @@
       const puppet = readU32(outPuppetPtr);
       if (!puppet) throw new Error("puppet handle is null");
 
+      if (fnGetParameters && fnUpdateParameters) {
+        try {
+          const outCountPtr = getMalloc()(K.OutPtr);
+          Module.HEAPU32[outCountPtr >>> 2] = 0;
+          let pr = fnGetParameters(puppet, 0, 0, outCountPtr);
+          if (pr === K.Ok) {
+            const count = readU32(outCountPtr);
+            if (count > 0) {
+              const infoPtr = getMalloc()(count * K.SizeNjgParameterInfo);
+              pr = fnGetParameters(puppet, infoPtr, count, outCountPtr);
+              if (pr === K.Ok) {
+                const params = [];
+                for (let i = 0; i < count; i += 1) {
+                  params.push(decodeParameterInfo(infoPtr + i * K.SizeNjgParameterInfo));
+                }
+                createParameterControls(params, (param, x, y) => {
+                  const up = getMalloc()(K.SizePuppetParameterUpdate);
+                  Module.HEAPU32[(up >>> 2) + 0] = param.uuid >>> 0;
+                  Module.HEAPF32[(up >>> 2) + 1] = x;
+                  Module.HEAPF32[(up >>> 2) + 2] = y;
+                  const rr = fnUpdateParameters(puppet, up, 1);
+                  if (rr !== K.Ok) log("WARN", "njgUpdateParameters failed:", rr, "uuid", param.uuid);
+                  free(up);
+                });
+              } else {
+                log("WARN", "njgGetParameters(list) failed:", pr);
+              }
+              free(infoPtr);
+            } else {
+              paramPanel.textContent = "parameters: none";
+            }
+          } else {
+            log("WARN", "njgGetParameters(count) failed:", pr);
+          }
+          free(outCountPtr);
+        } catch (e) {
+          log("WARN", "parameter UI unavailable:", String(e));
+        }
+      } else {
+        paramPanel.textContent = "parameters: wasm exports not available";
+      }
+
       const frameCfgPtr = getMalloc()(K.FrameConfig);
       const cmdViewPtr = getMalloc()(K.CommandQueueView);
       const snapshotPtr = getMalloc()(K.SharedBufferSnapshot);
 
       let last = performance.now();
       let alive = true;
+      let running = false;
+      let rafId = 0;
       let debugFrame = 0;
       const cleanup = () => {
         if (!alive) return;
         alive = false;
+        running = false;
+        if (rafId) {
+          cancelAnimationFrame(rafId);
+          rafId = 0;
+        }
+        stopBtn.disabled = true;
         try { fnUnloadPuppet(renderer, puppet); } catch (_) {}
         try { fnDestroyRenderer(renderer); } catch (_) {}
         try { fnRtTerm(); } catch (_) {}
@@ -423,7 +923,7 @@
       }
 
       function frame(now) {
-        if (!alive) return;
+        if (!alive || !running) return;
         try {
           resizeCanvas();
 
@@ -467,28 +967,82 @@
           debugFrame += 1;
           if (debugFrame <= 5 || (debugFrame % 60) === 0) {
             const firstKind = commandsCount > 0 ? commands[0]?.kind : -1;
+            const vr = validateDrawPartRanges(commands, snapshot);
+            const hist = commandKindHistogram(commands);
+            const maskStats = beginMaskStencilStats(commands);
+            const vtx = analyzeVertexRanges(commands, snapshot);
+            const dst = analyzeDeformUsage(commands, snapshot);
             log("frame", debugFrame, "cmdCount", commandsCount, "firstKind", firstKind,
               "drawPart", drawPartCount, "v/uv/d", snapshot.vertices.data.length, snapshot.uvs.data.length, snapshot.deform.data.length);
+            log("kinds", hist);
+            log("mask-stats", maskStats);
+            if (vtx) log("vertex-range", vtx);
+            log("deform-stats", dst);
+            if (vr.bad > 0) {
+              log("range-check", "checked", vr.checked, "bad", vr.bad, vr.firstBad);
+            }
           }
 
           renderCommands(glInit, snapshot, { commands });
         } catch (e) {
           log("frame error:", String(e && e.message ? e.message : e));
         }
-        requestAnimationFrame(frame);
+        rafId = requestAnimationFrame(frame);
       }
 
+      const startLoop = () => {
+        if (!alive || running) return;
+        running = true;
+        stopBtn.disabled = false;
+        last = performance.now();
+        rafId = requestAnimationFrame(frame);
+      };
+      const stopLoop = () => {
+        running = false;
+        stopBtn.disabled = true;
+        if (rafId) {
+          cancelAnimationFrame(rafId);
+          rafId = 0;
+        }
+      };
+      stopBtn.addEventListener("click", stopLoop);
+
       log("renderer ready, commands loop started");
-      requestAnimationFrame(frame);
+      startLoop();
+      return { startLoop, stopLoop, cleanup };
     }
 
+    async function refreshModelListUI() {
+      try {
+        const models = await fetchModelList();
+        fillModelSelect(models);
+        log("models listed:", models.length);
+      } catch (e) {
+        fillModelSelect([]);
+        log("WARN", "model list fetch failed:", String(e && e.message ? e.message : e));
+      }
+    }
+
+    refreshModelsBtn.addEventListener("click", () => {
+      refreshModelListUI();
+    });
+
     startBtn.addEventListener("click", () => {
+      if (runtimeControl) {
+        runtimeControl.startLoop();
+        return;
+      }
       startBtn.disabled = true;
-      main().catch((e) => {
+      main().then((ctl) => {
+        runtimeControl = ctl;
+        startBtn.disabled = false;
+      }).catch((e) => {
         log("ERROR:", String(e && e.message ? e.message : e));
         startBtn.disabled = false;
       });
     });
+
+    refreshModelListUI();
   </script>
 </body>
 </html>

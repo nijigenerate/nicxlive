@@ -41,8 +41,8 @@ public:
 
     // Deformer
     DeformResult deformChildren(const std::shared_ptr<Node>& target,
-                                const std::vector<Vec2>& origVertices,
-                                const std::vector<Vec2>& origDeformation,
+                                const Vec2Array& origVertices,
+                                Vec2Array origDeformation,
                                 const Mat4* origTransform) override;
 
     // Node overrides

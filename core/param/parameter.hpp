@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cassert>
 #include <cstdint>
 #include <limits>
 #include <map>
@@ -58,7 +59,9 @@ inline DeformSlot scaleValue(const DeformSlot& in, float scale) {
 
 inline DeformSlot lerpValue(const DeformSlot& a, const DeformSlot& b, float t) {
     if (a.vertexOffsets.size() != b.vertexOffsets.size()) {
-        return t < 0.5f ? a : b;
+        assert(false && "DeformSlot::lerpValue requires equal vertex counts");
+        DeformSlot out = a;
+        return out;
     }
     DeformSlot out;
     out.vertexOffsets = Vec2Array(a.vertexOffsets.size());
@@ -85,23 +88,29 @@ inline DeformSlot scaleValue<DeformSlot>(const DeformSlot& in, float scale) {
 }
 
 inline DeformSlot operator+(const DeformSlot& a, const DeformSlot& b) {
-    DeformSlot out;
-    auto n = std::min(a.vertexOffsets.size(), b.vertexOffsets.size());
-    out.vertexOffsets.resize(n);
-    for (std::size_t i = 0; i < n; ++i) {
-        out.vertexOffsets.xAt(i) = a.vertexOffsets.xAt(i) + b.vertexOffsets.xAt(i);
-        out.vertexOffsets.yAt(i) = a.vertexOffsets.yAt(i) + b.vertexOffsets.yAt(i);
+    if (a.vertexOffsets.size() != b.vertexOffsets.size()) {
+        assert(false && "DeformSlot::operator+ requires equal vertex counts");
+        DeformSlot out = a;
+        return out;
+    }
+    DeformSlot out = a;
+    for (std::size_t i = 0; i < out.vertexOffsets.size(); ++i) {
+        out.vertexOffsets.xAt(i) += b.vertexOffsets.xAt(i);
+        out.vertexOffsets.yAt(i) += b.vertexOffsets.yAt(i);
     }
     return out;
 }
 
 inline DeformSlot operator-(const DeformSlot& a, const DeformSlot& b) {
-    DeformSlot out;
-    auto n = std::min(a.vertexOffsets.size(), b.vertexOffsets.size());
-    out.vertexOffsets.resize(n);
-    for (std::size_t i = 0; i < n; ++i) {
-        out.vertexOffsets.xAt(i) = a.vertexOffsets.xAt(i) - b.vertexOffsets.xAt(i);
-        out.vertexOffsets.yAt(i) = a.vertexOffsets.yAt(i) - b.vertexOffsets.yAt(i);
+    if (a.vertexOffsets.size() != b.vertexOffsets.size()) {
+        assert(false && "DeformSlot::operator- requires equal vertex counts");
+        DeformSlot out = a;
+        return out;
+    }
+    DeformSlot out = a;
+    for (std::size_t i = 0; i < out.vertexOffsets.size(); ++i) {
+        out.vertexOffsets.xAt(i) -= b.vertexOffsets.xAt(i);
+        out.vertexOffsets.yAt(i) -= b.vertexOffsets.yAt(i);
     }
     return out;
 }

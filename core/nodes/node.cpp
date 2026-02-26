@@ -218,19 +218,25 @@ void Node::preProcess() {
         if (auto p = parent.lock()) {
             matrix = overrideTransformMatrix ? *overrideTransformMatrix : p->transform().toMat4();
         }
-        std::vector<Vec2> localTrans{Vec2{localTransform.translation.x, localTransform.translation.y}};
-        std::vector<Vec2> offsetTrans{Vec2{offsetTransform.translation.x, offsetTransform.translation.y}};
+        Vec2Array localTrans;
+        localTrans.resize(1);
+        localTrans.xAt(0) = localTransform.translation.x;
+        localTrans.yAt(0) = localTransform.translation.y;
+        Vec2Array offsetTrans;
+        offsetTrans.resize(1);
+        offsetTrans.xAt(0) = offsetTransform.translation.x;
+        offsetTrans.yAt(0) = offsetTransform.translation.y;
         auto result = hook.func(shared_from_this(), localTrans, offsetTrans, &matrix);
         const auto& newOffset = std::get<0>(result);
         const auto& newMat = std::get<1>(result);
         bool notify = std::get<2>(result);
         if (!newOffset.empty()) {
-            offsetTransform.translation.x = newOffset[0].x;
-            offsetTransform.translation.y = newOffset[0].y;
+            offsetTransform.translation.x = newOffset.xAt(0);
+            offsetTransform.translation.y = newOffset.yAt(0);
             transformChanged();
         }
-        if (newMat.has_value()) {
-            overrideTransformMatrix = newMat;
+        if (newMat != nullptr) {
+            overrideTransformMatrix = *newMat;
         }
         if (notify) {
             notifyChange(shared_from_this());
@@ -247,20 +253,26 @@ void Node::postProcess(int id) {
         if (auto p = parent.lock()) {
             matrix = overrideTransformMatrix ? *overrideTransformMatrix : p->transform().toMat4();
         }
-        std::vector<Vec2> localTrans{Vec2{localTransform.translation.x, localTransform.translation.y}};
-        std::vector<Vec2> offsetTrans{Vec2{offsetTransform.translation.x, offsetTransform.translation.y}};
+        Vec2Array localTrans;
+        localTrans.resize(1);
+        localTrans.xAt(0) = localTransform.translation.x;
+        localTrans.yAt(0) = localTransform.translation.y;
+        Vec2Array offsetTrans;
+        offsetTrans.resize(1);
+        offsetTrans.xAt(0) = offsetTransform.translation.x;
+        offsetTrans.yAt(0) = offsetTransform.translation.y;
         auto result = hook.func(shared_from_this(), localTrans, offsetTrans, &matrix);
         const auto& newOffset = std::get<0>(result);
         const auto& newMat = std::get<1>(result);
         bool notify = std::get<2>(result);
         if (!newOffset.empty()) {
-            offsetTransform.translation.x = newOffset[0].x;
-            offsetTransform.translation.y = newOffset[0].y;
+            offsetTransform.translation.x = newOffset.xAt(0);
+            offsetTransform.translation.y = newOffset.yAt(0);
             transformChanged();
             overrideTransformMatrix = transform().toMat4();
         }
-        if (newMat.has_value()) {
-            overrideTransformMatrix = newMat;
+        if (newMat != nullptr) {
+            overrideTransformMatrix = *newMat;
         }
         if (notify) {
             notifyChange(shared_from_this());

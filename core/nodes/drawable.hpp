@@ -100,15 +100,15 @@ public:
     virtual void drawMeshPoints() const;
     virtual MeshData& getMesh();
 
-    virtual std::tuple<Vec2Array, std::optional<Mat4>, bool> nodeAttachProcessor(const std::shared_ptr<Node>& node,
-                                                                                  const Vec2Array& origVertices,
-                                                                                  const Vec2Array& origDeformation,
-                                                                                  const Mat4* origTransform);
+    virtual std::tuple<Vec2Array, Mat4*, bool> nodeAttachProcessor(const std::shared_ptr<Node>& node,
+                                                                    const Vec2Array& origVertices,
+                                                                    Vec2Array origDeformation,
+                                                                    const Mat4* origTransform);
 
-    virtual std::tuple<Vec2Array, std::optional<Mat4>, bool> weldingProcessor(const std::shared_ptr<Node>& target,
-                                                                              const Vec2Array& origVertices,
-                                                                              const Vec2Array& origDeformation,
-                                                                              const Mat4* origTransform);
+    virtual std::tuple<Vec2Array, Mat4*, bool> weldingProcessor(const std::shared_ptr<Node>& target,
+                                                                const Vec2Array& origVertices,
+                                                                Vec2Array origDeformation,
+                                                                const Mat4* origTransform);
 
     virtual void rebufferMesh(const MeshData& data);
 
@@ -140,6 +140,7 @@ public:
     virtual void build(bool force) override;
     virtual void buildDrawable(bool force);
 
+    bool mustPropagate() const override;
     virtual bool mustPropagateDrawable() const;
 
     virtual void fillDrawPacket(const Node& header, PartDrawPacket& packet, bool isMask) const;
