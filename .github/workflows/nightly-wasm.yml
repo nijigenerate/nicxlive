@@ -22,6 +22,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libboost-dev
+
       - name: Setup Emscripten SDK
         uses: mymindstorm/setup-emsdk@v14
         with:
