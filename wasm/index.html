@@ -20,9 +20,53 @@
       background: #101010;
     }
     #viewer { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-    .paramRow { display: grid; grid-template-columns: minmax(180px, 260px) 1fr 180px; align-items: center; gap: 8px; margin-bottom: 6px; }
+    .paramRow {
+      display: grid;
+      grid-template-columns: minmax(160px, 220px) 1fr 130px;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
     .paramRow code { color: #9ad; }
     .paramVal { color: #9f9; }
+    .paramRow2D {
+      display: grid;
+      grid-template-columns: minmax(160px, 220px) 1fr 130px;
+      align-items: start;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+    .paramCtrl {
+      width: 120px;
+      justify-self: start;
+    }
+    .xyPad {
+      width: 120px;
+      height: 120px;
+      border: 1px solid #444;
+      background:
+        linear-gradient(#0000 49%, #333 50%, #0000 51%),
+        linear-gradient(90deg, #0000 49%, #333 50%, #0000 51%),
+        #151515;
+      position: relative;
+      touch-action: none;
+      cursor: crosshair;
+      user-select: none;
+    }
+    .xyDot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #9f9;
+      border: 1px solid #071;
+      position: absolute;
+      transform: translate(-50%, -50%);
+      pointer-events: none;
+    }
+    .paramSlider {
+      width: 120px;
+      accent-color: #6fd18b;
+    }
     #cv { flex: 1; width: 100%; min-height: 240px; display: block; }
     #log { display: none; }
     button { cursor: pointer; }
@@ -60,7 +104,7 @@
       createNicxWasmCodec,
       createNicxWasmBindings,
     } from "../webgl_backend/webgl_backend.js";
-    const WASM_TEST_VERSION = "wasm-index-2026-02-28-17";
+    const WASM_TEST_VERSION = "wasm-index-2026-02-28-20";
     const WASM_TEST_LOG_ENABLED = false;
 
     const logEl = document.getElementById("log");
@@ -151,38 +195,113 @@
     }
 
     function createParameterControls(params, onChange) {
+      const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
+      const num = (v, fallback) => (Number.isFinite(v) ? v : fallback);
       paramPanel.innerHTML = "";
       if (!Array.isArray(params) || params.length === 0) {
         paramPanel.textContent = "parameters: none";
         return;
       }
       for (const p of params) {
+        const minX = num(p?.min?.[0], -1);
+        const minY = num(p?.min?.[1], -1);
+        const maxX = num(p?.max?.[0], 1);
+        const maxY = num(p?.max?.[1], 1);
+        const defX = clamp(num(p?.defaults?.[0], 0), minX, maxX);
+        const defY = clamp(num(p?.defaults?.[1], 0), minY, maxY);
+        const isVec2 = !!p?.isVec2 && (maxY !== minY);
+
+        if (isVec2) {
+          const row = document.createElement("div");
+          row.className = "paramRow2D";
+
+          const nameEl = document.createElement("code");
+          nameEl.textContent = `${p.name || "param"} (${p.uuid >>> 0})`;
+
+          const pad = document.createElement("div");
+          pad.className = "xyPad";
+          const ctrl = document.createElement("div");
+          ctrl.className = "paramCtrl";
+          const dot = document.createElement("div");
+          dot.className = "xyDot";
+          pad.appendChild(dot);
+          ctrl.appendChild(pad);
+
+          const valueEl = document.createElement("span");
+          valueEl.className = "paramVal";
+
+          let curX = defX;
+          let curY = defY;
+
+          const updateDotAndLabel = () => {
+            const tx = (curX - minX) / Math.max(1e-6, (maxX - minX));
+            const ty = (curY - minY) / Math.max(1e-6, (maxY - minY));
+            dot.style.left = `${(tx * 100).toFixed(3)}%`;
+            dot.style.top = `${((1 - ty) * 100).toFixed(3)}%`;
+            valueEl.textContent = `X:${curX.toFixed(3)} Y:${curY.toFixed(3)}`;
+          };
+
+          const updateFromClient = (clientX, clientY, emit) => {
+            const rect = pad.getBoundingClientRect();
+            const lx = clamp(clientX - rect.left, 0, rect.width);
+            const ly = clamp(clientY - rect.top, 0, rect.height);
+            const tx = rect.width > 0 ? (lx / rect.width) : 0;
+            const ty = rect.height > 0 ? (ly / rect.height) : 0;
+            curX = clamp(minX + tx * (maxX - minX), minX, maxX);
+            curY = clamp(minY + (1 - ty) * (maxY - minY), minY, maxY);
+            updateDotAndLabel();
+            if (emit) onChange(p, curX, curY);
+          };
+
+          pad.addEventListener("pointerdown", (ev) => {
+            if (pad.setPointerCapture) pad.setPointerCapture(ev.pointerId);
+            updateFromClient(ev.clientX, ev.clientY, true);
+          });
+          pad.addEventListener("pointermove", (ev) => {
+            if (!(ev.buttons & 1)) return;
+            updateFromClient(ev.clientX, ev.clientY, true);
+          });
+          pad.addEventListener("pointerup", (ev) => {
+            updateFromClient(ev.clientX, ev.clientY, true);
+            if (pad.releasePointerCapture) {
+              try { pad.releasePointerCapture(ev.pointerId); } catch (_) {}
+            }
+          });
+          pad.addEventListener("pointercancel", (ev) => {
+            if (pad.releasePointerCapture) {
+              try { pad.releasePointerCapture(ev.pointerId); } catch (_) {}
+            }
+          });
+
+          updateDotAndLabel();
+          onChange(p, curX, curY);
+
+          row.appendChild(nameEl);
+          row.appendChild(ctrl);
+          row.appendChild(valueEl);
+          paramPanel.appendChild(row);
+          continue;
+        }
+
         const row = document.createElement("div");
         row.className = "paramRow";
-
         const nameEl = document.createElement("code");
         nameEl.textContent = `${p.name || "param"} (${p.uuid >>> 0})`;
-
         const slider = document.createElement("input");
         slider.type = "range";
-        const min = Number.isFinite(p.minX) ? p.minX : -1;
-        const max = Number.isFinite(p.maxX) ? p.maxX : 1;
-        const val = Number.isFinite(p.defX) ? p.defX : 0;
-        slider.min = String(min);
-        slider.max = String(max);
+        slider.className = "paramSlider paramCtrl";
+        slider.min = String(minX);
+        slider.max = String(maxX);
         slider.step = "0.001";
-        slider.value = String(Math.max(min, Math.min(max, val)));
-
+        slider.value = String(defX);
         const valueEl = document.createElement("span");
         valueEl.className = "paramVal";
-        valueEl.textContent = Number(slider.value).toFixed(3);
-
+        valueEl.textContent = `X:${defX.toFixed(3)}`;
         slider.addEventListener("input", () => {
-          const x = Number(slider.value);
-          valueEl.textContent = x.toFixed(3);
-          onChange(p, x, Number.isFinite(p.defY) ? p.defY : 0);
+          const x = clamp(Number(slider.value), minX, maxX);
+          valueEl.textContent = `X:${x.toFixed(3)}`;
+          onChange(p, x, defY);
         });
-
         row.appendChild(nameEl);
         row.appendChild(slider);
         row.appendChild(valueEl);
