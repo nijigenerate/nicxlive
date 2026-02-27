@@ -45,6 +45,7 @@ jobs:
         run: |
           emcmake cmake -S . -B build-wasm-nightly \
             -DBUILD_WASM=ON \
+            -DNICXLIVE_BUILD_SHARED=OFF \
             -DBoost_NO_BOOST_CMAKE=ON \
             -DBoost_INCLUDE_DIR="${RUNNER_TEMP}/boost-headers" \
             -DCMAKE_BUILD_TYPE=Release
