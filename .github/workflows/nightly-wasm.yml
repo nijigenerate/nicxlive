@@ -1,0 +1,59 @@
+name: Nightly WASM Build
+
+on:
+  schedule:
+    # Daily at 02:00 UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly-wasm-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-wasm:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Emscripten SDK
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: latest
+
+      - name: Verify toolchain
+        run: |
+          emcc -v
+          emcmake --version
+          cmake --version
+
+      - name: Configure (WASM)
+        run: |
+          emcmake cmake -S . -B build-wasm-nightly \
+            -DBUILD_WASM=ON \
+            -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build (WASM)
+        run: cmake --build build-wasm-nightly -j
+
+      - name: Collect artifacts
+        run: |
+          mkdir -p out/wasm
+          cp -v build-wasm-nightly/nicxlive.js out/wasm/
+          cp -v build-wasm-nightly/nicxlive.wasm out/wasm/
+          if [ -f build-wasm-nightly/nicxlive.data ]; then cp -v build-wasm-nightly/nicxlive.data out/wasm/; fi
+          if [ -f build-wasm-nightly/nicxlive.worker.js ]; then cp -v build-wasm-nightly/nicxlive.worker.js out/wasm/; fi
+
+      - name: Upload nightly artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nicxlive-wasm-nightly
+          path: out/wasm
+          if-no-files-found: error
+          retention-days: 14
