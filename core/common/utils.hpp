@@ -85,12 +85,13 @@ inline void transformAssign(Vec2Array& dst, const Vec2Array& src, const nodes::M
 }
 
 inline void transformAdd(Vec2Array& dst, const Vec2Array& src, const nodes::Mat4& mat) {
-    if (dst.size() < src.size()) dst.resize(src.size());
+    if (dst.size() == 0 || src.size() == 0) return;
+    const std::size_t len = std::min(dst.size(), src.size());
     const float m00 = mat[0][0];
     const float m01 = mat[0][1];
     const float m10 = mat[1][0];
     const float m11 = mat[1][1];
-    for (std::size_t i = 0; i < src.size(); ++i) {
+    for (std::size_t i = 0; i < len; ++i) {
         auto sv = src.at(i);
         auto dv = dst.at(i);
         dst.set(i, nodes::Vec2{
@@ -101,12 +102,14 @@ inline void transformAdd(Vec2Array& dst, const Vec2Array& src, const nodes::Mat4
 }
 
 inline void transformAdd(Vec2Array& dst, const Vec2Array& src, const nodes::Mat4& mat, std::size_t count) {
-    if (dst.size() < count) dst.resize(count);
+    if (dst.size() == 0 || src.size() == 0) return;
+    const std::size_t len = std::min(count, std::min(dst.size(), src.size()));
+    if (len == 0) return;
     const float m00 = mat[0][0];
     const float m01 = mat[0][1];
     const float m10 = mat[1][0];
     const float m11 = mat[1][1];
-    for (std::size_t i = 0; i < count && i < src.size(); ++i) {
+    for (std::size_t i = 0; i < len; ++i) {
         auto sv = src.at(i);
         auto dv = dst.at(i);
         dst.set(i, nodes::Vec2{

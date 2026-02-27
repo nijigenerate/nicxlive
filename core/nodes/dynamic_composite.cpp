@@ -5,6 +5,9 @@ namespace nicxlive::core::nodes {
 DynamicComposite::DynamicComposite(const MeshData& data, uint32_t uuidVal) : Projectable() {
     *mesh = data;
     if (uuidVal != 0) uuid = uuidVal;
+    // D parity: when explicit mesh data is provided, DynamicComposite should
+    // not stay in auto-resized mode.
+    autoResizedMesh = data.vertices.empty();
 }
 
 const std::string& DynamicComposite::typeId() const {
