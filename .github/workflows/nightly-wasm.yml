@@ -30,7 +30,7 @@ jobs:
       - name: Verify toolchain
         run: |
           emcc -v
-          emcmake --version
+          emcmake cmake --version
           cmake --version
 
       - name: Configure (WASM)
