@@ -25,7 +25,8 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libboost-dev
+          sudo apt-get install -y libboost-all-dev
+          test -f /usr/include/boost/version.hpp
 
       - name: Setup Emscripten SDK
         uses: mymindstorm/setup-emsdk@v14
@@ -42,6 +43,8 @@ jobs:
         run: |
           emcmake cmake -S . -B build-wasm-nightly \
             -DBUILD_WASM=ON \
+            -DBoost_NO_BOOST_CMAKE=ON \
+            -DBoost_INCLUDE_DIR=/usr/include \
             -DCMAKE_BUILD_TYPE=Release
 
       - name: Build (WASM)
