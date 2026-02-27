@@ -24,6 +24,30 @@ bool traceSharedEnabled() {
     return enabled != 0;
 }
 
+bool traceDrawMapEnabled() {
+    static int enabled = -1;
+    if (enabled >= 0) return enabled != 0;
+    const char* v = std::getenv("NJCX_TRACE_DRAWPART_MAP");
+    if (!v) {
+        enabled = 0;
+        return false;
+    }
+    enabled = (std::strcmp(v, "1") == 0 || std::strcmp(v, "true") == 0 || std::strcmp(v, "TRUE") == 0) ? 1 : 0;
+    return enabled != 0;
+}
+
+int traceDrawMapMaxFrames() {
+    static int parsed = 0;
+    static int value = 1;
+    if (parsed) return value;
+    parsed = 1;
+    const char* v = std::getenv("NJCX_TRACE_DRAWPART_MAP_FRAMES");
+    if (!v) return value;
+    int out = std::atoi(v);
+    if (out > 0) value = out;
+    return value;
+}
+
 uint64_t hashVec2Array(const ::nicxlive::core::nodes::Vec2Array& arr) {
     constexpr uint64_t kOffset = 1469598103934665603ull;
     constexpr uint64_t kPrime = 1099511628211ull;
@@ -48,6 +72,7 @@ uint64_t hashVec2Array(const ::nicxlive::core::nodes::Vec2Array& arr) {
 QueueCommandEmitter::QueueCommandEmitter(const std::shared_ptr<QueueRenderBackend>& backend) : backend_(backend) {}
 
 void QueueCommandEmitter::beginFrame(RenderBackend* backend, RenderGpuState& state) {
+    static int frameIndex = 0;
     activeBackend_ = backend;
     statePtr_ = &state;
     state = RenderGpuState::init();
@@ -60,6 +85,10 @@ void QueueCommandEmitter::beginFrame(RenderBackend* backend, RenderGpuState& sta
     if (backend_) {
         backend_->queue.clear();
     }
+    if (traceDrawMapEnabled()) {
+        NJCX_DBG_LOG("[nicxlive][drawmap] begin frame=%d\n", frameIndex);
+    }
+    frameIndex++;
     uploadSharedBuffers();
 }
 
@@ -129,6 +158,38 @@ void QueueCommandEmitter::endMask() {
 }
 
 void QueueCommandEmitter::drawPartPacket(const nodes::PartDrawPacket& packet) {
+    if (traceDrawMapEnabled() && backend_) {
+        static int frameCounter = 0;
+        if (backend_->queue.empty()) {
+            frameCounter++;
+        }
+        if (frameCounter <= traceDrawMapMaxFrames()) {
+            const auto idx = backend_->queue.size();
+            auto node = packet.node.lock();
+            const char* nodeName = node ? node->name.c_str() : "<expired>";
+            const unsigned nodeUuid = node ? node->uuid : 0u;
+            float d0x = 0.0f;
+            float d0y = 0.0f;
+            if (packet.deformation.size() > 0) {
+                d0x = packet.deformation.xAt(0);
+                d0y = packet.deformation.yAt(0);
+            }
+            NJCX_DBG_LOG(
+                "[nicxlive][drawmap] cmd=%zu node=%s(%u) tex0=%u vo=%u uo=%u do=%u vtx=%u idx=%u d0=(%g,%g)\n",
+                idx,
+                nodeName,
+                nodeUuid,
+                packet.textureUUIDs[0],
+                packet.vertexOffset,
+                packet.uvOffset,
+                packet.deformOffset,
+                packet.vertexCount,
+                packet.indexCount,
+                d0x,
+                d0y
+            );
+        }
+    }
     QueuedCommand cmd{};
     cmd.kind = RenderCommandKind::DrawPart;
     cmd.partPacket = packet;
@@ -247,4 +308,3 @@ void QueueCommandEmitter::uploadSharedBuffers() {
 }
 
 } // namespace nicxlive::core::render
-

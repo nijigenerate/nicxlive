@@ -432,7 +432,7 @@ std::tuple<Vec2Array, Mat4*, bool> Drawable::nodeAttachProcessor(const std::shar
                                                                                Vec2Array origDeformation,
                                                                                const Mat4* origTransform) {
     bool changed = false;
-    if (!node || mesh->indices.size() < 3) return {origDeformation, nullptr, false};
+    if (!node || mesh->indices.size() < 3) return {Vec2Array{}, nullptr, false};
     Mat4 inv = Mat4::inverse(transform().toMat4());
     Vec3 localNode = inv.transformPoint(Vec3{node->transform().translation.x, node->transform().translation.y, 0});
     Vec2 nodeOrigin{localNode.x, localNode.y};
@@ -441,7 +441,7 @@ std::tuple<Vec2Array, Mat4*, bool> Drawable::nodeAttachProcessor(const std::shar
     std::array<std::size_t, 3> tri{};
     if (triIt == attachedIndex.end()) {
         auto triFound = findSurroundingTriangle(nodeOrigin, static_cast<const MeshData&>(*mesh));
-        if (!triFound) return {origDeformation, nullptr, false};
+        if (!triFound) return {Vec2Array{}, nullptr, false};
         tri = *triFound;
         attachedIndex[node->uuid] = tri;
     } else {
@@ -451,7 +451,7 @@ std::tuple<Vec2Array, Mat4*, bool> Drawable::nodeAttachProcessor(const std::shar
     Vec2 targetPrime{};
     float rotVert = 0.0f, rotHorz = 0.0f;
     if (!calculateTransformInTriangle(*mesh, tri, deformation, nodeOrigin, targetPrime, rotVert, rotHorz)) {
-        return {origDeformation, nullptr, false};
+        return {Vec2Array{}, nullptr, false};
     }
     Vec2 delta{targetPrime.x - nodeOrigin.x, targetPrime.y - nodeOrigin.y};
     node->setValue("transform.t.x", delta.x);

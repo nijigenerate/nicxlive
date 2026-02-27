@@ -8,6 +8,13 @@
 namespace nicxlive::core::nodes {
 namespace {
 std::size_t gProjectableFrameCounter = 0;
+bool traceDynamicMatrixEnabled() {
+    static int cached = -1;
+    if (cached >= 0) return cached != 0;
+    const char* v = std::getenv("NJCX_TRACE_DYNAMIC_MATRIX");
+    cached = (v && v[0] != '\0' && v[0] != '0') ? 1 : 0;
+    return cached != 0;
+}
 }
 
 std::size_t advanceProjectableFrame() {
@@ -117,17 +124,17 @@ Transform Projectable::fullTransform() const {
     if (lockToRootValue()) {
         if (auto pup = puppetRef()) {
             if (auto root = pup->root) {
-                return base.calcOffset(root->localTransform);
+                return base * root->localTransform;
             }
-            return base.calcOffset(Transform{Vec3{0.0f, 0.0f, 0.0f}});
+            return base * Transform{Vec3{0.0f, 0.0f, 0.0f}};
         }
         return base;
     }
     if (auto p = parentPtr()) {
         if (auto proj = std::dynamic_pointer_cast<Projectable>(p)) {
-            return base.calcOffset(proj->fullTransform());
+            return base * proj->fullTransform();
         }
-        return base.calcOffset(p->transform());
+        return base * p->transform();
     }
     return base;
 }
@@ -631,11 +638,25 @@ void Projectable::dynamicRenderBegin(core::RenderContext& ctx) {
     Mat4 childBasis = Mat4::multiply(translate, Mat4::inverse(transform().toMat4()));
     queuedOffscreenParts.clear();
 
+    const bool traceDynamicMatrix = traceDynamicMatrixEnabled();
     for (auto& p : subParts) {
         if (!p) continue;
         if (std::dynamic_pointer_cast<Mask>(p)) continue;
         Mat4 childMatrix = Mat4::multiply(correction, p->transform().toMat4());
         Mat4 finalMatrix = Mat4::multiply(childBasis, childMatrix);
+        if (traceDynamicMatrix) {
+            NJCX_DBG_LOG(
+                "[nicxlive][dyn-mat] self=%s(%u) child=%s(%u) "
+                "toff=(%.3f,%.3f) selfT=(%.3f,%.3f) "
+                "childM.t=(%.3f,%.3f) final.t=(%.3f,%.3f) final.m00=%.6f m01=%.6f m10=%.6f m11=%.6f\n",
+                name.c_str(), uuid,
+                p->name.c_str(), p->uuid,
+                textureOffset.x, textureOffset.y,
+                transform().translation.x, transform().translation.y,
+                childMatrix[0][3], childMatrix[1][3],
+                finalMatrix[0][3], finalMatrix[1][3],
+                finalMatrix[0][0], finalMatrix[0][1], finalMatrix[1][0], finalMatrix[1][1]);
+        }
         p->setOffscreenModelMatrix(finalMatrix);
         if (auto dynChild = std::dynamic_pointer_cast<Projectable>(p)) {
             NJCX_DBG_LOG("[nicxlive] proj.nestedOffscreen parent=%s(%u) child=%s(%u) type=%s\n",
