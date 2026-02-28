@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: nightly-wasm-${{ github.ref }}
@@ -68,3 +68,43 @@ jobs:
           path: out/wasm
           if-no-files-found: error
           retention-days: 14
+
+      - name: Move nightly tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -f nightly
+          git push origin refs/tags/nightly --force
+
+      - name: Build release file list
+        id: release_files
+        run: |
+          files=()
+          for f in nicxlive.js nicxlive.wasm nicxlive.data nicxlive.worker.js; do
+            p="out/wasm/${f}"
+            if [ -f "${p}" ]; then
+              files+=("${p}")
+            fi
+          done
+
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "No release files found under out/wasm" >&2
+            exit 1
+          fi
+
+          {
+            echo "files<<EOF"
+            printf '%s\n' "${files[@]}"
+            echo "EOF"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Publish nightly release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: nightly
+          name: Nightly WASM Build
+          prerelease: true
+          make_latest: false
+          files: ${{ steps.release_files.outputs.files }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
