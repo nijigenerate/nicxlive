@@ -71,12 +71,15 @@
     #log { display: none; }
     button { cursor: pointer; }
     select { min-width: 320px; background: #181818; color: #ddd; border: 1px solid #444; padding: 4px 6px; }
+    #modelUrlInput { min-width: 320px; background: #181818; color: #ddd; border: 1px solid #444; padding: 4px 6px; }
+    #modelUrlInput:disabled { opacity: 0.5; }
   </style>
 </head>
 <body>
   <div id="ui">
     <label>Model</label>
     <select id="modelSelect"></select>
+    <input id="modelUrlInput" type="text" placeholder="https://.../model.inx or /models/model.inx" disabled />
     <button id="refreshModels">refresh</button>
     <button id="start">start</button>
     <button id="stop" disabled>stop</button>
@@ -104,8 +107,9 @@
       createNicxWasmCodec,
       createNicxWasmBindings,
     } from "../webgl_backend/webgl_backend.js";
-    const WASM_TEST_VERSION = "wasm-index-2026-02-28-20";
+    const WASM_TEST_VERSION = "wasm-index-2026-02-28-22";
     const WASM_TEST_LOG_ENABLED = false;
+    const CUSTOM_MODEL_VALUE = "__custom_url__";
 
     const logEl = document.getElementById("log");
     const canvas = document.getElementById("cv");
@@ -114,6 +118,7 @@
     const scaleInput = document.getElementById("scale");
     const scaleVal = document.getElementById("scaleVal");
     const modelSelect = document.getElementById("modelSelect");
+    const modelUrlInput = document.getElementById("modelUrlInput");
     const refreshModelsBtn = document.getElementById("refreshModels");
     const paramPanel = document.getElementById("paramPanel");
     let Module = null;
@@ -158,23 +163,70 @@
       return arr.filter((m) => typeof m === "string");
     }
 
-    function fillModelSelect(models) {
+    function normalizeManifestModels(raw) {
+      const source = Array.isArray(raw)
+        ? raw
+        : (Array.isArray(raw?.models) ? raw.models : null);
+      const mappedSource = source || (raw?.models && typeof raw.models === "object"
+        ? Object.entries(raw.models).map(([name, url]) => ({ name, url }))
+        : []);
+      const out = [];
+      for (const item of mappedSource) {
+        if (typeof item === "string") {
+          out.push({ name: item, url: item });
+          continue;
+        }
+        if (!item || typeof item !== "object") continue;
+        const url = String(item.url ?? item.path ?? item.model ?? "").trim();
+        if (!url) continue;
+        const name = String(item.name ?? item.title ?? item.label ?? url).trim();
+        out.push({ name: name || url, url });
+      }
+      return out;
+    }
+
+    async function fetchManifestModels() {
+      const res = await fetch(`manifest.json?t=${Date.now()}`, {
+        cache: "no-store",
+        headers: { "Cache-Control": "no-cache" },
+      });
+      if (res.status === 404) return null;
+      if (!res.ok) throw new Error(`failed to fetch manifest.json: ${res.status}`);
+      return normalizeManifestModels(await res.json());
+    }
+
+    function updateCustomUrlInputState() {
+      const custom = modelSelect.value === CUSTOM_MODEL_VALUE;
+      modelUrlInput.disabled = !custom;
+      if (custom) modelUrlInput.focus();
+    }
+
+    function fillModelSelect(entries) {
       modelSelect.innerHTML = "";
-      for (const m of models) {
+      for (const entry of entries) {
         const opt = document.createElement("option");
-        opt.value = m;
-        opt.textContent = m;
+        opt.value = entry.url;
+        opt.textContent = entry.name;
         modelSelect.appendChild(opt);
       }
-      if (!models.length) {
-        const opt = document.createElement("option");
-        opt.value = "";
-        opt.textContent = "(no .inx/.inp found)";
-        modelSelect.appendChild(opt);
+      const customOpt = document.createElement("option");
+      customOpt.value = CUSTOM_MODEL_VALUE;
+      customOpt.textContent = "(Custom URL...)";
+      modelSelect.appendChild(customOpt);
+
+      modelSelect.value = entries.length ? entries[0].url : CUSTOM_MODEL_VALUE;
+      updateCustomUrlInputState();
+    }
+
+    function resolveSelectedModelUrl() {
+      const selected = String(modelSelect.value || "").trim();
+      if (selected === CUSTOM_MODEL_VALUE) {
+        const custom = String(modelUrlInput.value || "").trim();
+        if (!custom) throw new Error("custom model URL is empty");
+        return custom;
       }
-      const defaultPath = "/models/model.inx";
-      const hasDefault = models.includes(defaultPath);
-      modelSelect.value = hasDefault ? defaultPath : (models[0] || "");
+      if (!selected) throw new Error("model is not selected");
+      return selected;
     }
 
     if (WASM_TEST_LOG_ENABLED) {
@@ -354,8 +406,7 @@
       const renderer = readU32(outRendererPtr);
       if (!renderer) throw new Error("renderer handle is null");
 
-      const modelUrl = String(modelSelect.value || "").trim();
-      if (!modelUrl) throw new Error("model is not selected");
+      const modelUrl = resolveSelectedModelUrl();
       const stagedPath = await codec.stageInxToMemfs(modelUrl);
       log("model staged:", stagedPath);
 
@@ -377,6 +428,11 @@
       if (lr !== codec.layout.Ok) throw new Error(`njgLoadPuppet failed: ${lr}`);
       const puppet = readU32(outPuppetPtr);
       if (!puppet) throw new Error("puppet handle is null");
+
+      // Stabilize physics right after load: advance with tiny fixed steps.
+      for (let i = 0; i < 24; i += 1) {
+        apis.fnTickPuppet(puppet, 1.0 / 120.0);
+      }
 
       if (apis.fnGetParameters && apis.fnUpdateParameters) {
         try {
@@ -429,6 +485,7 @@
       let running = false;
       let rafId = 0;
       let debugFrame = 0;
+      let physicsAccum = 0.0;
       let panX = 0.0;
       let panY = 0.0;
       let dragging = false;
@@ -527,7 +584,7 @@
         try {
           resizeCanvas();
 
-          const dt = Math.min(0.05, Math.max(0.0, (now - last) / 1000.0));
+          const dt = Math.min(0.10, Math.max(0.0, (now - last) / 1000.0));
           last = now;
 
           applyPanScale();
@@ -540,7 +597,20 @@
             requestAnimationFrame(frame);
             return;
           }
-          apis.fnTickPuppet(puppet, dt);
+          // Physics-friendly fixed stepping to avoid violent oscillation after load
+          // or when the frame interval spikes.
+          const fixedStep = 1.0 / 120.0;
+          const maxSubSteps = 8;
+          physicsAccum = Math.min(physicsAccum + dt, fixedStep * maxSubSteps);
+          let steps = 0;
+          while (physicsAccum >= fixedStep && steps < maxSubSteps) {
+            apis.fnTickPuppet(puppet, fixedStep);
+            physicsAccum -= fixedStep;
+            steps += 1;
+          }
+          if (steps === 0) {
+            apis.fnTickPuppet(puppet, Math.min(dt, fixedStep));
+          }
 
           if (apis.fnEmitCommands(renderer, cmdViewPtr) !== codec.layout.Ok) {
             log("njgEmitCommands failed");
@@ -600,9 +670,16 @@
 
     async function refreshModelListUI() {
       try {
+        const manifestModels = await fetchManifestModels();
+        if (manifestModels && manifestModels.length > 0) {
+          fillModelSelect(manifestModels);
+          log("manifest models listed:", manifestModels.length);
+          return;
+        }
         const models = await fetchModelList();
-        fillModelSelect(models);
-        log("models listed:", models.length);
+        const entries = models.map((m) => ({ name: m, url: m }));
+        fillModelSelect(entries);
+        log("models listed:", entries.length);
       } catch (e) {
         fillModelSelect([]);
         log("WARN", "model list fetch failed:", String(e && e.message ? e.message : e));
@@ -640,6 +717,20 @@
     });
 
     modelSelect.addEventListener("change", () => {
+      updateCustomUrlInputState();
+      if (modelSelect.value === CUSTOM_MODEL_VALUE && !String(modelUrlInput.value || "").trim()) return;
+      launchSelectedModel({ forceReload: true });
+    });
+    modelUrlInput.addEventListener("change", () => {
+      if (modelSelect.value !== CUSTOM_MODEL_VALUE) return;
+      if (!String(modelUrlInput.value || "").trim()) return;
+      launchSelectedModel({ forceReload: true });
+    });
+    modelUrlInput.addEventListener("keydown", (ev) => {
+      if (ev.key !== "Enter") return;
+      if (modelSelect.value !== CUSTOM_MODEL_VALUE) return;
+      ev.preventDefault();
+      if (!String(modelUrlInput.value || "").trim()) return;
       launchSelectedModel({ forceReload: true });
     });
 
