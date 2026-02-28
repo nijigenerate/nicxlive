@@ -1,0 +1,12 @@
+{
+  "models": [
+    {
+      "name": "Display Name 1",
+      "url": "/models/your-model-1.inx"
+    },
+    {
+      "name": "Display Name 2",
+      "url": "https://example.com/path/to/your-model-2.inp"
+    }
+  ]
+}
