@@ -2,6 +2,9 @@
 
 `nic☒live` is a straight C++ port of the D-based `nijilive` library. It aims to mirror the original node graph and rendering behavior as closely as possible, while documenting compatibility gaps.
 
+## Live Demo
+- WASM/WebGL sample: <https://pub-681295a74302457bbc68d86467905d4f.r2.dev/wasm/index.html>
+
 ## Goals
 - Implement full compatibility with `nijilive` in C++ (node graph + render behavior)
 - Serve as a drop-in native library for the Unity plugin (replace D-based plugin)
