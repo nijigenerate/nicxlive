@@ -4,7 +4,7 @@
 
 ## Live Demo
 - WASM/WebGL sample: <https://pub-681295a74302457bbc68d86467905d4f.r2.dev/wasm/index.html>
-<img width="2556" height="1388" alt="image" src="https://github.com/user-attachments/assets/222f8590-9a35-43dc-a515-4646eb76c2fa" />
+<img width="1609" height="1361" alt="image" src="https://github.com/user-attachments/assets/af62e206-d50b-4919-830f-a9a5a152d69f" />
 
 ## Goals
 - Implement full compatibility with `nijilive` in C++ (node graph + render behavior)
