@@ -166,7 +166,7 @@ export class WebGLRenderBackend {
     this.clearColor = [0, 0, 0, 0];
     this.sceneAmbientLight = [0, 0, 0, 0];
 
-    this.boundAlbedoHandle = 0;
+    this.boundTextureKey = "";
     this.postProcessingStack = [];
     this.thumbnailGridEnabled = !!opts.thumbnailGrid;
     this.sceneVAO = null;
@@ -209,6 +209,8 @@ export class WebGLRenderBackend {
     this.debugThumbMvpLoc = null;
     this.debugThumbVao = null;
     this.debugThumbQuadVbo = null;
+    this.feedbackReadFbo = null;
+    this.feedbackReadTextures = [];
 
     this._buildShaders();
     this.initializeRenderer();
@@ -247,9 +249,18 @@ uniform sampler2D albedo;
 uniform float opacity;
 uniform vec3 multColor;
 uniform vec3 screenColor;
+uniform int wrapAlbedo;
 layout(location=0) out vec4 outAlbedo;
+vec4 sampleWrap(sampler2D tex, vec2 uv, int wrapMode) {
+  if (wrapMode == 0) {
+    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
+      return vec4(0.0);
+    }
+  }
+  return texture(tex, uv);
+}
 void main() {
-  vec4 texColor = texture(albedo, vUV);
+  vec4 texColor = sampleWrap(albedo, vUV, wrapAlbedo);
   vec3 screenOut = vec3(1.0) - ((vec3(1.0) - texColor.xyz) * (vec3(1.0) - (screenColor * texColor.a)));
   outAlbedo = vec4(screenOut.xyz, texColor.a) * vec4(multColor.xyz, 1.0) * opacity;
 }`;
@@ -264,15 +275,26 @@ uniform float opacity;
 uniform vec3 multColor;
 uniform vec3 screenColor;
 uniform float emissionStrength;
+uniform int wrapAlbedo;
+uniform int wrapEmissive;
+uniform int wrapBump;
 layout(location=1) out vec4 outEmissive;
 layout(location=2) out vec4 outBump;
 vec4 screen(vec3 tcol, float a) {
   return vec4(vec3(1.0) - ((vec3(1.0) - tcol) * (vec3(1.0) - (screenColor * a))), a);
 }
+vec4 sampleWrap(sampler2D tex, vec2 uv, int wrapMode) {
+  if (wrapMode == 0) {
+    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
+      return vec4(0.0);
+    }
+  }
+  return texture(tex, uv);
+}
 void main() {
-  vec4 texColor = texture(albedo, vUV);
-  vec4 emiColor = texture(emissive, vUV);
-  vec4 bmpColor = texture(bumpmap, vUV);
+  vec4 texColor = sampleWrap(albedo, vUV, wrapAlbedo);
+  vec4 emiColor = sampleWrap(emissive, vUV, wrapEmissive);
+  vec4 bmpColor = sampleWrap(bumpmap, vUV, wrapBump);
   vec4 mult = vec4(multColor.xyz, 1.0);
   vec4 emissionOut = screen(emiColor.xyz, texColor.a) * mult * emissionStrength;
   outEmissive = emissionOut * texColor.a;
@@ -289,16 +311,27 @@ uniform float opacity;
 uniform vec3 multColor;
 uniform vec3 screenColor;
 uniform float emissionStrength;
+uniform int wrapAlbedo;
+uniform int wrapEmissive;
+uniform int wrapBump;
 layout(location=0) out vec4 outAlbedo;
 layout(location=1) out vec4 outEmissive;
 layout(location=2) out vec4 outBump;
 vec4 screen(vec3 tcol, float a) {
   return vec4(vec3(1.0) - ((vec3(1.0) - tcol) * (vec3(1.0) - (screenColor * a))), a);
 }
+vec4 sampleWrap(sampler2D tex, vec2 uv, int wrapMode) {
+  if (wrapMode == 0) {
+    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
+      return vec4(0.0);
+    }
+  }
+  return texture(tex, uv);
+}
 void main() {
-  vec4 texColor = texture(albedo, vUV);
-  vec4 emiColor = texture(emissive, vUV);
-  vec4 bmpColor = texture(bumpmap, vUV);
+  vec4 texColor = sampleWrap(albedo, vUV, wrapAlbedo);
+  vec4 emiColor = sampleWrap(emissive, vUV, wrapEmissive);
+  vec4 bmpColor = sampleWrap(bumpmap, vUV, wrapBump);
   vec4 mult = vec4(multColor.xyz, 1.0);
   vec4 albedoOut = screen(texColor.xyz, texColor.a) * mult;
   vec4 emissionOut = screen(emiColor.xyz, texColor.a) * mult * emissionStrength;
@@ -312,9 +345,18 @@ precision highp float;
 in vec2 vUV;
 uniform sampler2D tex;
 uniform float threshold;
+uniform int wrapTex;
 out vec4 outColor;
+vec4 sampleWrap(sampler2D t, vec2 uv, int wrapMode) {
+  if (wrapMode == 0) {
+    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
+      return vec4(0.0);
+    }
+  }
+  return texture(t, uv);
+}
 void main() {
-  vec4 color = texture(tex, vUV);
+  vec4 color = sampleWrap(tex, vUV, wrapTex);
   if (color.a <= threshold) discard;
   outColor = vec4(1.0, 1.0, 1.0, 1.0);
 }`;
@@ -394,6 +436,7 @@ void main() {
       offset: gl.getUniformLocation(this.partMaskShader, "offset"),
       threshold: gl.getUniformLocation(this.partMaskShader, "threshold"),
       tex: gl.getUniformLocation(this.partMaskShader, "tex"),
+      wrapTex: gl.getUniformLocation(this.partMaskShader, "wrapTex"),
     };
 
     this.uMask = {
@@ -424,6 +467,9 @@ void main() {
       albedo: gl.getUniformLocation(program, "albedo"),
       emissive: gl.getUniformLocation(program, "emissive"),
       bump: gl.getUniformLocation(program, "bumpmap"),
+      wrapAlbedo: gl.getUniformLocation(program, "wrapAlbedo"),
+      wrapEmissive: gl.getUniformLocation(program, "wrapEmissive"),
+      wrapBump: gl.getUniformLocation(program, "wrapBump"),
       emissionStrength: gl.getUniformLocation(program, "emissionStrength"),
     };
   }
@@ -508,6 +554,11 @@ void main() {
     if (this.debugVbo) gl.deleteBuffer(this.debugVbo);
     if (this.debugIbo) gl.deleteBuffer(this.debugIbo);
     if (this.debugVao) gl.deleteVertexArray(this.debugVao);
+    if (this.feedbackReadFbo) gl.deleteFramebuffer(this.feedbackReadFbo);
+    for (const tex of this.feedbackReadTextures) {
+      gl.deleteTexture(tex);
+    }
+    this.feedbackReadTextures = [];
   }
 
   setViewport(width, height) {
@@ -558,6 +609,50 @@ void main() {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, width | 0, height | 0, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
     return tex;
+  }
+
+  _allocFeedbackReadTexture(width, height) {
+    const gl = this.gl;
+    const tex = this.feedbackReadTextures.pop() || gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, width | 0, height | 0, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    return tex;
+  }
+
+  _releaseFeedbackReadTexture(tex) {
+    if (!tex) return;
+    this.feedbackReadTextures.push(tex);
+  }
+
+  _snapshotTextureForRead(textureHandle) {
+    const gl = this.gl;
+    const src = this.texturesByHandle.get(Number(textureHandle || 0));
+    if (!src?.texture || !src.width || !src.height) return null;
+
+    if (!this.feedbackReadFbo) this.feedbackReadFbo = gl.createFramebuffer();
+    const prevDraw = gl.getParameter(gl.DRAW_FRAMEBUFFER_BINDING);
+    const prevRead = gl.getParameter(gl.READ_FRAMEBUFFER_BINDING);
+    const prevActiveTex = gl.getParameter(gl.ACTIVE_TEXTURE);
+    const prevTex2D = gl.getParameter(gl.TEXTURE_BINDING_2D);
+
+    const copyTex = this._allocFeedbackReadTexture(src.width, src.height);
+
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, this.feedbackReadFbo);
+    gl.framebufferTexture2D(gl.READ_FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, src.texture, 0);
+    gl.readBuffer(gl.COLOR_ATTACHMENT0);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, copyTex);
+    gl.copyTexSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 0, 0, src.width | 0, src.height | 0);
+
+    gl.activeTexture(prevActiveTex);
+    gl.bindTexture(gl.TEXTURE_2D, prevTex2D);
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, prevRead);
+    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, prevDraw);
+    return copyTex;
   }
 
   _makeStencilTarget(width, height) {
@@ -638,7 +733,7 @@ void main() {
   beginScene() {
     const gl = this.gl;
     this._ensureSceneQuad();
-    this.boundAlbedoHandle = 0;
+    this.boundTextureKey = "";
     gl.bindVertexArray(this.sceneVAO);
     gl.enable(gl.BLEND);
     if (typeof gl.enablei === "function") {
@@ -1535,7 +1630,15 @@ void main() {
     }
 
     const handle = this._allocTextureHandle();
-    this.texturesByHandle.set(handle, { texture, width, height, channels, stencil: !!stencil });
+    this.texturesByHandle.set(handle, {
+      texture,
+      width,
+      height,
+      channels,
+      stencil: !!stencil,
+      wrapping: Wrapping.Clamp,
+      filtering: Filtering.Linear,
+    });
     return handle;
   }
 
@@ -1649,6 +1752,7 @@ void main() {
     const magFilter = linear ? gl.LINEAR : gl.NEAREST;
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, minFilter);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, magFilter);
+    e.filtering = Number(filtering);
   }
 
   applyTextureWrapping(handle, wrapping) {
@@ -1670,6 +1774,7 @@ void main() {
       const pname = this.extTextureBorderClamp.TEXTURE_BORDER_COLOR_EXT;
       if (pname) gl.texParameterfv(gl.TEXTURE_2D, pname, new Float32Array([0, 0, 0, 0]));
     }
+    e.wrapping = Number(wrapping);
   }
 
   applyTextureAnisotropy(handle, value) {
@@ -2002,6 +2107,15 @@ void main() {
     if (u.albedo) gl.uniform1i(u.albedo, 0);
     if (u.emissive) gl.uniform1i(u.emissive, 1);
     if (u.bump) gl.uniform1i(u.bump, 2);
+    const h0 = Number(packet.textureHandles?.[0] || 0);
+    const h1 = Number(packet.textureHandles?.[1] || 0);
+    const h2 = Number(packet.textureHandles?.[2] || 0);
+    const t0 = this.texturesByHandle.get(h0);
+    const t1 = this.texturesByHandle.get(h1);
+    const t2 = this.texturesByHandle.get(h2);
+    if (u.wrapAlbedo) gl.uniform1i(u.wrapAlbedo, Number(t0?.wrapping ?? Wrapping.Clamp));
+    if (u.wrapEmissive) gl.uniform1i(u.wrapEmissive, Number(t1?.wrapping ?? Wrapping.Clamp));
+    if (u.wrapBump) gl.uniform1i(u.wrapBump, Number(t2?.wrapping ?? Wrapping.Clamp));
 
     if (stage === 0) this.applyBlendMode(Number(packet.blendingMode || 0), false);
     else this.applyBlendMode(Number(packet.blendingMode || 0), true);
@@ -2034,14 +2148,23 @@ void main() {
     const albedo = texturesByHandle.get(albedoHandle);
     if (!albedo) return;
 
-    if (this.boundAlbedoHandle !== albedoHandle) {
+    const activeDyn = this.activeDynamicPasses.length
+      ? this.activeDynamicPasses[this.activeDynamicPasses.length - 1]
+      : null;
+    const readbackTexturesByHandle = activeDyn?.readbackTexturesByHandle || null;
+    const textureKey = `${Number(packet.textureHandles?.[0] || 0)}:${Number(packet.textureHandles?.[1] || 0)}:${Number(packet.textureHandles?.[2] || 0)}:${textureCount}`;
+    if (this.boundTextureKey !== textureKey) {
       for (let i = 0; i < textureCount; i += 1) {
         const h = Number(packet.textureHandles?.[i] || 0);
+        let overrideTex = null;
+        if (readbackTexturesByHandle && readbackTexturesByHandle.has(h)) {
+          overrideTex = readbackTexturesByHandle.get(h);
+        }
         const tex = texturesByHandle.get(h);
         gl.activeTexture(gl.TEXTURE0 + i);
-        gl.bindTexture(gl.TEXTURE_2D, tex ? tex.texture : null);
+        gl.bindTexture(gl.TEXTURE_2D, overrideTex || (tex ? tex.texture : null));
       }
-      this.boundAlbedoHandle = albedoHandle;
+      this.boundTextureKey = textureKey;
     }
 
     if (packet.isMask) {
@@ -2053,6 +2176,7 @@ void main() {
       gl.uniform2f(this.uPartMask.offset, origin[0] || 0, origin[1] || 0);
       gl.uniform1f(this.uPartMask.threshold, Number(packet.maskThreshold ?? 0.5));
       gl.uniform1i(this.uPartMask.tex, 0);
+      gl.uniform1i(this.uPartMask.wrapTex, Number(albedo.wrapping ?? Wrapping.Clamp));
       gl.blendEquation(gl.FUNC_ADD);
       gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
       this.renderStage(packet, false);
@@ -2169,14 +2293,22 @@ void main() {
     pass.origViewport = [prevViewport[0], prevViewport[1], prevViewport[2], prevViewport[3]];
     const prevHandleSet = new Set(this.activeRenderTargetHandles);
 
-    this.activeDynamicPasses.push({ prevBuffer, prevViewport, pass, prevHandleSet });
+    const readbackTexturesByHandle = new Map();
+    for (let i = 0; i < pass.surface.textureCount; i += 1) {
+      const h = Number(pass.surface.textureHandles[i] || 0);
+      if (!h) continue;
+      const copyTex = this._snapshotTextureForRead(h);
+      if (copyTex) readbackTexturesByHandle.set(h, copyTex);
+    }
+
+    this.activeDynamicPasses.push({ prevBuffer, prevViewport, pass, prevHandleSet, readbackTexturesByHandle });
     this.activeRenderTargetHandleStack.push(prevHandleSet);
     this.activeRenderTargetHandles = new Set();
     for (let i = 0; i < pass.surface.textureCount; i += 1) {
       const h = Number(pass.surface.textureHandles[i] || 0);
       if (h) this.activeRenderTargetHandles.add(h);
     }
-    this.boundAlbedoHandle = 0;
+    this.boundTextureKey = "";
 
     gl.bindFramebuffer(gl.FRAMEBUFFER, pass.surface.framebuffer);
 
@@ -2211,7 +2343,13 @@ void main() {
     this.popViewport();
     this.activeRenderTargetHandles = st.prevHandleSet || new Set();
     if (this.activeRenderTargetHandleStack.length) this.activeRenderTargetHandleStack.pop();
-    this.boundAlbedoHandle = 0;
+    if (st.readbackTexturesByHandle) {
+      for (const tex of st.readbackTexturesByHandle.values()) {
+        this._releaseFeedbackReadTexture(tex);
+      }
+      st.readbackTexturesByHandle.clear();
+    }
+    this.boundTextureKey = "";
     if (vp && vp.length === 4) {
       gl.viewport(vp[0], vp[1], vp[2], vp[3]);
     }
