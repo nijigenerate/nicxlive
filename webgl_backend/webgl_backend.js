@@ -2137,8 +2137,8 @@ void main() {
     }
   }
 
-  drawPartPacket(packet, texturesByHandle = this.texturesByHandle) {
-    if (!packet || !packet.renderable || !packet.indexCount || !packet.vertexCount) return;
+  drawPartPacket(packet, texturesByHandle = this.texturesByHandle, forceForMask = false) {
+    if (!packet || (!forceForMask && !packet.renderable) || !packet.indexCount || !packet.vertexCount) return;
 
     const gl = this.gl;
     const textureCount = Math.min(Number(packet.textureCount || 0), 3);
@@ -2475,7 +2475,8 @@ void main() {
     gl.stencilMask(0xff);
 
     if (Number(packet.kind) === MaskDrawableKind.Part) {
-      this.drawPartPacket(packet.partPacket, texturesByHandle);
+      // Match nijilive behavior: mask source Part is allowed even when renderable=false.
+      this.drawPartPacket(packet.partPacket, texturesByHandle, true);
     } else {
       this.executeMaskPacket(packet.maskPacket);
     }
