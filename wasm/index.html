@@ -86,6 +86,8 @@
     <label>scale</label>
     <input id="scale" type="range" min="0.05" max="2.0" step="0.01" value="0.15" />
     <span id="scaleVal">0.15</span>
+    <label for="bgColor">bg</label>
+    <input id="bgColor" type="color" value="#111111" />
   </div>
   <div id="workspace">
     <div id="paramPanel"></div>
@@ -117,6 +119,7 @@
     const stopBtn = document.getElementById("stop");
     const scaleInput = document.getElementById("scale");
     const scaleVal = document.getElementById("scaleVal");
+    const bgColorInput = document.getElementById("bgColor");
     const modelSelect = document.getElementById("modelSelect");
     const modelUrlInput = document.getElementById("modelUrlInput");
     const refreshModelsBtn = document.getElementById("refreshModels");
@@ -369,6 +372,18 @@
 
       const glInit = initWebGLBackend(canvas, { debugLog: false });
       const backendCallbacks = glInit.backend.createUnityResourceCallbacks();
+      const applyBackgroundColor = () => {
+        const hex = String(bgColorInput?.value || "#111111");
+        const m = /^#?([0-9a-fA-F]{6})$/.exec(hex);
+        if (!m) return;
+        const rgb = parseInt(m[1], 16);
+        const r = ((rgb >>> 16) & 0xff) / 255.0;
+        const g = ((rgb >>> 8) & 0xff) / 255.0;
+        const b = (rgb & 0xff) / 255.0;
+        glInit.backend.setClearColor(r, g, b, 1.0);
+      };
+      applyBackgroundColor();
+      bgColorInput?.addEventListener("input", applyBackgroundColor);
 
       const addFunction = Module.addFunction;
       if (!addFunction) throw new Error("addFunction is missing. Rebuild wasm with exported runtime method addFunction.");
@@ -490,6 +505,7 @@
         if (!alive) return;
         alive = false;
         running = false;
+        bgColorInput?.removeEventListener("input", applyBackgroundColor);
         if (rafId) {
           cancelAnimationFrame(rafId);
           rafId = 0;
