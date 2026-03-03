@@ -825,6 +825,22 @@ void Projectable::enqueueRenderCommands(core::RenderContext& ctx) {
     Part::enqueueRenderCommands(ctx);
 }
 
+void Projectable::preProcess() {
+    if (!autoResizedMesh) {
+        Part::preProcess();
+    } else {
+        Node::preProcess();
+    }
+}
+
+void Projectable::postProcess(int id) {
+    if (!autoResizedMesh) {
+        Part::postProcess(id);
+    } else {
+        Node::postProcess(id);
+    }
+}
+
 void Projectable::runRenderTask(core::RenderContext&) {}
 
 void Projectable::runDynamicTask(core::RenderContext& ctx) {

@@ -91,6 +91,8 @@ public:
     virtual void renderNestedOffscreen(core::RenderContext& ctx);
     virtual void enqueueRenderCommands(core::RenderContext& ctx);
     void renderMask(bool dodge = false) override;
+    void preProcess() override;
+    void postProcess(int id = 0) override;
     void registerRenderTasks(core::TaskScheduler& scheduler) override;
     void runRenderBeginTask(core::RenderContext& ctx) override;
     void runRenderTask(core::RenderContext& ctx) override;
