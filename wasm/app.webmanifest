@@ -1,0 +1,9 @@
+{
+  "name": "nicxlive wasm",
+  "short_name": "nicxlive",
+  "start_url": "/wasm/index.html",
+  "scope": "/wasm/",
+  "display": "standalone",
+  "background_color": "#111111",
+  "theme_color": "#111111"
+}

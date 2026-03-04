@@ -2,7 +2,13 @@
 <html lang="ja">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#111111" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="nicxlive" />
+  <link rel="manifest" href="./app.webmanifest" />
   <title>nicxlive wasm webgl test</title>
   <style>
     html, body {
@@ -23,7 +29,11 @@
       min-height: 100svh;
     }
     #ui {
-      padding: 8px;
+      padding:
+        calc(env(safe-area-inset-top, 0px) + 8px)
+        calc(env(safe-area-inset-right, 0px) + 8px)
+        8px
+        calc(env(safe-area-inset-left, 0px) + 8px);
       display: flex;
       gap: 8px;
       align-items: center;
@@ -38,6 +48,7 @@
       flex: 1 1 auto;
       min-height: 0;
       overflow: hidden;
+      padding-bottom: env(safe-area-inset-bottom, 0px);
     }
     #paramPanel {
       box-sizing: border-box;
