@@ -5,18 +5,40 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>nicxlive wasm webgl test</title>
   <style>
-    html, body { margin: 0; padding: 0; background: #111; color: #ddd; font-family: monospace; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      background: #111;
+      color: #ddd;
+      font-family: monospace;
+      overflow: hidden;
+      overscroll-behavior: none;
+    }
+    body {
+      display: flex;
+      flex-direction: column;
+      height: 100dvh;
+      min-height: 100svh;
+    }
     #ui {
       padding: 8px;
       display: flex;
       gap: 8px;
       align-items: center;
-      flex-wrap: nowrap;
-      overflow-x: auto;
-      overflow-y: hidden;
-      white-space: nowrap;
+      flex-wrap: wrap;
+      overflow: hidden;
+      white-space: normal;
+      flex: 0 0 auto;
     }
-    #workspace { display: flex; width: 100vw; height: calc(100dvh - 64px); min-height: 480px; }
+    #workspace {
+      display: flex;
+      width: 100%;
+      flex: 1 1 auto;
+      min-height: 0;
+      overflow: hidden;
+    }
     #paramPanel {
       box-sizing: border-box;
       width: clamp(64px, 24vw, 420px);
@@ -29,7 +51,7 @@
       background: #101010;
       container-type: inline-size;
     }
-    #viewer { flex: 1; min-width: 320px; display: flex; flex-direction: column; }
+    #viewer { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
     .paramRow {
       display: grid;
       grid-template-columns: minmax(0, 1fr) auto;
@@ -102,7 +124,14 @@
       width: 100%;
       accent-color: #6fd18b;
     }
-    #cv { flex: 1; width: 100%; min-height: 240px; display: block; }
+    #cv {
+      flex: 1;
+      width: 100%;
+      min-height: 0;
+      display: block;
+      touch-action: none;
+      overscroll-behavior: contain;
+    }
     #log { display: none; }
     button { cursor: pointer; }
     select, #modelCombo {
@@ -174,6 +203,12 @@
       background: #1f2d1f;
       outline: none;
     }
+    .modelOptionCustom {
+      background: #182218;
+      border-bottom-color: #2f4a2f;
+      color: #bde6bd;
+      font-style: italic;
+    }
     .modelOptionName {
       display: block;
       white-space: nowrap;
@@ -181,7 +216,7 @@
       text-overflow: ellipsis;
     }
     #scale { width: 120px; }
-    #ui > * { flex: 0 0 auto; }
+    #ui > * { flex: 0 0 auto; max-width: 100%; }
     @media (max-width: 980px) {
       #modelComboBox {
         width: clamp(120px, 58vw, 560px);
@@ -192,6 +227,39 @@
       #modelComboBox {
         width: clamp(96px, 64vw, 460px);
         min-width: 96px;
+      }
+    }
+    @media (max-width: 900px) {
+      #ui {
+        padding: 6px;
+        gap: 6px;
+      }
+      #modelComboBox {
+        flex: 1 1 180px;
+        width: min(100%, 420px);
+        max-width: 100%;
+        min-width: 96px;
+      }
+      #modelCombo {
+        min-width: 0;
+      }
+      #scale {
+        width: 86px;
+      }
+      #paramPanel {
+        width: clamp(64px, 22vw, 160px);
+        min-width: 64px;
+        max-width: 180px;
+      }
+      #viewer {
+        min-width: 0;
+      }
+    }
+    @media (max-width: 680px) {
+      #paramPanel {
+        width: clamp(64px, 20vw, 128px);
+        min-width: 64px;
+        max-width: 140px;
       }
     }
     @media (orientation: portrait) and (max-width: 1100px) {
@@ -219,7 +287,6 @@
         grid-template-columns: 1fr;
         grid-template-areas:
           "name"
-          "value"
           "ctrl";
         gap: 2px;
         padding: 3px 2px 4px;
@@ -230,9 +297,7 @@
         line-height: 1.1;
       }
       .paramVal {
-        justify-self: start;
-        text-align: left;
-        font-size: 10px;
+        display: none;
       }
       .paramCtrl, .paramSlider {
         width: 100%;
@@ -393,8 +458,9 @@
     /* Whole-workspace width modes (default / narrow / wide) */
     @media (max-width: 980px) {
       #paramPanel {
-        width: clamp(150px, 24vw, 300px);
-        min-width: 150px;
+        width: clamp(72px, 22vw, 180px);
+        min-width: 72px;
+        max-width: 220px;
       }
     }
     @media (min-width: 1600px) {
@@ -547,6 +613,17 @@
       modelOptionsPopup.innerHTML = "";
       let visibleCount = 0;
       const nodes = [];
+      const customBtn = document.createElement("button");
+      customBtn.type = "button";
+      customBtn.className = "modelOption modelOptionCustom";
+      customBtn.textContent = "custom URL...";
+      customBtn.title = "paste or type model URL";
+      customBtn.addEventListener("click", () => {
+        closeModelOptions();
+        modelCombo.focus();
+        modelCombo.select?.();
+      });
+      nodes.push(customBtn);
       for (const entry of modelEntries) {
         const name = String(entry.name || entry.url || "");
         const url = String(entry.url || "");
@@ -574,7 +651,7 @@
       }
       const meta = document.createElement("div");
       meta.className = "modelOptionsMeta";
-      meta.textContent = `models: ${visibleCount}/${modelEntries.length}`;
+      meta.textContent = `models: ${visibleCount}/${modelEntries.length} + custom`;
       modelOptionsPopup.appendChild(meta);
       for (const n of nodes) modelOptionsPopup.appendChild(n);
       if (!modelOptionsPopup.hidden) positionModelOptionsPopup();
@@ -650,7 +727,7 @@
           row.className = "paramRow2D";
 
           const nameEl = document.createElement("code");
-          nameEl.textContent = `${p.name || "param"} (${p.uuid >>> 0})`;
+          nameEl.textContent = String(p.name || "param");
 
           const pad = document.createElement("div");
           pad.className = "xyPad";
@@ -720,7 +797,7 @@
         const row = document.createElement("div");
         row.className = "paramRow";
         const nameEl = document.createElement("code");
-        nameEl.textContent = `${p.name || "param"} (${p.uuid >>> 0})`;
+        nameEl.textContent = String(p.name || "param");
         const slider = document.createElement("input");
         slider.type = "range";
         slider.className = "paramSlider paramCtrl";
@@ -881,6 +958,9 @@
       let panLastX = 0;
       let panLastY = 0;
       let pinchState = null;
+      const onTouchGestureBlock = (ev) => {
+        ev.preventDefault();
+      };
       const cleanup = () => {
         if (!alive) return;
         alive = false;
@@ -895,6 +975,10 @@
         canvas.removeEventListener("pointerup", onPointerUp);
         canvas.removeEventListener("pointercancel", onPointerUp);
         canvas.removeEventListener("wheel", onWheel);
+        canvas.removeEventListener("touchstart", onTouchGestureBlock);
+        canvas.removeEventListener("touchmove", onTouchGestureBlock);
+        canvas.removeEventListener("gesturestart", onTouchGestureBlock);
+        canvas.removeEventListener("gesturechange", onTouchGestureBlock);
         stopBtn.disabled = true;
         try { apis.fnUnloadPuppet(renderer, puppet); } catch (_) {}
         try { apis.fnDestroyRenderer(renderer); } catch (_) {}
@@ -1025,6 +1109,10 @@
       canvas.addEventListener("pointerup", onPointerUp);
       canvas.addEventListener("pointercancel", onPointerUp);
       canvas.addEventListener("wheel", onWheel, { passive: false });
+      canvas.addEventListener("touchstart", onTouchGestureBlock, { passive: false });
+      canvas.addEventListener("touchmove", onTouchGestureBlock, { passive: false });
+      canvas.addEventListener("gesturestart", onTouchGestureBlock, { passive: false });
+      canvas.addEventListener("gesturechange", onTouchGestureBlock, { passive: false });
 
       function resizeCanvas() {
         const dpr = Math.max(1, window.devicePixelRatio || 1);
