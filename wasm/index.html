@@ -483,12 +483,13 @@
 </head>
 <body>
   <div id="ui">
-    <label>Model</label>
+    <label id="modelLabel">Model</label>
     <div id="modelComboBox">
       <input id="modelCombo" placeholder="select model or paste URL..." autocomplete="off" />
       <button id="modelComboToggle" type="button" aria-label="toggle model options">▼</button>
       <div id="modelOptionsPopup" hidden></div>
     </div>
+    <input id="modelFileInput" type="file" accept=".inx,.inp,application/octet-stream" hidden />
     <button id="refreshModels">refresh</button>
     <button id="start">start</button>
     <button id="stop" disabled>stop</button>
@@ -527,10 +528,12 @@
     const scaleInput = document.getElementById("scale");
     const scaleVal = document.getElementById("scaleVal");
     const bgColorInput = document.getElementById("bgColor");
+    const modelLabel = document.getElementById("modelLabel");
     const modelCombo = document.getElementById("modelCombo");
     const modelComboBox = document.getElementById("modelComboBox");
     const modelComboToggle = document.getElementById("modelComboToggle");
     const modelOptionsPopup = document.getElementById("modelOptionsPopup");
+    const modelFileInput = document.getElementById("modelFileInput");
     const refreshModelsBtn = document.getElementById("refreshModels");
     const paramPanel = document.getElementById("paramPanel");
     let Module = null;
@@ -538,6 +541,20 @@
     let isLaunching = false;
     let wasmPrepared = false;
     let modelEntries = [];
+    let modelSourceMode = "remote-list";
+    let selectedLocalModelFile = null;
+    let selectedLocalModelName = "";
+    const pageUrl = new URL(window.location.href);
+    const launchedAsInstalledApp = pageUrl.searchParams.get("app") === "1";
+    const forceOnlineModelList = pageUrl.searchParams.get("modelSource") === "online";
+    const installedStandalone = (() => {
+      try {
+        return window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone === true;
+      } catch (_) {
+        return false;
+      }
+    })();
+    const preferLocalModelFileMode = (installedStandalone || launchedAsInstalledApp) && !forceOnlineModelList;
 
     if ("serviceWorker" in navigator) {
       window.addEventListener("load", () => {
@@ -614,6 +631,51 @@
       return normalizeManifestModels(await res.json());
     }
 
+    function setModelSourceMode(mode) {
+      modelSourceMode = mode === "local-file" ? "local-file" : "remote-list";
+      const local = modelSourceMode === "local-file";
+      modelLabel.textContent = local ? "Model File" : "Model";
+      modelComboBox.hidden = false;
+      refreshModelsBtn.hidden = false;
+      refreshModelsBtn.textContent = local ? "online list" : "refresh";
+      if (local) closeModelOptions();
+    }
+
+    async function chooseLocalModelFile() {
+      let file = null;
+      if (window.showOpenFilePicker && window.isSecureContext) {
+        const [handle] = await window.showOpenFilePicker({
+          multiple: false,
+          excludeAcceptAllOption: false,
+          types: [
+            {
+              description: "nijigenerate model",
+              accept: {
+                "application/octet-stream": [".inx", ".inp"],
+              },
+            },
+          ],
+        });
+        file = handle ? await handle.getFile() : null;
+      } else {
+        file = await new Promise((resolve) => {
+          const done = () => {
+            modelFileInput.removeEventListener("change", done);
+            const f = modelFileInput.files && modelFileInput.files[0] ? modelFileInput.files[0] : null;
+            modelFileInput.value = "";
+            resolve(f);
+          };
+          modelFileInput.addEventListener("change", done, { once: true });
+          modelFileInput.click();
+        });
+      }
+      if (!file) return null;
+      selectedLocalModelFile = file;
+      selectedLocalModelName = String(file.name || "model.inx");
+      modelCombo.value = selectedLocalModelName;
+      return file;
+    }
+
     function openModelOptions() {
       positionModelOptionsPopup();
       modelOptionsPopup.hidden = false;
@@ -630,6 +692,23 @@
       modelOptionsPopup.innerHTML = "";
       let visibleCount = 0;
       const nodes = [];
+      const localBtn = document.createElement("button");
+      localBtn.type = "button";
+      localBtn.className = "modelOption modelOptionCustom";
+      localBtn.textContent = "open local file...";
+      localBtn.title = "select .inx/.inp from local storage";
+      localBtn.addEventListener("click", async () => {
+        closeModelOptions();
+        try {
+          if (modelSourceMode !== "local-file") setModelSourceMode("local-file");
+          const file = await chooseLocalModelFile();
+          if (!file) return;
+          launchSelectedModel({ forceReload: true });
+        } catch (e) {
+          log("WARN", "file picker failed:", String(e && e.message ? e.message : e));
+        }
+      });
+      nodes.push(localBtn);
       const customBtn = document.createElement("button");
       customBtn.type = "button";
       customBtn.className = "modelOption modelOptionCustom";
@@ -668,7 +747,7 @@
       }
       const meta = document.createElement("div");
       meta.className = "modelOptionsMeta";
-      meta.textContent = `models: ${visibleCount}/${modelEntries.length} + custom`;
+      meta.textContent = `models: ${visibleCount}/${modelEntries.length} + local/custom`;
       modelOptionsPopup.appendChild(meta);
       for (const n of nodes) modelOptionsPopup.appendChild(n);
       if (!modelOptionsPopup.hidden) positionModelOptionsPopup();
@@ -703,6 +782,26 @@
       const selected = String(modelCombo.value || "").trim();
       if (!selected) throw new Error("model URL is empty");
       return selected;
+    }
+
+    async function stageSelectedModel(codec) {
+      if (modelSourceMode !== "local-file") {
+        const modelUrl = resolveSelectedModelUrl();
+        return codec.stageInxToMemfs(modelUrl);
+      }
+      const file = selectedLocalModelFile;
+      if (!file) throw new Error("local model file is not selected");
+      const srcNameRaw = String(file.name || "model.inx").trim() || "model.inx";
+      const srcName = srcNameRaw.replace(/[^0-9A-Za-z._-]/g, "_");
+      const dst = `/assets/${srcName}`;
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      if (!Module.FS_createPath || !Module.FS_createDataFile) {
+        throw new Error("Emscripten FS runtime methods are missing. Rebuild wasm with FS runtime enabled.");
+      }
+      try { if (Module.FS_unlink) Module.FS_unlink(dst); } catch (_) {}
+      try { Module.FS_createPath("/", "assets", true, true); } catch (_) {}
+      Module.FS_createDataFile("/assets", srcName, bytes, true, true);
+      return dst;
     }
 
     if (WASM_TEST_LOG_ENABLED) {
@@ -894,8 +993,7 @@
       const renderer = readU32(outRendererPtr);
       if (!renderer) throw new Error("renderer handle is null");
 
-      const modelUrl = resolveSelectedModelUrl();
-      const stagedPath = await codec.stageInxToMemfs(modelUrl);
+      const stagedPath = await stageSelectedModel(codec);
       log("model staged:", stagedPath);
 
       const outPuppetPtr = codec.getMalloc()(codec.layout.OutPtr);
@@ -1220,19 +1318,47 @@
     }
 
     async function refreshModelListUI() {
+      if (preferLocalModelFileMode) {
+        setModelSourceMode("local-file");
+        fillModelSelect([]);
+        log("model source: local-file (standalone app mode)");
+        return { source: "local-file", count: selectedLocalModelFile ? 1 : 0 };
+      }
+
+      let manifestModels = null;
+      let manifestError = null;
       try {
-        const manifestModels = await fetchManifestModels();
-        if (manifestModels && manifestModels.length > 0) {
-          fillModelSelect(manifestModels);
-          log("manifest models listed:", manifestModels.length);
-          return { source: "manifest", count: manifestModels.length };
-        }
+        manifestModels = await fetchManifestModels();
+      } catch (e) {
+        manifestError = e;
+      }
+
+      if (manifestModels && manifestModels.length > 0) {
+        setModelSourceMode("remote-list");
+        fillModelSelect(manifestModels);
+        log("manifest models listed:", manifestModels.length);
+        return { source: "manifest", count: manifestModels.length };
+      }
+
+      try {
         const models = await fetchModelList();
         const entries = models.map((m) => ({ name: m, url: m }));
+        setModelSourceMode("remote-list");
         fillModelSelect(entries);
         log("models listed:", entries.length);
         return { source: "model-list", count: entries.length };
       } catch (e) {
+        const manifestUnavailable = manifestError || manifestModels == null;
+        if (manifestUnavailable) {
+          setModelSourceMode("local-file");
+          fillModelSelect([]);
+          if (manifestError) {
+            log("WARN", "manifest fetch failed:", String(manifestError && manifestError.message ? manifestError.message : manifestError));
+          }
+          log("model source switched to local file mode");
+          return { source: "local-file", count: selectedLocalModelFile ? 1 : 0 };
+        }
+        setModelSourceMode("remote-list");
         fillModelSelect([]);
         log("WARN", "model list fetch failed:", String(e && e.message ? e.message : e));
         return { source: "error", count: 0 };
@@ -1240,6 +1366,9 @@
     }
 
     refreshModelsBtn.addEventListener("click", () => {
+      if (modelSourceMode === "local-file") {
+        setModelSourceMode("remote-list");
+      }
       refreshModelListUI();
     });
 
@@ -1268,7 +1397,6 @@
     startBtn.addEventListener("click", () => {
       launchSelectedModel({ forceReload: false });
     });
-
     modelCombo.addEventListener("focus", () => {
       renderModelOptions("");
       openModelOptions();
