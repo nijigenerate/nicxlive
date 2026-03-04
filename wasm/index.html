@@ -6,43 +6,78 @@
   <title>nicxlive wasm webgl test</title>
   <style>
     html, body { margin: 0; padding: 0; background: #111; color: #ddd; font-family: monospace; }
-    #ui { padding: 8px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-    #workspace { display: flex; width: 100vw; height: calc(100vh - 64px); min-height: 480px; }
+    #ui {
+      padding: 8px;
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: nowrap;
+      overflow-x: auto;
+      overflow-y: hidden;
+      white-space: nowrap;
+    }
+    #workspace { display: flex; width: 100vw; height: calc(100dvh - 64px); min-height: 480px; }
     #paramPanel {
       box-sizing: border-box;
-      width: 360px;
-      min-width: 360px;
-      max-width: 360px;
+      width: clamp(64px, 24vw, 420px);
+      min-width: 64px;
+      max-width: 520px;
       padding: 8px;
       border-top: 1px solid #333;
       border-right: 1px solid #333;
       overflow: auto;
       background: #101010;
+      container-type: inline-size;
     }
-    #viewer { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+    #viewer { flex: 1; min-width: 320px; display: flex; flex-direction: column; }
     .paramRow {
       display: grid;
-      grid-template-columns: minmax(160px, 220px) 1fr 130px;
+      grid-template-columns: minmax(0, 1fr) auto;
+      grid-template-areas:
+        "name value"
+        "ctrl ctrl";
       align-items: center;
-      gap: 8px;
-      margin-bottom: 8px;
+      gap: 6px 8px;
+      margin-bottom: 10px;
+      padding: 6px 6px 8px;
+      border: 1px solid #232323;
+      border-radius: 6px;
+      background: #131313;
     }
     .paramRow code { color: #9ad; }
-    .paramVal { color: #9f9; }
+    .paramVal {
+      color: #9f9;
+      justify-self: end;
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+    }
     .paramRow2D {
       display: grid;
-      grid-template-columns: minmax(160px, 220px) 1fr 130px;
+      grid-template-columns: minmax(0, 1fr) auto;
+      grid-template-areas:
+        "name value"
+        "ctrl ctrl";
       align-items: start;
-      gap: 8px;
-      margin-bottom: 8px;
+      gap: 6px 8px;
+      margin-bottom: 10px;
+      padding: 6px 6px 8px;
+      border: 1px solid #232323;
+      border-radius: 6px;
+      background: #131313;
     }
+    .paramRow > code, .paramRow2D > code { grid-area: name; min-width: 0; overflow-wrap: anywhere; }
+    .paramRow > .paramVal, .paramRow2D > .paramVal { grid-area: value; }
     .paramCtrl {
-      width: 120px;
-      justify-self: start;
+      grid-area: ctrl;
+      width: 100%;
+      justify-self: stretch;
+      min-width: 0;
     }
     .xyPad {
       width: 120px;
-      height: 120px;
+      height: auto;
+      aspect-ratio: 1 / 1;
+      min-height: 120px;
       border: 1px solid #444;
       background:
         linear-gradient(#0000 49%, #333 50%, #0000 51%),
@@ -64,22 +99,319 @@
       pointer-events: none;
     }
     .paramSlider {
-      width: 120px;
+      width: 100%;
       accent-color: #6fd18b;
     }
     #cv { flex: 1; width: 100%; min-height: 240px; display: block; }
     #log { display: none; }
     button { cursor: pointer; }
-    select { min-width: 320px; background: #181818; color: #ddd; border: 1px solid #444; padding: 4px 6px; }
-    #modelUrlInput { min-width: 320px; background: #181818; color: #ddd; border: 1px solid #444; padding: 4px 6px; }
-    #modelUrlInput:disabled { opacity: 0.5; }
+    select, #modelCombo {
+      min-width: 220px;
+      width: min(42vw, 360px);
+      background: #181818;
+      color: #ddd;
+      border: 1px solid #444;
+      padding: 4px 6px;
+    }
+    #modelComboBox {
+      position: relative;
+      display: inline-flex;
+      align-items: stretch;
+      flex: 1 1 300px;
+      width: clamp(140px, 46vw, 680px);
+      min-width: 140px;
+      max-width: min(78vw, 680px);
+    }
+    #modelCombo {
+      width: 100%;
+      min-width: 0;
+      border-right: 0;
+    }
+    #modelComboToggle {
+      width: 30px;
+      border: 1px solid #444;
+      background: #222;
+      color: #ddd;
+      padding: 0;
+    }
+    #modelOptionsPopup {
+      position: fixed;
+      top: 0;
+      left: 0;
+      z-index: 30;
+      background: #121212;
+      border: 1px solid #444;
+      width: 320px;
+      max-width: calc(100vw - 16px);
+      max-height: min(70vh, 620px);
+      overflow: auto;
+      box-shadow: 0 8px 20px #0008;
+    }
+    .modelOptionsMeta {
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      background: #1a1a1a;
+      color: #9ab49a;
+      font-size: 11px;
+      padding: 4px 8px;
+      border-bottom: 1px solid #333;
+    }
+    .modelOption {
+      width: 100%;
+      border: 0;
+      border-bottom: 1px solid #2d2d2d;
+      background: #121212;
+      color: #ddd;
+      text-align: left;
+      padding: 5px 8px;
+      font: inherit;
+      cursor: pointer;
+      display: block;
+    }
+    .modelOption:hover,
+    .modelOption:focus-visible {
+      background: #1f2d1f;
+      outline: none;
+    }
+    .modelOptionName {
+      display: block;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    #scale { width: 120px; }
+    #ui > * { flex: 0 0 auto; }
+    @media (max-width: 980px) {
+      #modelComboBox {
+        width: clamp(120px, 58vw, 560px);
+        min-width: 120px;
+      }
+    }
+    @media (max-width: 680px) {
+      #modelComboBox {
+        width: clamp(96px, 64vw, 460px);
+        min-width: 96px;
+      }
+    }
+    @media (orientation: portrait) and (max-width: 1100px) {
+      #ui {
+        gap: 5px;
+        padding: 6px;
+      }
+      #modelComboBox {
+        flex-basis: 220px;
+        width: clamp(96px, 42vw, 340px);
+        max-width: 56vw;
+      }
+      #scale {
+        width: 88px;
+      }
+      #ui label {
+        font-size: 11px;
+      }
+      #ui button {
+        padding: 3px 6px;
+      }
+    }
+    @container (max-width: 120px) {
+      .paramRow, .paramRow2D {
+        grid-template-columns: 1fr;
+        grid-template-areas:
+          "name"
+          "value"
+          "ctrl";
+        gap: 2px;
+        padding: 3px 2px 4px;
+        margin-bottom: 6px;
+      }
+      .paramRow code, .paramRow2D code {
+        font-size: 10px;
+        line-height: 1.1;
+      }
+      .paramVal {
+        justify-self: start;
+        text-align: left;
+        font-size: 10px;
+      }
+      .paramCtrl, .paramSlider {
+        width: 100%;
+        min-width: 0;
+      }
+      .xyPad {
+        width: min(100%, 56px);
+        max-width: 56px;
+        height: auto;
+        aspect-ratio: 1 / 1;
+        min-height: 56px;
+      }
+    }
+    @container (min-width: 121px) and (max-width: 180px) {
+      .paramRow, .paramRow2D {
+        grid-template-columns: minmax(0, 1fr);
+        grid-template-areas:
+          "name"
+          "value"
+          "ctrl";
+        gap: 4px;
+        padding: 5px 4px 6px;
+      }
+      .paramVal {
+        justify-self: start;
+        text-align: left;
+        font-size: 11px;
+      }
+      .paramRow code, .paramRow2D code {
+        font-size: 11px;
+        line-height: 1.2;
+      }
+      .paramCtrl {
+        width: 100%;
+      }
+      .paramSlider {
+        width: 100%;
+      }
+      .xyPad {
+        width: min(100%, 72px);
+        max-width: 72px;
+        height: auto;
+        aspect-ratio: 1 / 1;
+        min-height: 72px;
+      }
+    }
+    @container (min-width: 181px) and (max-width: 240px) {
+      .paramRow, .paramRow2D {
+        grid-template-columns: minmax(0, 1fr);
+        grid-template-areas:
+          "name"
+          "ctrl"
+          "value";
+      }
+      .paramVal {
+        justify-self: start;
+        text-align: left;
+        font-size: 12px;
+      }
+      .paramCtrl {
+        width: min(100%, 120px);
+      }
+      .paramSlider {
+        width: min(100%, 120px);
+      }
+      .xyPad {
+        width: 80px;
+        max-width: 80px;
+        height: auto;
+        aspect-ratio: 1 / 1;
+        min-height: 80px;
+      }
+    }
+    @container (min-width: 241px) and (max-width: 319px) {
+      .paramCtrl {
+        width: min(100%, 146px);
+      }
+      .paramSlider {
+        width: min(100%, 146px);
+      }
+      .xyPad {
+        width: 92px;
+        max-width: 92px;
+        height: auto;
+        aspect-ratio: 1 / 1;
+        min-height: 92px;
+      }
+    }
+    @container (min-width: 320px) {
+      .paramRow {
+        grid-template-columns: minmax(120px, 1fr) minmax(120px, 1fr) auto;
+        grid-template-areas: "name ctrl value";
+        align-items: center;
+      }
+      .paramRow2D {
+        grid-template-columns: minmax(120px, 1fr) auto auto;
+        grid-template-areas: "name ctrl value";
+        align-items: start;
+      }
+      .paramCtrl {
+        width: min(100%, 180px);
+        justify-self: start;
+      }
+      .paramSlider {
+        width: min(100%, 180px);
+      }
+      .xyPad {
+        width: 120px;
+        max-width: 120px;
+        height: auto;
+        aspect-ratio: 1 / 1;
+        min-height: 120px;
+      }
+    }
+    @container (min-width: 360px) {
+      .paramRow {
+        grid-template-columns: minmax(150px, 1fr) minmax(140px, 1fr) auto;
+      }
+      .paramRow2D {
+        grid-template-columns: minmax(150px, 1fr) auto auto;
+      }
+      .paramCtrl {
+        width: min(100%, 200px);
+      }
+      .paramSlider {
+        width: min(100%, 200px);
+      }
+      .xyPad {
+        width: 132px;
+        max-width: 132px;
+        height: auto;
+        aspect-ratio: 1 / 1;
+        min-height: 132px;
+      }
+    }
+    @container (min-width: 440px) {
+      .paramRow {
+        grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr) auto;
+      }
+      .paramRow2D {
+        grid-template-columns: minmax(180px, 1fr) auto auto;
+      }
+      .paramCtrl {
+        width: min(100%, 240px);
+      }
+      .paramSlider {
+        width: min(100%, 240px);
+      }
+      .xyPad {
+        width: 152px;
+        max-width: 152px;
+        height: auto;
+        aspect-ratio: 1 / 1;
+        min-height: 152px;
+      }
+    }
+
+    /* Whole-workspace width modes (default / narrow / wide) */
+    @media (max-width: 980px) {
+      #paramPanel {
+        width: clamp(150px, 24vw, 300px);
+        min-width: 150px;
+      }
+    }
+    @media (min-width: 1600px) {
+      #paramPanel {
+        width: clamp(260px, 24vw, 520px);
+      }
+    }
   </style>
 </head>
 <body>
   <div id="ui">
     <label>Model</label>
-    <select id="modelSelect"></select>
-    <input id="modelUrlInput" type="text" placeholder="https://.../model.inx or /models/model.inx" disabled />
+    <div id="modelComboBox">
+      <input id="modelCombo" placeholder="select model or paste URL..." autocomplete="off" />
+      <button id="modelComboToggle" type="button" aria-label="toggle model options">▼</button>
+      <div id="modelOptionsPopup" hidden></div>
+    </div>
     <button id="refreshModels">refresh</button>
     <button id="start">start</button>
     <button id="stop" disabled>stop</button>
@@ -111,8 +443,6 @@
     } from "../webgl_backend/webgl_backend.js";
     const WASM_TEST_VERSION = "wasm-index-2026-02-28-24";
     const WASM_TEST_LOG_ENABLED = false;
-    const CUSTOM_MODEL_VALUE = "__custom_url__";
-
     const logEl = document.getElementById("log");
     const canvas = document.getElementById("cv");
     const startBtn = document.getElementById("start");
@@ -120,14 +450,17 @@
     const scaleInput = document.getElementById("scale");
     const scaleVal = document.getElementById("scaleVal");
     const bgColorInput = document.getElementById("bgColor");
-    const modelSelect = document.getElementById("modelSelect");
-    const modelUrlInput = document.getElementById("modelUrlInput");
+    const modelCombo = document.getElementById("modelCombo");
+    const modelComboBox = document.getElementById("modelComboBox");
+    const modelComboToggle = document.getElementById("modelComboToggle");
+    const modelOptionsPopup = document.getElementById("modelOptionsPopup");
     const refreshModelsBtn = document.getElementById("refreshModels");
     const paramPanel = document.getElementById("paramPanel");
     let Module = null;
     let runtimeControl = null;
     let isLaunching = false;
     let wasmPrepared = false;
+    let modelEntries = [];
 
     async function prepareWasmRuntime() {
       if (wasmPrepared) return;
@@ -198,37 +531,83 @@
       return normalizeManifestModels(await res.json());
     }
 
-    function updateCustomUrlInputState() {
-      const custom = modelSelect.value === CUSTOM_MODEL_VALUE;
-      modelUrlInput.disabled = !custom;
-      if (custom) modelUrlInput.focus();
+    function openModelOptions() {
+      positionModelOptionsPopup();
+      modelOptionsPopup.hidden = false;
+      modelComboToggle.setAttribute("aria-expanded", "true");
+    }
+
+    function closeModelOptions() {
+      modelOptionsPopup.hidden = true;
+      modelComboToggle.setAttribute("aria-expanded", "false");
+    }
+
+    function renderModelOptions(filterText = "") {
+      const filter = String(filterText || "").trim().toLowerCase();
+      modelOptionsPopup.innerHTML = "";
+      let visibleCount = 0;
+      const nodes = [];
+      for (const entry of modelEntries) {
+        const name = String(entry.name || entry.url || "");
+        const url = String(entry.url || "");
+        if (!url) continue;
+        if (filter && !name.toLowerCase().includes(filter) && !url.toLowerCase().includes(filter)) {
+          continue;
+        }
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "modelOption";
+        btn.title = url;
+        btn.dataset.url = url;
+
+        const nameEl = document.createElement("span");
+        nameEl.className = "modelOptionName";
+        nameEl.textContent = name;
+        btn.appendChild(nameEl);
+        btn.addEventListener("click", () => {
+          modelCombo.value = url;
+          closeModelOptions();
+          launchSelectedModel({ forceReload: true });
+        });
+        nodes.push(btn);
+        visibleCount += 1;
+      }
+      const meta = document.createElement("div");
+      meta.className = "modelOptionsMeta";
+      meta.textContent = `models: ${visibleCount}/${modelEntries.length}`;
+      modelOptionsPopup.appendChild(meta);
+      for (const n of nodes) modelOptionsPopup.appendChild(n);
+      if (!modelOptionsPopup.hidden) positionModelOptionsPopup();
+    }
+
+    function positionModelOptionsPopup() {
+      const r = modelComboBox.getBoundingClientRect();
+      const margin = 8;
+      const available = Math.max(120, window.innerWidth - margin * 2);
+      const popupMinWidth = Math.min(320, available);
+      const width = Math.min(available, Math.max(popupMinWidth, r.width));
+      const left = Math.max(margin, Math.min(r.left, window.innerWidth - margin - width));
+      modelOptionsPopup.style.left = `${left}px`;
+      modelOptionsPopup.style.top = `${Math.max(8, r.bottom + 2)}px`;
+      modelOptionsPopup.style.width = `${width}px`;
     }
 
     function fillModelSelect(entries) {
-      modelSelect.innerHTML = "";
-      for (const entry of entries) {
-        const opt = document.createElement("option");
-        opt.value = entry.url;
-        opt.textContent = entry.name;
-        modelSelect.appendChild(opt);
+      const current = String(modelCombo.value || "").trim();
+      modelEntries = Array.isArray(entries) ? entries.slice() : [];
+      renderModelOptions(current);
+      if (current) {
+        modelCombo.value = current;
+      } else if (entries.length) {
+        modelCombo.value = entries[0].url;
+      } else {
+        modelCombo.value = "";
       }
-      const customOpt = document.createElement("option");
-      customOpt.value = CUSTOM_MODEL_VALUE;
-      customOpt.textContent = "(Custom URL...)";
-      modelSelect.appendChild(customOpt);
-
-      modelSelect.value = entries.length ? entries[0].url : CUSTOM_MODEL_VALUE;
-      updateCustomUrlInputState();
     }
 
     function resolveSelectedModelUrl() {
-      const selected = String(modelSelect.value || "").trim();
-      if (selected === CUSTOM_MODEL_VALUE) {
-        const custom = String(modelUrlInput.value || "").trim();
-        if (!custom) throw new Error("custom model URL is empty");
-        return custom;
-      }
-      if (!selected) throw new Error("model is not selected");
+      const selected = String(modelCombo.value || "").trim();
+      if (!selected) throw new Error("model URL is empty");
       return selected;
     }
 
@@ -497,10 +876,11 @@
       let debugFrame = 0;
       let panX = 0.0;
       let panY = 0.0;
-      let dragging = false;
-      let dragPointerId = -1;
-      let dragLastX = 0;
-      let dragLastY = 0;
+      const activePointers = new Map();
+      let panPointerId = -1;
+      let panLastX = 0;
+      let panLastY = 0;
+      let pinchState = null;
       const cleanup = () => {
         if (!alive) return;
         alive = false;
@@ -538,30 +918,99 @@
         apis.fnSetPuppetTranslation(puppet, panX, panY);
       };
 
+      const pointerEntries = () => Array.from(activePointers.entries());
+      const pointerDistance = (a, b) => {
+        const dx = a.x - b.x;
+        const dy = a.y - b.y;
+        return Math.hypot(dx, dy);
+      };
+      const beginPanWith = (pointerId, point) => {
+        panPointerId = pointerId;
+        panLastX = point.x;
+        panLastY = point.y;
+      };
+      const beginPinchFromActive = () => {
+        const entries = pointerEntries();
+        if (entries.length < 2) {
+          pinchState = null;
+          return;
+        }
+        const [aId, a] = entries[0];
+        const [bId, b] = entries[1];
+        const dist = Math.max(1, pointerDistance(a, b));
+        pinchState = {
+          aId,
+          bId,
+          startDist: dist,
+          startScale: currentScale(),
+          lastCenterX: (a.x + b.x) * 0.5,
+          lastCenterY: (a.y + b.y) * 0.5,
+        };
+        panPointerId = -1;
+      };
+
       const onPointerDown = (ev) => {
-        dragging = true;
-        dragPointerId = ev.pointerId;
-        dragLastX = ev.clientX;
-        dragLastY = ev.clientY;
+        if (ev.pointerType === "mouse" && ev.button !== 0) return;
+        activePointers.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
         if (canvas.setPointerCapture) canvas.setPointerCapture(ev.pointerId);
+        if (activePointers.size === 1) {
+          beginPanWith(ev.pointerId, { x: ev.clientX, y: ev.clientY });
+          pinchState = null;
+          return;
+        }
+        if (activePointers.size >= 2) beginPinchFromActive();
       };
       const onPointerMove = (ev) => {
-        if (!dragging || ev.pointerId !== dragPointerId) return;
-        const dx = ev.clientX - dragLastX;
-        const dy = ev.clientY - dragLastY;
-        dragLastX = ev.clientX;
-        dragLastY = ev.clientY;
+        if (!activePointers.has(ev.pointerId)) return;
+        activePointers.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
         const dpr = Math.max(1, window.devicePixelRatio || 1);
+        if (pinchState) {
+          const a = activePointers.get(pinchState.aId);
+          const b = activePointers.get(pinchState.bId);
+          if (!a || !b) {
+            beginPinchFromActive();
+            return;
+          }
+          const dist = Math.max(1, pointerDistance(a, b));
+          const centerX = (a.x + b.x) * 0.5;
+          const centerY = (a.y + b.y) * 0.5;
+          const scale = clampScale((pinchState.startScale * dist) / pinchState.startDist);
+          scaleInput.value = scale.toFixed(3);
+          panX += (centerX - pinchState.lastCenterX) * dpr;
+          panY += (centerY - pinchState.lastCenterY) * dpr;
+          pinchState.lastCenterX = centerX;
+          pinchState.lastCenterY = centerY;
+          applyPanScale();
+          return;
+        }
+        if (ev.pointerId !== panPointerId) return;
+        const dx = ev.clientX - panLastX;
+        const dy = ev.clientY - panLastY;
+        panLastX = ev.clientX;
+        panLastY = ev.clientY;
         panX += dx * dpr;
         panY += dy * dpr;
         applyPanScale();
       };
       const onPointerUp = (ev) => {
-        if (ev.pointerId !== dragPointerId) return;
-        dragging = false;
-        dragPointerId = -1;
+        activePointers.delete(ev.pointerId);
         if (canvas.releasePointerCapture) {
           try { canvas.releasePointerCapture(ev.pointerId); } catch (_) {}
+        }
+        if (pinchState && (ev.pointerId === pinchState.aId || ev.pointerId === pinchState.bId)) {
+          if (activePointers.size >= 2) {
+            beginPinchFromActive();
+            return;
+          }
+          pinchState = null;
+        }
+        if (activePointers.size === 1) {
+          const [id, point] = pointerEntries()[0];
+          beginPanWith(id, point);
+          return;
+        }
+        if (activePointers.size === 0) {
+          panPointerId = -1;
         }
       };
       const onWheel = (ev) => {
@@ -715,21 +1164,47 @@
       launchSelectedModel({ forceReload: false });
     });
 
-    modelSelect.addEventListener("change", () => {
-      updateCustomUrlInputState();
-      if (modelSelect.value === CUSTOM_MODEL_VALUE && !String(modelUrlInput.value || "").trim()) return;
+    modelCombo.addEventListener("focus", () => {
+      renderModelOptions("");
+      openModelOptions();
+    });
+    modelComboToggle.addEventListener("click", () => {
+      if (!modelOptionsPopup.hidden) {
+        closeModelOptions();
+        return;
+      }
+      renderModelOptions("");
+      openModelOptions();
+      modelCombo.focus();
+    });
+    document.addEventListener("pointerdown", (ev) => {
+      if (modelComboBox.contains(ev.target)) return;
+      closeModelOptions();
+    });
+    window.addEventListener("resize", () => {
+      if (!modelOptionsPopup.hidden) positionModelOptionsPopup();
+    });
+    window.addEventListener("scroll", () => {
+      if (!modelOptionsPopup.hidden) positionModelOptionsPopup();
+    }, true);
+
+    modelCombo.addEventListener("change", () => {
+      if (!String(modelCombo.value || "").trim()) return;
       launchSelectedModel({ forceReload: true });
     });
-    modelUrlInput.addEventListener("change", () => {
-      if (modelSelect.value !== CUSTOM_MODEL_VALUE) return;
-      if (!String(modelUrlInput.value || "").trim()) return;
-      launchSelectedModel({ forceReload: true });
+    modelCombo.addEventListener("input", () => {
+      renderModelOptions(modelCombo.value || "");
+      openModelOptions();
     });
-    modelUrlInput.addEventListener("keydown", (ev) => {
+    modelCombo.addEventListener("keydown", (ev) => {
+      if (ev.key === "Escape") {
+        closeModelOptions();
+        return;
+      }
       if (ev.key !== "Enter") return;
-      if (modelSelect.value !== CUSTOM_MODEL_VALUE) return;
       ev.preventDefault();
-      if (!String(modelUrlInput.value || "").trim()) return;
+      closeModelOptions();
+      if (!String(modelCombo.value || "").trim()) return;
       launchSelectedModel({ forceReload: true });
     });
 
