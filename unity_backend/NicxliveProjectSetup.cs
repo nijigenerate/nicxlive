@@ -1,5 +1,6 @@
 #if UNITY_EDITOR
 using System;
+using System.Reflection;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -107,7 +108,7 @@ namespace Nicxlive.UnityBackend.EditorSetup
 
         private static bool EnsureUrpPipeline()
         {
-            var current = GraphicsSettings.currentRenderPipeline;
+            var current = GetConfiguredGraphicsPipeline();
             if (IsUrpAsset(current))
             {
                 var qualityChanged = ApplyUrpToAllQualityLevels(current);
@@ -130,7 +131,11 @@ namespace Nicxlive.UnityBackend.EditorSetup
                 return false;
             }
 
-            GraphicsSettings.currentRenderPipeline = urpAsset;
+            if (!SetConfiguredGraphicsPipeline(urpAsset))
+            {
+                Debug.LogWarning("[nicxlive] Failed to assign GraphicsSettings render pipeline.");
+                return false;
+            }
             var changed = true;
             changed |= ApplyUrpToAllQualityLevels(urpAsset);
             Debug.Log("[nicxlive] URP: assigned render pipeline asset.");
@@ -199,15 +204,33 @@ namespace Nicxlive.UnityBackend.EditorSetup
         {
             var changed = false;
             var qualityNames = QualitySettings.names;
-            for (var i = 0; i < qualityNames.Length; i++)
+            var qualityType = typeof(QualitySettings);
+            var getAt = qualityType.GetMethod("GetRenderPipelineAssetAt", BindingFlags.Public | BindingFlags.Static);
+            var setAt = qualityType.GetMethod("SetRenderPipelineAssetAt", BindingFlags.Public | BindingFlags.Static);
+            if (getAt != null && setAt != null)
             {
-                var current = QualitySettings.GetRenderPipelineAssetAt(i);
-                if (current == urpAsset)
+                for (var i = 0; i < qualityNames.Length; i++)
                 {
-                    continue;
+                    var current = getAt.Invoke(null, new object[] { i }) as RenderPipelineAsset;
+                    if (current == urpAsset)
+                    {
+                        continue;
+                    }
+                    setAt.Invoke(null, new object[] { i, urpAsset });
+                    changed = true;
                 }
-                QualitySettings.SetRenderPipelineAssetAt(i, urpAsset);
-                changed = true;
+                return changed;
+            }
+
+            var renderPipeline = qualityType.GetProperty("renderPipeline", BindingFlags.Public | BindingFlags.Static);
+            if (renderPipeline != null && renderPipeline.CanWrite)
+            {
+                var current = renderPipeline.GetValue(null) as RenderPipelineAsset;
+                if (current != urpAsset)
+                {
+                    renderPipeline.SetValue(null, urpAsset, null);
+                    changed = true;
+                }
             }
             return changed;
         }
@@ -220,6 +243,39 @@ namespace Nicxlive.UnityBackend.EditorSetup
             }
             var fullName = asset.GetType().FullName;
             return !string.IsNullOrEmpty(fullName) && fullName.Contains("UniversalRenderPipelineAsset");
+        }
+
+        private static RenderPipelineAsset? GetConfiguredGraphicsPipeline()
+        {
+            var graphicsType = typeof(GraphicsSettings);
+            var defaultPipeline = graphicsType.GetProperty("defaultRenderPipeline", BindingFlags.Public | BindingFlags.Static);
+            if (defaultPipeline != null)
+            {
+                return defaultPipeline.GetValue(null) as RenderPipelineAsset;
+            }
+
+            var currentPipeline = graphicsType.GetProperty("currentRenderPipeline", BindingFlags.Public | BindingFlags.Static);
+            return currentPipeline != null ? currentPipeline.GetValue(null) as RenderPipelineAsset : null;
+        }
+
+        private static bool SetConfiguredGraphicsPipeline(RenderPipelineAsset asset)
+        {
+            var graphicsType = typeof(GraphicsSettings);
+            var defaultPipeline = graphicsType.GetProperty("defaultRenderPipeline", BindingFlags.Public | BindingFlags.Static);
+            if (defaultPipeline != null && defaultPipeline.CanWrite)
+            {
+                defaultPipeline.SetValue(null, asset, null);
+                return true;
+            }
+
+            var currentPipeline = graphicsType.GetProperty("currentRenderPipeline", BindingFlags.Public | BindingFlags.Static);
+            if (currentPipeline != null && currentPipeline.CanWrite)
+            {
+                currentPipeline.SetValue(null, asset, null);
+                return true;
+            }
+
+            return false;
         }
 
         private static void EnsureFolder(string folderPath)

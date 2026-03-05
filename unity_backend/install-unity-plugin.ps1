@@ -53,6 +53,36 @@ function Ensure-UnityProject {
     }
 }
 
+function Ensure-AllowUnsafeCodeYaml {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ProjectRoot
+    )
+
+    $settingsPath = Join-Path $ProjectRoot "ProjectSettings\\ProjectSettings.asset"
+    if (-not (Test-Path $settingsPath)) {
+        throw "ProjectSettings.asset not found: $settingsPath"
+    }
+
+    $raw = Get-Content -Raw -Encoding UTF8 $settingsPath
+    if ($raw -match "allowUnsafeCode:\s*1") {
+        return $false
+    }
+
+    if ($raw -notmatch "allowUnsafeCode:\s*\d+") {
+        throw "allowUnsafeCode field was not found in: $settingsPath"
+    }
+
+    $updated = [System.Text.RegularExpressions.Regex]::Replace($raw, "allowUnsafeCode:\s*\d+", "allowUnsafeCode: 1", 1)
+    if ($updated -eq $raw) {
+        return $false
+    }
+
+    Set-Content -Path $settingsPath -Value $updated -Encoding UTF8
+    Write-Host "[nicxlive] pre-set allowUnsafeCode: 1 in ProjectSettings.asset"
+    return $true
+}
+
 function Resolve-UnityExePath {
     param(
         [Parameter(Mandatory = $false)]
@@ -91,6 +121,7 @@ $buildDir = Join-Path $repoRoot "build"
 $projectRoot = (Resolve-Path $UnityProjectPath).Path
 
 Ensure-UnityProject -ProjectRoot $projectRoot
+Ensure-AllowUnsafeCodeYaml -ProjectRoot $projectRoot | Out-Null
 
 if (-not $SkipNativeBuild) {
     $cache = Join-Path $buildDir "CMakeCache.txt"
@@ -143,11 +174,17 @@ $editorDest = Join-Path $editorDir "NicxliveBehaviourEditor.cs"
 $setupDest = Join-Path $editorDir "NicxliveProjectSetup.cs"
 
 Copy-Item -Force $nativeDll $dllDest
-Copy-Item -Force $runtimeSource $runtimeDest
-Copy-Item -Force $editorSource $editorDest
+# Setup script is copied first so Unity can run project setup before importing unsafe runtime code.
 Copy-Item -Force $setupSource $setupDest
 
 if (-not $SkipUnitySetup) {
+    if (Test-Path $runtimeDest) {
+        Remove-Item -Force $runtimeDest
+    }
+    if (Test-Path $editorDest) {
+        Remove-Item -Force $editorDest
+    }
+
     $resolvedUnityExe = Resolve-UnityExePath -RequestedPath $UnityExe
     if ($null -eq $resolvedUnityExe) {
         Write-Warning "[nicxlive] Unity.exe was not found automatically. Skipping Unity settings setup."
@@ -174,6 +211,9 @@ if (-not $SkipUnitySetup) {
 else {
     Write-Host "[nicxlive] skipping Unity settings setup (-SkipUnitySetup specified)."
 }
+
+Copy-Item -Force $runtimeSource $runtimeDest
+Copy-Item -Force $editorSource $editorDest
 
 Write-Host ""
 Write-Host "[nicxlive] install complete"

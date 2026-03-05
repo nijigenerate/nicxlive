@@ -1052,7 +1052,9 @@ namespace Nicxlive.UnityBackend.Compat
             _ = source;
             var shader = UrpShaderCatalog.RequirePartShader();
             _material = new Material(shader);
-            Handle = BackendRegistry.currentRenderBackend().createShader(shader).Handle;
+            var vertexSource = source.Stage.Vertex ?? string.Empty;
+            var fragmentSource = source.Stage.Fragment ?? string.Empty;
+            Handle = BackendRegistry.currentRenderBackend().createShader(vertexSource, fragmentSource).Handle;
         }
         public static Shader fromOpenGLSource(string vertex, string fragment) => new Shader(new ShaderAsset { Stage = new ShaderStageSource { Vertex = vertex, Fragment = fragment } });
         public void use()
@@ -1429,7 +1431,7 @@ namespace Nicxlive.UnityBackend.Compat
             if (_maskMaterial != null)
             {
                 _maskMaterial.SetPass(0);
-                _maskMaterial.SetFloat(_propertyConfig.MaskThreshold, packet.Threshold);
+                _maskMaterial.SetFloat(_propertyConfig.MaskThreshold, 0f);
             }
             _ = sharedVertexBufferHandle();
             _ = sharedDeformBufferHandle();
@@ -1985,6 +1987,63 @@ namespace Nicxlive.UnityBackend.Compat
             public static extern IntPtr GetActiveWindow();
         }
 
+        private static class NativeLibraryCompat
+        {
+            private const int RTLD_NOW = 2;
+
+            [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+            private static extern IntPtr LoadLibraryW(string fileName);
+
+            [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Ansi)]
+            private static extern IntPtr GetProcAddress(IntPtr module, string symbol);
+
+            [DllImport("libdl")]
+            private static extern IntPtr dlopen(string fileName, int flags);
+
+            [DllImport("libdl")]
+            private static extern IntPtr dlsym(IntPtr handle, string symbol);
+
+            public static bool TryLoad(string path, out IntPtr handle)
+            {
+                handle = IntPtr.Zero;
+                if (string.IsNullOrWhiteSpace(path))
+                {
+                    return false;
+                }
+
+                if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+                {
+                    handle = LoadLibraryW(path);
+                }
+                else
+                {
+                    handle = dlopen(path, RTLD_NOW);
+                }
+
+                return handle != IntPtr.Zero;
+            }
+
+            public static bool TryGetExport(IntPtr handle, string symbol, out IntPtr entry)
+            {
+                entry = IntPtr.Zero;
+                if (handle == IntPtr.Zero || string.IsNullOrWhiteSpace(symbol))
+                {
+                    return false;
+                }
+
+                if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+                {
+                    entry = GetProcAddress(handle, symbol);
+                }
+                else
+                {
+                    entry = dlsym(handle, symbol);
+                }
+
+                return entry != IntPtr.Zero;
+            }
+        }
+
         public static void ensureRenderBackend() { _cachedRenderBackend ??= new RenderingBackend(); }
         public static void inSetRenderBackend(RenderingBackend backend) { _cachedRenderBackend = backend; }
         public static RenderingBackend? tryRenderBackend() { ensureRenderBackend(); return _cachedRenderBackend; }
@@ -2109,7 +2168,7 @@ namespace Nicxlive.UnityBackend.Compat
 
             foreach (var candidate in enumerateLibraryCandidates(path))
             {
-                if (NativeLibrary.TryLoad(candidate, out var handle))
+                if (NativeLibraryCompat.TryLoad(candidate, out var handle))
                 {
                     _loadedNativeLibraries[path] = handle;
                     return handle;
@@ -2123,7 +2182,7 @@ namespace Nicxlive.UnityBackend.Compat
             {
                 return IntPtr.Zero;
             }
-            return NativeLibrary.TryGetExport(handle, symbol, out var entry) ? entry : IntPtr.Zero;
+            return NativeLibraryCompat.TryGetExport(handle, symbol, out var entry) ? entry : IntPtr.Zero;
         }
         public static void configureMacOpenGLSurfaceOpacity(IntPtr glContext)
         {
@@ -3287,7 +3346,7 @@ namespace Nicxlive.UnityBackend.Managed
             {
                 return;
             }
-            var shader = UrpShaderCatalog.RequirePartShader();
+            var shader = Nicxlive.UnityBackend.Compat.UrpShaderCatalog.RequirePartShader();
             _presentMaterial = new Material(shader)
             {
                 name = "nicxlive_present_program"
