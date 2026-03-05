@@ -191,6 +191,22 @@ BENIGN_EXTRA_TOKENS = {
     "render.init_mask", "render.exec"
 }
 
+URP_REQUIRED_PATTERNS = [
+    ("URP shader is used", r"Universal Render Pipeline/Unlit"),
+    ("SRP camera hook is used", r"RenderPipelineManager\.beginCameraRendering"),
+    ("URP command buffer router exists", r"class\s+UrpCommandBufferRouter\b"),
+    ("URP router attach is used", r"UrpCommandBufferRouter\.Attach\s*\("),
+]
+
+URP_FORBIDDEN_PATTERNS = [
+    ("Built-in CameraEvent usage", r"\bCameraEvent\b"),
+    ("Built-in AddCommandBuffer usage", r"\.AddCommandBuffer\s*\("),
+    ("Built-in RemoveCommandBuffer usage", r"\.RemoveCommandBuffer\s*\("),
+    ("Built-in Unlit/Texture shader usage", r"\"Unlit/Texture\""),
+    ("Built-in Unlit/Color shader usage", r"\"Unlit/Color\""),
+    ("Built-in CameraTarget usage", r"BuiltinRenderTextureType\.CameraTarget"),
+]
+
 @dataclass
 class Method:
     name: str
@@ -214,6 +230,10 @@ def extract_types(text: str, lang: str) -> List[TypeDef]:
         line = text.count("\n", 0, m.start()) + 1
         out.append(TypeDef(m.group(1), m.group(2), line))
     return out
+
+
+def line_of_index(text: str, index: int) -> int:
+    return text.count("\n", 0, index) + 1
 
 
 def _extract_block(text: str, open_idx: int) -> str:
@@ -518,6 +538,37 @@ def build_method_comparison(gl_methods: List[Method], dx_methods: List[Method], 
     return lines, summary
 
 
+def build_urp_check_table(unity_text: str) -> Tuple[List[str], Dict[str, int]]:
+    lines = [
+        "### URP互換チェック",
+        "| Check | 判定 | 根拠 |",
+        "|---|---|---|",
+    ]
+    summary = {"OK": 0, "内容NG": 0, "NG": 0}
+
+    for title, pattern in URP_REQUIRED_PATTERNS:
+        m = re.search(pattern, unity_text)
+        if m:
+            line = line_of_index(unity_text, m.start())
+            lines.append(f"| {title} | OK | 必須パターン検出: line {line} |")
+            summary["OK"] += 1
+        else:
+            lines.append(f"| {title} | NG | 必須パターン未検出 |")
+            summary["NG"] += 1
+
+    for title, pattern in URP_FORBIDDEN_PATTERNS:
+        m = re.search(pattern, unity_text)
+        if m:
+            line = line_of_index(unity_text, m.start())
+            lines.append(f"| {title} | NG | 禁止パターン検出: line {line} |")
+            summary["NG"] += 1
+        else:
+            lines.append(f"| {title} | OK | 禁止パターンなし |")
+            summary["OK"] += 1
+
+    return lines, summary
+
+
 def main() -> None:
     gl_text = SRC_GL.read_text(encoding="utf-8", errors="ignore")
     dx_text = SRC_DX.read_text(encoding="utf-8", errors="ignore")
@@ -532,6 +583,9 @@ def main() -> None:
     un_methods = extract_methods(SRC_UNITY, "cs")
 
     method_lines, summary = build_method_comparison(gl_methods, dx_methods, un_methods)
+    urp_lines, urp_summary = build_urp_check_table(un_text)
+    for k, v in urp_summary.items():
+        summary[k] += v
 
     out: List[str] = []
     out.append("# Unity Backend 互換性評価 (論理フロー比較)")
@@ -554,6 +608,7 @@ def main() -> None:
     out.extend(render_if_table("OpenGL", gl_types, un_types)); out.append("")
     out.extend(render_if_table("DirectX", dx_types, un_types)); out.append("")
     out.extend(method_lines); out.append("")
+    out.extend(urp_lines); out.append("")
     out.append("## サマリー")
     out.append(f"- OK: {summary['OK']}")
     out.append(f"- 内容NG: {summary['内容NG']}")
@@ -561,7 +616,7 @@ def main() -> None:
 
     OUT.write_text("\n".join(out), encoding="utf-8")
     print(f"wrote: {OUT}")
-    print(f"summary OK={summary['OK']} 内容NG={summary['内容NG']} NG={summary['NG']}")
+    print(f"summary OK={summary['OK']} content_ng={summary['内容NG']} NG={summary['NG']}")
 
 
 if __name__ == "__main__":

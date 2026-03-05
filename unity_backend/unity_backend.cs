@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
+using Nicxlive.UnityBackend.Compat;
 using Nicxlive.UnityBackend.Interop;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -985,8 +986,9 @@ namespace Nicxlive.UnityBackend.Compat
         public Shader(ShaderAsset source)
         {
             _ = source;
-            _material = new Material(UnityEngine.Shader.Find("Unlit/Texture"));
-            Handle = BackendRegistry.currentRenderBackend().createShader(UnityEngine.Shader.Find("Unlit/Texture")).Handle;
+            var shader = UrpShaderCatalog.RequirePartShader();
+            _material = new Material(shader);
+            Handle = BackendRegistry.currentRenderBackend().createShader(shader).Handle;
         }
         public static Shader fromOpenGLSource(string vertex, string fragment) => new Shader(new ShaderAsset { Stage = new ShaderStageSource { Vertex = vertex, Fragment = fragment } });
         public void use()
@@ -1045,6 +1047,102 @@ namespace Nicxlive.UnityBackend.Compat
         }
     }
 
+    internal static class UrpShaderCatalog
+    {
+        private const string UrpUnlit = "Universal Render Pipeline/Unlit";
+
+        public static UnityEngine.Shader RequirePartShader()
+        {
+            return RequireShader(UrpUnlit);
+        }
+
+        public static UnityEngine.Shader RequireMaskShader()
+        {
+            return RequireShader(UrpUnlit);
+        }
+
+        private static UnityEngine.Shader RequireShader(string shaderName)
+        {
+            var shader = UnityEngine.Shader.Find(shaderName);
+            if (shader == null)
+            {
+                throw new InvalidOperationException($"Required URP shader not found: {shaderName}");
+            }
+            return shader;
+        }
+    }
+
+    internal static class UrpCommandBufferRouter
+    {
+        private static readonly Dictionary<Camera, List<CommandBuffer>> BuffersByCamera = new Dictionary<Camera, List<CommandBuffer>>();
+        private static bool _hooked;
+
+        public static void Attach(Camera camera, CommandBuffer buffer)
+        {
+            if (camera == null || buffer == null)
+            {
+                return;
+            }
+
+            EnsureHooked();
+            if (!BuffersByCamera.TryGetValue(camera, out var list))
+            {
+                list = new List<CommandBuffer>();
+                BuffersByCamera[camera] = list;
+            }
+            if (!list.Contains(buffer))
+            {
+                list.Add(buffer);
+            }
+        }
+
+        public static void Detach(Camera camera, CommandBuffer buffer)
+        {
+            if (camera == null || buffer == null)
+            {
+                return;
+            }
+            if (!BuffersByCamera.TryGetValue(camera, out var list))
+            {
+                return;
+            }
+            list.Remove(buffer);
+            if (list.Count == 0)
+            {
+                BuffersByCamera.Remove(camera);
+            }
+        }
+
+        private static void EnsureHooked()
+        {
+            if (_hooked)
+            {
+                return;
+            }
+            RenderPipelineManager.beginCameraRendering += OnBeginCameraRendering;
+            _hooked = true;
+        }
+
+        private static void OnBeginCameraRendering(ScriptableRenderContext context, Camera camera)
+        {
+            if (!BuffersByCamera.TryGetValue(camera, out var list) || list.Count == 0)
+            {
+                return;
+            }
+
+            for (var i = 0; i < list.Count; i++)
+            {
+                var buffer = list[i];
+                if (buffer == null)
+                {
+                    continue;
+                }
+                context.ExecuteCommandBuffer(buffer);
+                buffer.Clear();
+            }
+        }
+    }
+
     public sealed class RenderingBackend
     {
         public readonly CommandExecutor Executor = new CommandExecutor();
@@ -1056,11 +1154,12 @@ namespace Nicxlive.UnityBackend.Compat
         private SharedBuffers _sharedSnapshot = new SharedBuffers();
         private CommandBuffer? _commandBuffer;
         private Camera? _boundCamera;
+        private Camera? _attachedCamera;
+        private CommandBuffer? _attachedCommandBuffer;
         private Material? _partMaterial;
         private Material? _maskMaterial;
         private readonly CommandExecutor.PropertyConfig _propertyConfig = new CommandExecutor.PropertyConfig();
         private bool _sceneOpen;
-        private bool _attachedToCamera;
         private int _viewportWidth = 1280;
         private int _viewportHeight = 720;
 
@@ -1071,8 +1170,8 @@ namespace Nicxlive.UnityBackend.Compat
         public void bindDrawableVao() => Executor.bindDrawableVao();
         public void beginScene(CommandBuffer buffer, int width, int height)
         {
-            EnsurePipelineObjects();
             _commandBuffer = buffer;
+            EnsurePipelineObjects();
             _viewportWidth = Mathf.Max(1, width);
             _viewportHeight = Mathf.Max(1, height);
             _immediateCommands.Clear();
@@ -1450,7 +1549,8 @@ namespace Nicxlive.UnityBackend.Compat
 
         public GLShaderHandle createShader(string vertexSource, string fragmentSource)
         {
-            var shader = UnityEngine.Shader.Find("Unlit/Texture");
+            _ = (vertexSource, fragmentSource);
+            var shader = UrpShaderCatalog.RequirePartShader();
             var h = Textures.createShader(shader);
             return new GLShaderHandle { Handle = h };
         }
@@ -1478,16 +1578,26 @@ namespace Nicxlive.UnityBackend.Compat
             }
             if (_partMaterial == null)
             {
-                _partMaterial = new Material(UnityEngine.Shader.Find("Unlit/Texture"));
+                _partMaterial = new Material(UrpShaderCatalog.RequirePartShader());
             }
             if (_maskMaterial == null)
             {
-                _maskMaterial = new Material(UnityEngine.Shader.Find("Unlit/Color"));
+                _maskMaterial = new Material(UrpShaderCatalog.RequireMaskShader());
             }
-            if (_boundCamera != null && !_attachedToCamera)
+            if (_attachedCamera != _boundCamera || _attachedCommandBuffer != _commandBuffer)
             {
-                _boundCamera.AddCommandBuffer(CameraEvent.BeforeImageEffects, _commandBuffer);
-                _attachedToCamera = true;
+                if (_attachedCamera != null && _attachedCommandBuffer != null)
+                {
+                    UrpCommandBufferRouter.Detach(_attachedCamera, _attachedCommandBuffer);
+                }
+                _attachedCamera = null;
+                _attachedCommandBuffer = null;
+            }
+            if (_boundCamera != null && _commandBuffer != null && _attachedCamera == null)
+            {
+                UrpCommandBufferRouter.Attach(_boundCamera, _commandBuffer);
+                _attachedCamera = _boundCamera;
+                _attachedCommandBuffer = _commandBuffer;
             }
         }
 
@@ -2040,6 +2150,7 @@ namespace Nicxlive.UnityBackend.Managed
         private readonly int _postTmpAId = Shader.PropertyToID("_NicxPostTmpA");
         private readonly int _postTmpBId = Shader.PropertyToID("_NicxPostTmpB");
         private readonly int _drawBufferCountId = Shader.PropertyToID("_NicxDrawBufferCount");
+        private static readonly RenderTargetIdentifier UrpBackbufferTarget = new RenderTargetIdentifier(BuiltinRenderTextureType.CurrentActive);
 
         public CommandExecutor()
         {
@@ -2117,7 +2228,7 @@ namespace Nicxlive.UnityBackend.Managed
             buffer.SetViewProjectionMatrices(Matrix4x4.identity, Matrix4x4.identity);
             buffer.SetGlobalVector("_SceneAmbientLight", Vector4.one);
             _renderTargetStack.Clear();
-            _renderTargetStack.Push(BuiltinRenderTextureType.CameraTarget);
+            _renderTargetStack.Push(UrpBackbufferTarget);
             _viewportStack.Clear();
             _dynamicPassStack.Clear();
             _inMaskPass = false;
@@ -2177,7 +2288,7 @@ namespace Nicxlive.UnityBackend.Managed
         {
             if (_renderTargetStack.Count == 0)
             {
-                _renderTargetStack.Push(BuiltinRenderTextureType.CameraTarget);
+                _renderTargetStack.Push(UrpBackbufferTarget);
             }
             buffer.SetRenderTarget(_renderTargetStack.Peek());
         }
@@ -2198,7 +2309,7 @@ namespace Nicxlive.UnityBackend.Managed
 
         public void postProcessScene(CommandBuffer buffer)
         {
-            var current = _renderTargetStack.Count > 0 ? _renderTargetStack.Peek() : new RenderTargetIdentifier(BuiltinRenderTextureType.CameraTarget);
+            var current = _renderTargetStack.Count > 0 ? _renderTargetStack.Peek() : UrpBackbufferTarget;
             buffer.GetTemporaryRT(_postTmpAId, _viewportW, _viewportH, 0, FilterMode.Bilinear, RenderTextureFormat.ARGB32);
             buffer.GetTemporaryRT(_postTmpBId, _viewportW, _viewportH, 0, FilterMode.Bilinear, RenderTextureFormat.ARGB32);
             buffer.Blit(current, _postTmpAId);
@@ -2214,9 +2325,12 @@ namespace Nicxlive.UnityBackend.Managed
             ensurePresentProgram();
             var size = new Vector4(Mathf.Max(1, width), Mathf.Max(1, height), 0, 0);
             buffer.SetGlobalVector("_PresentFramebufferSize", size);
-            var src = _renderTargetStack.Count > 0 ? _renderTargetStack.Peek() : new RenderTargetIdentifier(BuiltinRenderTextureType.CameraTarget);
-            buffer.SetRenderTarget(BuiltinRenderTextureType.CameraTarget);
-            buffer.Blit(src, BuiltinRenderTextureType.CameraTarget);
+            var src = _renderTargetStack.Count > 0 ? _renderTargetStack.Peek() : UrpBackbufferTarget;
+            buffer.SetRenderTarget(UrpBackbufferTarget);
+            if (!src.Equals(UrpBackbufferTarget))
+            {
+                buffer.Blit(src, UrpBackbufferTarget);
+            }
         }
 
         private void renderScene(CommandBuffer buffer, Material material, Mesh mesh, Matrix4x4 matrix)
@@ -2915,12 +3029,12 @@ namespace Nicxlive.UnityBackend.Managed
         public Material? PartMaterial;
         public Material? MaskMaterial;
         public CommandExecutor.PropertyConfig ShaderProperties = new CommandExecutor.PropertyConfig();
-        public CameraEvent CameraEvent = CameraEvent.BeforeImageEffects;
 
         private TextureRegistry? _textureRegistry;
         private NicxliveRenderer? _renderer;
         private CommandExecutor? _executor;
         private CommandBuffer? _commandBuffer;
+        private Camera? _attachedCamera;
 
         private void OnEnable()
         {
@@ -2939,7 +3053,8 @@ namespace Nicxlive.UnityBackend.Managed
             _renderer = new NicxliveRenderer(Screen.width, Screen.height, _textureRegistry);
             _executor = new CommandExecutor();
             _commandBuffer = new CommandBuffer { name = "nicxlive_unity_backend" };
-            camera.AddCommandBuffer(CameraEvent, _commandBuffer);
+            UrpCommandBufferRouter.Attach(camera, _commandBuffer);
+            _attachedCamera = camera;
 
             if (!string.IsNullOrWhiteSpace(PuppetPath))
             {
@@ -2959,6 +3074,15 @@ namespace Nicxlive.UnityBackend.Managed
             {
                 return;
             }
+            if (_commandBuffer != null && _attachedCamera != camera)
+            {
+                if (_attachedCamera != null)
+                {
+                    UrpCommandBufferRouter.Detach(_attachedCamera, _commandBuffer);
+                }
+                UrpCommandBufferRouter.Attach(camera, _commandBuffer);
+                _attachedCamera = camera;
+            }
 
             _renderer.BeginFrame(Screen.width, Screen.height);
             _renderer.Tick(Time.deltaTime);
@@ -2970,15 +3094,11 @@ namespace Nicxlive.UnityBackend.Managed
 
         private void OnDisable()
         {
-            if (TargetCamera == null)
+            if (_attachedCamera != null && _commandBuffer != null)
             {
-                TargetCamera = Camera.main;
+                UrpCommandBufferRouter.Detach(_attachedCamera, _commandBuffer);
             }
-
-            if (TargetCamera != null && _commandBuffer != null)
-            {
-                TargetCamera.RemoveCommandBuffer(CameraEvent, _commandBuffer);
-            }
+            _attachedCamera = null;
 
             _commandBuffer?.Release();
             _commandBuffer = null;
