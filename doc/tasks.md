@@ -284,3 +284,24 @@ Status: `[ ]` todo, `[>]` in progress, `[x]` done, `[?]` blocked.
 | [x] | CP161 | behavior_diff | `compat-webgl_backend.md` | `postProcessScene` の `renderScene` 入力（area/mvp/fbSize/ambient） | `webgl_backend.js` の postprocess 描画に `area` ベース頂点更新、`ambientLight` / `fbSize` / `mvp` uniform 供給を追加し、`fBuffer/cfBuffer` ping-pong + `blitFramebuffer` へ整合。 | `opengl_backend.d:renderScene/postProcessScene` を正として写経実装した。 |
 | [>] | CP162 | behavior_diff | `compat-webgl_backend.md` | texture parameter APIs の残差分（ClampToBorder, readback） | `CP157` で API は実装済み。さらに `EXT_texture_border_clamp` 対応を追加し、対応環境では `ClampToBorder` と border color(0,0,0,0) を反映。未対応環境は `CLAMP_TO_EDGE` フォールバック。 | WebGL2 非対応仕様（desktop GL依存）について、実行環境ごとの差分（extension有無）を明示し、運用方針を確定する。 |
 | [ ] | CP134 | behavior_diff | `compat-unity_native.md`, `compat-projectable.md` | `njgSetPuppetScale`/`njgSetPuppetTranslation` 後の再描画トリガ | 追加していた `NotifyReason::Transformed` 明示通知は D 側に存在しないため撤回済み | `unity.d` の `njgSetPuppetScale`/`njgSetPuppetTranslation` を正として、必要な再描画契約は Node/Projectable 側で写経対応する |
+
+## Unity Backend スタブ/ダミー解消タスク（unity_backend.cs）
+
+Status: `[ ]` todo, `[>]` in progress, `[x]` done, `[?]` blocked.
+
+| Status | Task ID | 対象 | 完了条件 |
+| --- | --- | --- | --- |
+| [x] | UBP001 | `RenderingBackend` の dynamic framebuffer 管理 (`dynamicFramebufferKeyUsesHandle`, `acquire`, `release`, `glDeleteFramebuffers`) | texture handle ベースで関連 framebuffer を追跡・解放できること |
+| [x] | UBP002 | `drawDrawableElements` / `enqueueSpan` / `drawUploadedGeometry` / `renderScene` | no-op を廃止し、実際に draw packet 経路へ流せること |
+| [x] | UBP003 | `RenderingBackend.issueBlendBarrier` | no-op を廃止し、`CommandExecutor.issueBlendBarrier` へ反映されること |
+| [x] | UBP004 | OpenGL互換 API (`glGetShaderiv`, `glGetProgramiv`, `glDeleteShader` 等) | shader/program ハンドルに対して実状態検証/解放が動作すること |
+| [x] | UBP005 | 動的ライブラリ解決 (`dlopen`, `dlsym`) | `NativeLibrary` 経由で実際に解決処理が行われること |
+| [x] | UBP006 | SDL/window 互換 API (`SDL_GL_SetAttribute`, `queryWindowPixelSize`, `requireWindowHandle`) | 設定値保持・画面サイズ取得・window handle 取得が no-op/固定値でないこと |
+| [x] | UBP007 | `sampleTex` | `Texture2D` の実サンプリング結果を返すこと（readable/unreadable双方の経路） |
+| [x] | UBP008 | DirectX互換 API (`WinD3D12*`, `D3D12_ROOT_DESCRIPTOR_TABLE`) | 関数ポインタ解決/有効ポインタ返却を行うこと |
+| [x] | UBP009 | `DirectXRuntime.ensureUploadBuffer` | no-op を廃止し staging バッファ容量確保が動作すること |
+| [x] | UBP010 | 検証と再評価 | `rg` によるスタブ痕跡確認と `compat-unity_backend.md` 再生成で内容を更新すること |
+| [x] | UBP011 | `createShader(string,string)` のソース互換対応 | 入力ソースを解析し、シェーダプロファイル（mask/present/uniform）を反映すること |
+| [x] | UBP012 | `CommandExecutor.ensurePresentProgram` 実体化 | present 用 material/mesh を初期化し、`presentSceneToBackbuffer` で利用すること |
+| [x] | UBP013 | 高度ブレンド能力の実装化 | `supportsAdvancedBlend*` 固定 false を廃止し、実行環境に応じた能力初期化を行うこと |
+| [x] | UBP014 | `DirectXRuntime` 互換レイヤ拡張 | swapchain target/srv binding/upload/geometry pack/frame 管理を実体化し、互換実行経路を強化すること |
