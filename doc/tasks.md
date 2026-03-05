@@ -305,3 +305,16 @@ Status: `[ ]` todo, `[>]` in progress, `[x]` done, `[?]` blocked.
 | [x] | UBP012 | `CommandExecutor.ensurePresentProgram` 実体化 | present 用 material/mesh を初期化し、`presentSceneToBackbuffer` で利用すること |
 | [x] | UBP013 | 高度ブレンド能力の実装化 | `supportsAdvancedBlend*` 固定 false を廃止し、実行環境に応じた能力初期化を行うこと |
 | [x] | UBP014 | `DirectXRuntime` 互換レイヤ拡張 | swapchain target/srv binding/upload/geometry pack/frame 管理を実体化し、互換実行経路を強化すること |
+
+## Unity Plugin 拡張タスク（Editor運用観点）
+
+Status: `[ ]` todo, `[>]` in progress, `[x]` done, `[?]` blocked.
+
+| Status | Task ID | 方針 | 対象 | 完了条件 |
+| --- | --- | --- | --- | --- |
+| [x] | UPE001 | A | `NicxliveBehaviour` 常時描画化（`ExecuteAlways` / Edit Mode 更新） | Play を押さない状態でも対象描画ループが継続すること |
+| [x] | UPE002 | A | `NicxliveBehaviour` の transform 連携（位置・スケール） | GameObject の位置/スケールを native puppet 変換へ反映できること |
+| [x] | UPE003 | A | `NicxliveRenderer`/PInvoke のパラメータ API 実装 (`njgGetParameters`/`njgUpdateParameters`) | モデルパラメータ列挙と更新を managed 側から実行できること |
+| [x] | UPE004 | B | Editor 拡張ファイル追加（CustomEditor） | モデルファイル/リソースを Inspector から選択して `PuppetPath` に反映できること |
+| [x] | UPE005 | B | Editor でのパラメータ操作 UI | Inspector からパラメータ値を変更し、実モデルに反映できること |
+| [x] | UPE006 | A+B | 再評価反映 (`compat-unity_plugin_impl.md`) | 追加観点の判定が全て `OK` になること |

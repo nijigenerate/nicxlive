@@ -1,7 +1,9 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO;
 using System.Runtime.InteropServices;
+using System.Text;
 using Nicxlive.UnityBackend.Interop;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -102,6 +104,25 @@ namespace Nicxlive.UnityBackend.Interop
         {
             public int ViewportWidth;
             public int ViewportHeight;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct PuppetParameterUpdate
+        {
+            public uint ParameterUuid;
+            public Vec2 Value;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct NjgParameterInfo
+        {
+            public uint Uuid;
+            [MarshalAs(UnmanagedType.I1)] public bool IsVec2;
+            public Vec2 Min;
+            public Vec2 Max;
+            public Vec2 Defaults;
+            public IntPtr Name;
+            public nuint NameLength;
         }
 
         [StructLayout(LayoutKind.Sequential)]
@@ -315,6 +336,18 @@ namespace Nicxlive.UnityBackend.Interop
         [DllImport(DllName, EntryPoint = "njgUnloadPuppet", CallingConvention = CallingConvention.Cdecl)]
         public static extern NjgResult UnloadPuppet(IntPtr renderer, IntPtr puppet);
 
+        [DllImport(DllName, EntryPoint = "njgGetParameters", CallingConvention = CallingConvention.Cdecl)]
+        public static extern NjgResult GetParameters(IntPtr puppet, IntPtr buffer, nuint bufferLength, out nuint outCount);
+
+        [DllImport(DllName, EntryPoint = "njgUpdateParameters", CallingConvention = CallingConvention.Cdecl)]
+        public static extern NjgResult UpdateParameters(IntPtr puppet, IntPtr updates, nuint updateCount);
+
+        [DllImport(DllName, EntryPoint = "njgSetPuppetScale", CallingConvention = CallingConvention.Cdecl)]
+        public static extern NjgResult SetPuppetScale(IntPtr puppet, float sx, float sy);
+
+        [DllImport(DllName, EntryPoint = "njgSetPuppetTranslation", CallingConvention = CallingConvention.Cdecl)]
+        public static extern NjgResult SetPuppetTranslation(IntPtr puppet, float tx, float ty);
+
         [DllImport(DllName, EntryPoint = "njgBeginFrame", CallingConvention = CallingConvention.Cdecl)]
         public static extern NjgResult BeginFrame(IntPtr renderer, ref FrameConfig config);
 
@@ -498,6 +531,32 @@ namespace Nicxlive.UnityBackend.Managed
             Marshal.Copy(slice.Data, dst, 0, dst.Length);
             return dst;
         }
+    }
+}
+
+
+
+namespace Nicxlive.UnityBackend.Managed
+{
+    public sealed class PuppetParameterInfo
+    {
+        public uint Uuid;
+        public string Name = string.Empty;
+        public bool IsVec2;
+        public Vector2 Min;
+        public Vector2 Max;
+        public Vector2 Defaults;
+    }
+
+    [Serializable]
+    public sealed class PuppetParameterState
+    {
+        public uint Uuid;
+        public string Name = string.Empty;
+        public bool IsVec2;
+        public Vector2 Min;
+        public Vector2 Max;
+        public Vector2 Value;
     }
 }
 
@@ -2648,14 +2707,37 @@ namespace Nicxlive.UnityBackend.Managed
         }
 
         public TextureRegistry TextureRegistry => _textureRegistry;
+        public bool HasPuppet => _puppet != IntPtr.Zero;
+        public string LoadedPuppetPath { get; private set; } = string.Empty;
 
         public void LoadPuppet(string puppetPath)
         {
-            var result = NicxliveNative.LoadPuppet(_renderer, puppetPath, out _puppet);
+            if (string.IsNullOrWhiteSpace(puppetPath))
+            {
+                throw new InvalidOperationException("Puppet path is empty.");
+            }
+
+            var normalizedPath = Path.GetFullPath(puppetPath);
+            UnloadPuppet();
+            var result = NicxliveNative.LoadPuppet(_renderer, normalizedPath, out _puppet);
             if (result != NicxliveNative.NjgResult.Ok || _puppet == IntPtr.Zero)
             {
-                throw new InvalidOperationException($"njgLoadPuppet failed: {result}, path={puppetPath}");
+                throw new InvalidOperationException($"njgLoadPuppet failed: {result}, path={normalizedPath}");
             }
+            LoadedPuppetPath = normalizedPath;
+        }
+
+        public void UnloadPuppet()
+        {
+            if (_puppet == IntPtr.Zero || _renderer == IntPtr.Zero)
+            {
+                LoadedPuppetPath = string.Empty;
+                return;
+            }
+
+            NicxliveNative.UnloadPuppet(_renderer, _puppet);
+            _puppet = IntPtr.Zero;
+            LoadedPuppetPath = string.Empty;
         }
 
         public void BeginFrame(int width, int height)
@@ -2707,6 +2789,130 @@ namespace Nicxlive.UnityBackend.Managed
             return SharedBufferUploader.CopyFromNative(snapshot);
         }
 
+        public void SetPuppetScale(float sx, float sy)
+        {
+            if (_puppet == IntPtr.Zero)
+            {
+                return;
+            }
+
+            var result = NicxliveNative.SetPuppetScale(_puppet, sx, sy);
+            if (result != NicxliveNative.NjgResult.Ok)
+            {
+                throw new InvalidOperationException($"njgSetPuppetScale failed: {result}");
+            }
+        }
+
+        public void SetPuppetTranslation(float tx, float ty)
+        {
+            if (_puppet == IntPtr.Zero)
+            {
+                return;
+            }
+
+            var result = NicxliveNative.SetPuppetTranslation(_puppet, tx, ty);
+            if (result != NicxliveNative.NjgResult.Ok)
+            {
+                throw new InvalidOperationException($"njgSetPuppetTranslation failed: {result}");
+            }
+        }
+
+        public List<PuppetParameterInfo> GetParameters()
+        {
+            var output = new List<PuppetParameterInfo>();
+            if (_puppet == IntPtr.Zero)
+            {
+                return output;
+            }
+
+            var queryResult = NicxliveNative.GetParameters(_puppet, IntPtr.Zero, 0, out var count);
+            if (queryResult != NicxliveNative.NjgResult.Ok)
+            {
+                throw new InvalidOperationException($"njgGetParameters(count) failed: {queryResult}");
+            }
+
+            if (count == 0)
+            {
+                return output;
+            }
+
+            var stride = Marshal.SizeOf<NicxliveNative.NjgParameterInfo>();
+            var byteLength = checked((int)count * stride);
+            var buffer = Marshal.AllocHGlobal(byteLength);
+            try
+            {
+                var result = NicxliveNative.GetParameters(_puppet, buffer, count, out var outCount);
+                if (result != NicxliveNative.NjgResult.Ok)
+                {
+                    throw new InvalidOperationException($"njgGetParameters(data) failed: {result}");
+                }
+
+                var actual = Math.Min(count, outCount);
+                output.Capacity = checked((int)actual);
+                for (nuint i = 0; i < actual; i++)
+                {
+                    var current = IntPtr.Add(buffer, checked((int)i * stride));
+                    var native = Marshal.PtrToStructure<NicxliveNative.NjgParameterInfo>(current);
+                    output.Add(new PuppetParameterInfo
+                    {
+                        Uuid = native.Uuid,
+                        IsVec2 = native.IsVec2,
+                        Min = new Vector2(native.Min.X, native.Min.Y),
+                        Max = new Vector2(native.Max.X, native.Max.Y),
+                        Defaults = new Vector2(native.Defaults.X, native.Defaults.Y),
+                        Name = DecodeUtf8(native.Name, native.NameLength),
+                    });
+                }
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(buffer);
+            }
+
+            return output;
+        }
+
+        public void UpdateParameter(uint uuid, Vector2 value)
+        {
+            Span<NicxliveNative.PuppetParameterUpdate> updates = stackalloc NicxliveNative.PuppetParameterUpdate[1];
+            updates[0] = new NicxliveNative.PuppetParameterUpdate
+            {
+                ParameterUuid = uuid,
+                Value = new NicxliveNative.Vec2 { X = value.x, Y = value.y },
+            };
+            UpdateParameters(updates);
+        }
+
+        public void UpdateParameters(ReadOnlySpan<NicxliveNative.PuppetParameterUpdate> updates)
+        {
+            if (_puppet == IntPtr.Zero || updates.Length == 0)
+            {
+                return;
+            }
+
+            var stride = Marshal.SizeOf<NicxliveNative.PuppetParameterUpdate>();
+            var byteLength = checked(updates.Length * stride);
+            var buffer = Marshal.AllocHGlobal(byteLength);
+            try
+            {
+                for (var i = 0; i < updates.Length; i++)
+                {
+                    var current = IntPtr.Add(buffer, i * stride);
+                    Marshal.StructureToPtr(updates[i], current, false);
+                }
+
+                var result = NicxliveNative.UpdateParameters(_puppet, buffer, (nuint)updates.Length);
+                if (result != NicxliveNative.NjgResult.Ok)
+                {
+                    throw new InvalidOperationException($"njgUpdateParameters failed: {result}");
+                }
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(buffer);
+            }
+        }
+
         public void Dispose()
         {
             if (_disposed)
@@ -2715,12 +2921,7 @@ namespace Nicxlive.UnityBackend.Managed
             }
 
             _disposed = true;
-
-            if (_puppet != IntPtr.Zero && _renderer != IntPtr.Zero)
-            {
-                NicxliveNative.UnloadPuppet(_renderer, _puppet);
-                _puppet = IntPtr.Zero;
-            }
+            UnloadPuppet();
 
             if (_renderer != IntPtr.Zero)
             {
@@ -2743,6 +2944,19 @@ namespace Nicxlive.UnityBackend.Managed
         private void ReleaseTexture(nuint handle, IntPtr userData)
         {
             _textureRegistry.ReleaseTexture((ulong)handle);
+        }
+
+        private static string DecodeUtf8(IntPtr ptr, nuint byteLength)
+        {
+            if (ptr == IntPtr.Zero || byteLength == 0)
+            {
+                return string.Empty;
+            }
+
+            var length = checked((int)byteLength);
+            var bytes = new byte[length];
+            Marshal.Copy(ptr, bytes, 0, length);
+            return Encoding.UTF8.GetString(bytes);
         }
     }
 }
@@ -3721,9 +3935,14 @@ namespace Nicxlive.UnityBackend.Managed
 
 namespace Nicxlive.UnityBackend.Managed
 {
+    [ExecuteAlways]
     public sealed class NicxliveBehaviour : MonoBehaviour
     {
+        public UnityEngine.Object? PuppetAsset;
         public string PuppetPath = string.Empty;
+        public Vector2 ModelScale = Vector2.one;
+        public Vector2 ModelOffsetPixels = Vector2.zero;
+        public bool DrawInEditMode = true;
         public Camera? TargetCamera;
         public Material? PartMaterial;
         public Material? MaskMaterial;
@@ -3734,61 +3953,343 @@ namespace Nicxlive.UnityBackend.Managed
         private CommandExecutor? _executor;
         private CommandBuffer? _commandBuffer;
         private Camera? _attachedCamera;
+        private string _loadedPuppetPath = string.Empty;
+        private readonly List<PuppetParameterState> _parameterStates = new List<PuppetParameterState>();
+        private readonly Dictionary<uint, PuppetParameterState> _parameterStatesByUuid = new Dictionary<uint, PuppetParameterState>();
+#if UNITY_EDITOR
+        private double _lastEditorFrameTime = -1.0;
+#endif
+
+        public IReadOnlyList<PuppetParameterState> ParameterStates => _parameterStates;
+        public bool HasLoadedPuppet => _renderer != null && _renderer.HasPuppet;
 
         private void OnEnable()
         {
-            var camera = TargetCamera != null ? TargetCamera : Camera.main;
-            if (camera == null)
-            {
-                throw new InvalidOperationException("Target camera is not set.");
-            }
+            TryEnsureRuntime();
+            TryReloadPuppet(false);
+        }
 
-            if (PartMaterial == null || MaskMaterial == null)
+        private void OnValidate()
+        {
+            if (!isActiveAndEnabled)
             {
-                throw new InvalidOperationException("PartMaterial and MaskMaterial are required.");
+                return;
             }
-
-            _textureRegistry = new TextureRegistry();
-            _renderer = new NicxliveRenderer(Screen.width, Screen.height, _textureRegistry);
-            _executor = new CommandExecutor();
-            _commandBuffer = new CommandBuffer { name = "nicxlive_unity_backend" };
-            Nicxlive.UnityBackend.Compat.UrpCommandBufferRouter.Attach(camera, _commandBuffer);
-            _attachedCamera = camera;
-
-            if (!string.IsNullOrWhiteSpace(PuppetPath))
-            {
-                _renderer.LoadPuppet(PuppetPath);
-            }
+            TryEnsureRuntime();
+            TryReloadPuppet(true);
         }
 
         private void Update()
         {
-            if (_renderer == null || _executor == null || _commandBuffer == null || PartMaterial == null || MaskMaterial == null)
+            if (!Application.isPlaying && !DrawInEditMode)
             {
                 return;
             }
 
-            var camera = TargetCamera != null ? TargetCamera : Camera.main;
+            if (!TryEnsureRuntime() ||
+                _renderer == null ||
+                _executor == null ||
+                _commandBuffer == null ||
+                PartMaterial == null ||
+                MaskMaterial == null)
+            {
+                return;
+            }
+
+            var camera = ResolveCamera();
             if (camera == null)
             {
                 return;
             }
-            if (_commandBuffer != null && _attachedCamera != camera)
+            EnsureAttachedCamera(camera);
+
+            TryReloadPuppet(false);
+            if (_renderer.HasPuppet)
             {
-                if (_attachedCamera != null)
-                {
-                    Nicxlive.UnityBackend.Compat.UrpCommandBufferRouter.Detach(_attachedCamera, _commandBuffer);
-                }
-                Nicxlive.UnityBackend.Compat.UrpCommandBufferRouter.Attach(camera, _commandBuffer);
-                _attachedCamera = camera;
+                ApplyTransformToPuppet(camera);
             }
 
-            _renderer.BeginFrame(Screen.width, Screen.height);
-            _renderer.Tick(Time.deltaTime);
+            var viewportWidth = Mathf.Max(1, camera.pixelWidth);
+            var viewportHeight = Mathf.Max(1, camera.pixelHeight);
+            _renderer.BeginFrame(viewportWidth, viewportHeight);
+            _renderer.Tick(ComputeDeltaSeconds());
             var view = _renderer.EmitCommands();
             var shared = _renderer.GetSharedBuffers();
             var decoded = CommandStream.Decode(view);
             _executor.Execute(_commandBuffer, camera, decoded, shared, _renderer.TextureRegistry, PartMaterial, MaskMaterial, ShaderProperties);
+#if UNITY_EDITOR
+            if (!Application.isPlaying)
+            {
+                UnityEditor.EditorApplication.QueuePlayerLoopUpdate();
+            }
+#endif
+        }
+
+        public bool ReloadPuppetFromCurrentSelection()
+        {
+            return TryReloadPuppet(true);
+        }
+
+        public bool RefreshParameters()
+        {
+            if (_renderer == null || !_renderer.HasPuppet)
+            {
+                _parameterStates.Clear();
+                _parameterStatesByUuid.Clear();
+                return false;
+            }
+
+            var metadata = _renderer.GetParameters();
+            var next = new List<PuppetParameterState>(metadata.Count);
+            var nextMap = new Dictionary<uint, PuppetParameterState>(metadata.Count);
+
+            for (var i = 0; i < metadata.Count; i++)
+            {
+                var info = metadata[i];
+                var state = new PuppetParameterState
+                {
+                    Uuid = info.Uuid,
+                    Name = info.Name,
+                    IsVec2 = info.IsVec2,
+                    Min = info.Min,
+                    Max = info.Max,
+                    Value = ClampParameterValue(info.Defaults, info.Min, info.Max, info.IsVec2),
+                };
+
+                if (_parameterStatesByUuid.TryGetValue(info.Uuid, out var existing))
+                {
+                    state.Value = ClampParameterValue(existing.Value, state.Min, state.Max, state.IsVec2);
+                }
+
+                next.Add(state);
+                nextMap[state.Uuid] = state;
+            }
+
+            _parameterStates.Clear();
+            _parameterStates.AddRange(next);
+            _parameterStatesByUuid.Clear();
+            foreach (var kv in nextMap)
+            {
+                _parameterStatesByUuid[kv.Key] = kv.Value;
+            }
+            return _parameterStates.Count > 0;
+        }
+
+        public bool SetParameterValue(uint uuid, Vector2 value)
+        {
+            if (_renderer == null || !_renderer.HasPuppet)
+            {
+                return false;
+            }
+            if (!_parameterStatesByUuid.TryGetValue(uuid, out var state))
+            {
+                return false;
+            }
+
+            var clamped = ClampParameterValue(value, state.Min, state.Max, state.IsVec2);
+            _renderer.UpdateParameter(uuid, clamped);
+            state.Value = clamped;
+            _parameterStatesByUuid[uuid] = state;
+            return true;
+        }
+
+        public void ApplyTransformNow()
+        {
+            if (_renderer == null || !_renderer.HasPuppet)
+            {
+                return;
+            }
+            var camera = ResolveCamera();
+            if (camera == null)
+            {
+                return;
+            }
+            ApplyTransformToPuppet(camera);
+        }
+
+        private bool TryEnsureRuntime()
+        {
+            if (PartMaterial == null || MaskMaterial == null)
+            {
+                return false;
+            }
+
+            var camera = ResolveCamera();
+            if (camera == null)
+            {
+                return false;
+            }
+
+            _textureRegistry ??= new TextureRegistry();
+            _renderer ??= new NicxliveRenderer(Mathf.Max(1, camera.pixelWidth), Mathf.Max(1, camera.pixelHeight), _textureRegistry);
+            _executor ??= new CommandExecutor();
+            if (_commandBuffer == null)
+            {
+                _commandBuffer = new CommandBuffer { name = "nicxlive_unity_backend" };
+            }
+            EnsureAttachedCamera(camera);
+            return true;
+        }
+
+        private Camera? ResolveCamera()
+        {
+            if (TargetCamera != null)
+            {
+                return TargetCamera;
+            }
+            if (Camera.main != null)
+            {
+                return Camera.main;
+            }
+
+            var cameraCount = Camera.allCamerasCount;
+            if (cameraCount > 0)
+            {
+                var cameras = new Camera[cameraCount];
+                Camera.GetAllCameras(cameras);
+                if (cameras.Length > 0 && cameras[0] != null)
+                {
+                    return cameras[0];
+                }
+            }
+#if UNITY_EDITOR
+            var scene = UnityEditor.SceneView.lastActiveSceneView;
+            if (scene != null && scene.camera != null)
+            {
+                return scene.camera;
+            }
+#endif
+            return null;
+        }
+
+        private void EnsureAttachedCamera(Camera camera)
+        {
+            if (_commandBuffer == null || _attachedCamera == camera)
+            {
+                return;
+            }
+            if (_attachedCamera != null)
+            {
+                Nicxlive.UnityBackend.Compat.UrpCommandBufferRouter.Detach(_attachedCamera, _commandBuffer);
+            }
+            Nicxlive.UnityBackend.Compat.UrpCommandBufferRouter.Attach(camera, _commandBuffer);
+            _attachedCamera = camera;
+        }
+
+        private bool TryReloadPuppet(bool forceReload)
+        {
+            if (_renderer == null)
+            {
+                return false;
+            }
+
+            var resolvedPath = ResolvePuppetPath();
+            if (string.IsNullOrWhiteSpace(resolvedPath))
+            {
+                if (_renderer.HasPuppet)
+                {
+                    _renderer.UnloadPuppet();
+                    _loadedPuppetPath = string.Empty;
+                    _parameterStates.Clear();
+                    _parameterStatesByUuid.Clear();
+                }
+                return false;
+            }
+
+            if (!File.Exists(resolvedPath))
+            {
+                return false;
+            }
+
+            var normalizedPath = Path.GetFullPath(resolvedPath);
+            if (!forceReload &&
+                _renderer.HasPuppet &&
+                string.Equals(_loadedPuppetPath, normalizedPath, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            _renderer.LoadPuppet(normalizedPath);
+            _loadedPuppetPath = normalizedPath;
+            RefreshParameters();
+            ApplyTransformNow();
+            return true;
+        }
+
+        private string ResolvePuppetPath()
+        {
+#if UNITY_EDITOR
+            if (PuppetAsset != null)
+            {
+                var assetPath = UnityEditor.AssetDatabase.GetAssetPath(PuppetAsset);
+                if (!string.IsNullOrWhiteSpace(assetPath))
+                {
+                    return Path.GetFullPath(assetPath);
+                }
+            }
+#endif
+            if (string.IsNullOrWhiteSpace(PuppetPath))
+            {
+                return string.Empty;
+            }
+            return Path.GetFullPath(PuppetPath);
+        }
+
+        private void ApplyTransformToPuppet(Camera camera)
+        {
+            if (_renderer == null || !_renderer.HasPuppet)
+            {
+                return;
+            }
+
+            var width = Mathf.Max(1, camera.pixelWidth);
+            var height = Mathf.Max(1, camera.pixelHeight);
+            var screen = camera.WorldToScreenPoint(transform.position);
+            var tx = screen.x - (width * 0.5f) + ModelOffsetPixels.x;
+            var ty = (height * 0.5f) - screen.y + ModelOffsetPixels.y;
+
+            var lossy = transform.lossyScale;
+            var sx = ModelScale.x * lossy.x;
+            var sy = ModelScale.y * lossy.y;
+            if (Mathf.Approximately(sx, 0f))
+            {
+                sx = 1f;
+            }
+            if (Mathf.Approximately(sy, 0f))
+            {
+                sy = 1f;
+            }
+
+            _renderer.SetPuppetScale(sx, sy);
+            _renderer.SetPuppetTranslation(tx, ty);
+        }
+
+        private double ComputeDeltaSeconds()
+        {
+            if (Application.isPlaying)
+            {
+                return Time.deltaTime;
+            }
+#if UNITY_EDITOR
+            var now = UnityEditor.EditorApplication.timeSinceStartup;
+            if (_lastEditorFrameTime < 0.0)
+            {
+                _lastEditorFrameTime = now;
+                return 0.0;
+            }
+            var delta = Math.Max(0.0, now - _lastEditorFrameTime);
+            _lastEditorFrameTime = now;
+            return delta;
+#else
+            return 0.0;
+#endif
+        }
+
+        private static Vector2 ClampParameterValue(Vector2 value, Vector2 min, Vector2 max, bool isVec2)
+        {
+            var x = Mathf.Clamp(value.x, min.x, max.x);
+            var y = isVec2 ? Mathf.Clamp(value.y, min.y, max.y) : value.y;
+            return new Vector2(x, y);
         }
 
         private void OnDisable()
@@ -3806,6 +4307,12 @@ namespace Nicxlive.UnityBackend.Managed
             _renderer = null;
             _executor = null;
             _textureRegistry = null;
+            _loadedPuppetPath = string.Empty;
+            _parameterStates.Clear();
+            _parameterStatesByUuid.Clear();
+#if UNITY_EDITOR
+            _lastEditorFrameTime = -1.0;
+#endif
         }
     }
 }
