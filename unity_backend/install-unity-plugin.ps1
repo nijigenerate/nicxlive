@@ -155,11 +155,15 @@ New-Item -ItemType Directory -Force -Path $runtimeDir | Out-Null
 New-Item -ItemType Directory -Force -Path $editorDir | Out-Null
 
 $runtimeSource = Join-Path $scriptDir "unity_backend.cs"
+$runtimeBehaviourSource = Join-Path $scriptDir "NicxliveBehaviour.cs"
 $editorSource = Join-Path $scriptDir "NicxliveBehaviourEditor.cs"
 $setupSource = Join-Path $scriptDir "NicxliveProjectSetup.cs"
 
 if (-not (Test-Path $runtimeSource)) {
     throw "Managed runtime source not found: $runtimeSource"
+}
+if (-not (Test-Path $runtimeBehaviourSource)) {
+    throw "Managed runtime behaviour source not found: $runtimeBehaviourSource"
 }
 if (-not (Test-Path $editorSource)) {
     throw "Managed editor source not found: $editorSource"
@@ -170,6 +174,7 @@ if (-not (Test-Path $setupSource)) {
 
 $dllDest = Join-Path $pluginsX64Dir "nicxlive.dll"
 $runtimeDest = Join-Path $runtimeDir "unity_backend.cs"
+$runtimeBehaviourDest = Join-Path $runtimeDir "NicxliveBehaviour.cs"
 $editorDest = Join-Path $editorDir "NicxliveBehaviourEditor.cs"
 $setupDest = Join-Path $editorDir "NicxliveProjectSetup.cs"
 
@@ -180,6 +185,9 @@ Copy-Item -Force $setupSource $setupDest
 if (-not $SkipUnitySetup) {
     if (Test-Path $runtimeDest) {
         Remove-Item -Force $runtimeDest
+    }
+    if (Test-Path $runtimeBehaviourDest) {
+        Remove-Item -Force $runtimeBehaviourDest
     }
     if (Test-Path $editorDest) {
         Remove-Item -Force $editorDest
@@ -213,6 +221,7 @@ else {
 }
 
 Copy-Item -Force $runtimeSource $runtimeDest
+Copy-Item -Force $runtimeBehaviourSource $runtimeBehaviourDest
 Copy-Item -Force $editorSource $editorDest
 
 Write-Host ""
@@ -220,6 +229,7 @@ Write-Host "[nicxlive] install complete"
 Write-Host "  Unity project : $projectRoot"
 Write-Host "  Native DLL    : $dllDest"
 Write-Host "  Runtime code  : $runtimeDest"
+Write-Host "  Behaviour code: $runtimeBehaviourDest"
 Write-Host "  Editor code   : $editorDest"
 Write-Host "  Setup code    : $setupDest"
 Write-Host ""

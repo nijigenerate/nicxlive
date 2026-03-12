@@ -1,3 +1,4 @@
+#nullable enable
 #if UNITY_EDITOR
 using System;
 using System.Reflection;
@@ -111,7 +112,7 @@ namespace Nicxlive.UnityBackend.EditorSetup
             var current = GetConfiguredGraphicsPipeline();
             if (IsUrpAsset(current))
             {
-                var qualityChanged = ApplyUrpToAllQualityLevels(current);
+                var qualityChanged = ApplyUrpToAllQualityLevels(current!);
                 if (!qualityChanged)
                 {
                     Debug.Log("[nicxlive] URP: already configured.");
