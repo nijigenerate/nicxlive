@@ -623,9 +623,20 @@ namespace Nicxlive.UnityBackend.Managed
             var handle = _nextHandle++;
             if (renderTarget)
             {
-                var depth = stencil ? 24 : 0;
-                var rt = new RenderTexture(Mathf.Max(1, width), Mathf.Max(1, height), depth, RenderTextureFormat.ARGB32);
+                var desc = new RenderTextureDescriptor(
+                    Mathf.Max(1, width),
+                    Mathf.Max(1, height),
+                    RenderTextureFormat.ARGB32,
+                    stencil ? 24 : 0)
+                {
+                    msaaSamples = 1,
+                    useMipMap = false,
+                    autoGenerateMips = false,
+                    sRGB = false
+                };
+                var rt = new RenderTexture(desc);
                 rt.name = $"nicx_rt_{handle}";
+                rt.hideFlags = HideFlags.HideAndDontSave;
                 rt.useMipMap = false;
                 rt.autoGenerateMips = false;
                 rt.Create();
@@ -640,7 +651,7 @@ namespace Nicxlive.UnityBackend.Managed
                     3 => TextureFormat.RGB24,
                     _ => TextureFormat.RGBA32,
                 };
-                var tex = new Texture2D(Mathf.Max(1, width), Mathf.Max(1, height), format, false, false);
+                var tex = new Texture2D(Mathf.Max(1, width), Mathf.Max(1, height), format, false, true);
                 tex.name = $"nicx_tex_{handle}";
                 tex.wrapMode = TextureWrapMode.Clamp;
                 tex.filterMode = FilterMode.Bilinear;
@@ -841,7 +852,7 @@ namespace Nicxlive.UnityBackend.Managed
             {
                 var prev = RenderTexture.active;
                 RenderTexture.active = rt;
-                var copy = new Texture2D(rt.width, rt.height, channels == 3 ? TextureFormat.RGB24 : TextureFormat.RGBA32, false, false);
+                var copy = new Texture2D(rt.width, rt.height, channels == 3 ? TextureFormat.RGB24 : TextureFormat.RGBA32, false, true);
                 copy.ReadPixels(new Rect(0, 0, rt.width, rt.height), 0, 0);
                 copy.Apply(false, false);
                 var data = copy.GetRawTextureData();
@@ -3089,6 +3100,7 @@ namespace Nicxlive.UnityBackend.Managed
         private sealed class SceneDebugDraw
         {
             public Mesh? ClipMesh;
+            public bool DestroyClipMesh;
             public Texture? MainTexture;
             public Texture? EmissionTexture;
             public float MainWrap;
@@ -3624,7 +3636,7 @@ namespace Nicxlive.UnityBackend.Managed
             for (var i = 0; i < draws.Count; i++)
             {
                 var draw = draws[i];
-                if (draw.ClipMesh != null)
+                if (draw.DestroyClipMesh && draw.ClipMesh != null)
                 {
                     UnityObjectUtil.DestroyObject(draw.ClipMesh);
                 }
@@ -3648,7 +3660,8 @@ namespace Nicxlive.UnityBackend.Managed
             {
                 msaaSamples = 1,
                 useMipMap = false,
-                autoGenerateMips = false
+                autoGenerateMips = false,
+                sRGB = false
             };
 
             var texture = new RenderTexture(desc)
@@ -4226,7 +4239,7 @@ namespace Nicxlive.UnityBackend.Managed
         private static Color SampleRenderTexture(RenderTexture texture, Vector2 uv)
         {
             var prev = RenderTexture.active;
-            var read = new Texture2D(1, 1, TextureFormat.RGBA32, false, false);
+            var read = new Texture2D(1, 1, TextureFormat.RGBA32, false, true);
             try
             {
                 RenderTexture.active = texture;
@@ -4322,8 +4335,8 @@ namespace Nicxlive.UnityBackend.Managed
             {
                 return;
             }
-            buffer.GetTemporaryRT(_postTmpAId, _viewportW, _viewportH, 0, FilterMode.Bilinear, RenderTextureFormat.ARGB32);
-            buffer.GetTemporaryRT(_postTmpBId, _viewportW, _viewportH, 0, FilterMode.Bilinear, RenderTextureFormat.ARGB32);
+            buffer.GetTemporaryRT(_postTmpAId, _viewportW, _viewportH, 0, FilterMode.Bilinear, RenderTextureFormat.ARGB32, RenderTextureReadWrite.Linear);
+            buffer.GetTemporaryRT(_postTmpBId, _viewportW, _viewportH, 0, FilterMode.Bilinear, RenderTextureFormat.ARGB32, RenderTextureReadWrite.Linear);
             buffer.Blit(current, _postTmpAId);
             buffer.Blit(_postTmpAId, _postTmpBId);
             buffer.Blit(_postTmpBId, current);
@@ -6634,7 +6647,14 @@ namespace Nicxlive.UnityBackend.Managed
             }
 
             ReleaseRuntimeGameOverlayTexture();
-            _runtimeGameOverlayTexture = new RenderTexture(width, height, 0, RenderTextureFormat.ARGB32)
+            var desc = new RenderTextureDescriptor(width, height, RenderTextureFormat.ARGB32, 0)
+            {
+                msaaSamples = 1,
+                useMipMap = false,
+                autoGenerateMips = false,
+                sRGB = false
+            };
+            _runtimeGameOverlayTexture = new RenderTexture(desc)
             {
                 name = "nicxlive_game_overlay_rt",
                 useMipMap = false,

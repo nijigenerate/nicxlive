@@ -37,6 +37,21 @@ Shader "Hidden/Nicxlive/Present"
                 float2 uv : TEXCOORD0;
             };
 
+            half NicxSrgbToLinearChannel(half c)
+            {
+                return c <= 0.04045h
+                    ? (c / 12.92h)
+                    : pow((c + 0.055h) / 1.055h, 2.4h);
+            }
+
+            half3 NicxSrgbToLinear(half3 c)
+            {
+                return half3(
+                    NicxSrgbToLinearChannel(c.r),
+                    NicxSrgbToLinearChannel(c.g),
+                    NicxSrgbToLinearChannel(c.b));
+            }
+
             Varyings Vert(Attributes input)
             {
                 Varyings output;
@@ -47,7 +62,11 @@ Shader "Hidden/Nicxlive/Present"
 
             half4 Frag(Varyings input) : SV_Target
             {
-                return SAMPLE_TEXTURE2D(_MainTex, sampler_MainTex, input.uv);
+                half4 color = SAMPLE_TEXTURE2D(_MainTex, sampler_MainTex, input.uv);
+#ifndef UNITY_COLORSPACE_GAMMA
+                color.rgb = NicxSrgbToLinear(color.rgb);
+#endif
+                return color;
             }
             ENDHLSL
         }

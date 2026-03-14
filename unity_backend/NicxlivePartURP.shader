@@ -183,7 +183,7 @@ Shader "Nicxlive/URP Part"
                 {
                     half alpha = saturate(texColor.a * _Opacity);
                     clip(alpha - max(0.001h, (half)_MaskThreshold));
-                    output.outAlbedo = half4(texColor.rgb * alpha, alpha);
+                    output.outAlbedo = half4(texColor.rgb, texColor.a) * _Opacity;
                     return output;
                 }
                 half4 mult = half4(_MultColor.rgb, 1.0h);
@@ -205,7 +205,7 @@ Shader "Nicxlive/URP Part"
                 int shaderStage = (int)round(_ShaderStage);
                 if (shaderStage == 0)
                 {
-                    output.outAlbedo = half4(albedoOut.rgb * alpha, alpha);
+                    output.outAlbedo = albedoOut * _Opacity;
                     return output;
                 }
 
@@ -216,7 +216,7 @@ Shader "Nicxlive/URP Part"
                     return output;
                 }
 
-                output.outAlbedo = half4(albedoOut.rgb * alpha, alpha);
+                output.outAlbedo = albedoOut * _Opacity;
                 output.outEmissive = emissionOut * output.outAlbedo.a;
                 output.outBump = bumpColor * output.outAlbedo.a;
                 return output;
