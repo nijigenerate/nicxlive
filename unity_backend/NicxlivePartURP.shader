@@ -15,6 +15,9 @@ Shader "Nicxlive/URP Part"
         _DebugFlipY("Debug Flip Y", Float) = 0
         _DebugFlipV("Debug Flip V", Float) = 0
         _DebugShowAlbedo("Debug Show Albedo", Float) = 0
+        _WrapMainTex("Main Wrap", Float) = 0
+        _WrapEmissionTex("Emission Wrap", Float) = 0
+        _WrapBumpTex("Bump Wrap", Float) = 0
         _SrcBlend("Src Blend", Float) = 1
         _DstBlend("Dst Blend", Float) = 10
         _SrcBlendAlpha("Src Blend Alpha", Float) = 1
@@ -76,6 +79,9 @@ Shader "Nicxlive/URP Part"
                 float _DebugFlipY;
                 float _DebugFlipV;
                 float _DebugShowAlbedo;
+                float _WrapMainTex;
+                float _WrapEmissionTex;
+                float _WrapBumpTex;
                 float _SrcBlend;
                 float _DstBlend;
                 float _SrcBlendAlpha;
@@ -103,6 +109,42 @@ Shader "Nicxlive/URP Part"
                 half4 outEmissive : SV_Target1;
                 half4 outBump : SV_Target2;
             };
+
+            half4 SampleWrapMain(float2 uv)
+            {
+                if ((int)round(_WrapMainTex) == 0)
+                {
+                    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0)
+                    {
+                        return half4(0.0h, 0.0h, 0.0h, 0.0h);
+                    }
+                }
+                return SAMPLE_TEXTURE2D(_MainTex, sampler_MainTex, uv);
+            }
+
+            half4 SampleWrapEmission(float2 uv)
+            {
+                if ((int)round(_WrapEmissionTex) == 0)
+                {
+                    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0)
+                    {
+                        return half4(0.0h, 0.0h, 0.0h, 0.0h);
+                    }
+                }
+                return SAMPLE_TEXTURE2D(_EmissionTex, sampler_EmissionTex, uv);
+            }
+
+            half4 SampleWrapBump(float2 uv)
+            {
+                if ((int)round(_WrapBumpTex) == 0)
+                {
+                    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0)
+                    {
+                        return half4(0.0h, 0.0h, 0.0h, 0.0h);
+                    }
+                }
+                return SAMPLE_TEXTURE2D(_BumpMap, sampler_BumpMap, uv);
+            }
 
             half4 ScreenColorize(half3 texRgb, half alpha)
             {
@@ -134,9 +176,9 @@ Shader "Nicxlive/URP Part"
                 {
                     sampleUv.y = 1.0 - sampleUv.y;
                 }
-                half4 texColor = SAMPLE_TEXTURE2D(_MainTex, sampler_MainTex, sampleUv);
-                half4 emissionTex = SAMPLE_TEXTURE2D(_EmissionTex, sampler_EmissionTex, sampleUv);
-                half4 bumpColor = SAMPLE_TEXTURE2D(_BumpMap, sampler_BumpMap, sampleUv);
+                half4 texColor = SampleWrapMain(sampleUv);
+                half4 emissionTex = SampleWrapEmission(sampleUv);
+                half4 bumpColor = SampleWrapBump(sampleUv);
                 if (_DebugShowAlbedo > 0.5)
                 {
                     half alpha = saturate(texColor.a * _Opacity);

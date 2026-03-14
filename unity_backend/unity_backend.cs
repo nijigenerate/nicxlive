@@ -612,6 +612,7 @@ namespace Nicxlive.UnityBackend.Managed
     public sealed class TextureRegistry
     {
         private readonly Dictionary<ulong, Texture> _textures = new Dictionary<ulong, Texture>();
+        private readonly Dictionary<ulong, Wrapping> _wrappingByHandle = new Dictionary<ulong, Wrapping>();
         private readonly Dictionary<ulong, ShaderHandle> _shaders = new Dictionary<ulong, ShaderHandle>();
         private readonly Dictionary<ulong, Dictionary<string, int>> _shaderUniformIds = new Dictionary<ulong, Dictionary<string, int>>();
         private ulong _nextHandle = 1;
@@ -647,6 +648,8 @@ namespace Nicxlive.UnityBackend.Managed
                 _textures[handle] = tex;
             }
 
+            _wrappingByHandle[handle] = Wrapping.Clamp;
+
             return handle;
         }
 
@@ -679,7 +682,7 @@ namespace Nicxlive.UnityBackend.Managed
 
             tex2D.LoadRawTextureData(bytes);
             tex2D.Apply(false, false);
-            tex2D.wrapMode = TextureWrapMode.Clamp;
+            tex2D.wrapMode = ToTextureWrapMode(GetWrapping(handle));
             tex2D.filterMode = FilterMode.Bilinear;
             tex2D.anisoLevel = 1;
         }
@@ -692,6 +695,7 @@ namespace Nicxlive.UnityBackend.Managed
             }
 
             _textures.Remove(handle);
+            _wrappingByHandle.Remove(handle);
             if (texture != null)
             {
                 UnityObjectUtil.DestroyObject(texture);
@@ -790,7 +794,18 @@ namespace Nicxlive.UnityBackend.Managed
             {
                 return;
             }
-            texture.wrapMode = wrapping switch
+            _wrappingByHandle[handle] = wrapping;
+            texture.wrapMode = ToTextureWrapMode(wrapping);
+        }
+
+        public Wrapping GetWrapping(ulong handle)
+        {
+            return _wrappingByHandle.TryGetValue(handle, out var wrapping) ? wrapping : Wrapping.Clamp;
+        }
+
+        private static TextureWrapMode ToTextureWrapMode(Wrapping wrapping)
+        {
+            return wrapping switch
             {
                 Wrapping.Repeat => TextureWrapMode.Repeat,
                 Wrapping.MirroredRepeat => TextureWrapMode.Mirror,
@@ -3076,6 +3091,9 @@ namespace Nicxlive.UnityBackend.Managed
             public Mesh? ClipMesh;
             public Texture? MainTexture;
             public Texture? EmissionTexture;
+            public float MainWrap;
+            public float EmissionWrap;
+            public float BumpWrap;
             public float Opacity;
             public float EmissionStrength;
             public float MaskThreshold;
@@ -3109,6 +3127,9 @@ namespace Nicxlive.UnityBackend.Managed
             public string ShaderStage = "_ShaderStage";
             public string LegacyBlendOnly = "_LegacyBlendOnly";
             public string AdvancedBlend = "_AdvancedBlend";
+            public string MainWrap = "_WrapMainTex";
+            public string EmissiveWrap = "_WrapEmissionTex";
+            public string BumpWrap = "_WrapBumpTex";
             public string SrcBlend = "_SrcBlend";
             public string DstBlend = "_DstBlend";
             public string SrcBlendAlpha = "_SrcBlendAlpha";
@@ -3401,6 +3422,9 @@ namespace Nicxlive.UnityBackend.Managed
                 _sceneDebugMaterial.SetFloat("_DebugFlipY", 1.0f);
                 _sceneDebugMaterial.SetFloat("_DebugFlipV", 0.0f);
                 _sceneDebugMaterial.SetFloat("_DebugShowAlbedo", 1.0f);
+                _sceneDebugMaterial.SetFloat("_WrapMainTex", 0.0f);
+                _sceneDebugMaterial.SetFloat("_WrapEmissionTex", 0.0f);
+                _sceneDebugMaterial.SetFloat("_WrapBumpTex", 0.0f);
             }
             catch
             {
@@ -3528,6 +3552,9 @@ namespace Nicxlive.UnityBackend.Managed
                 material.SetFloat("_Opacity", Mathf.Clamp01(draw.Opacity));
                 material.SetFloat("_EmissionStrength", Mathf.Max(0f, draw.EmissionStrength));
                 material.SetFloat("_MaskThreshold", Mathf.Clamp01(draw.MaskThreshold));
+                material.SetFloat("_WrapMainTex", draw.MainWrap);
+                material.SetFloat("_WrapEmissionTex", draw.EmissionWrap);
+                material.SetFloat("_WrapBumpTex", draw.BumpWrap);
                 material.SetVector("_MultColor", draw.MultColor);
                 material.SetVector("_ScreenColor", draw.ScreenColor);
                 material.SetFloat("_DebugForceOpaque", 0.0f);
@@ -3552,6 +3579,9 @@ namespace Nicxlive.UnityBackend.Managed
                 props.SetFloat("_Opacity", Mathf.Clamp01(draw.Opacity));
                 props.SetFloat("_EmissionStrength", Mathf.Max(0f, draw.EmissionStrength));
                 props.SetFloat("_MaskThreshold", Mathf.Clamp01(draw.MaskThreshold));
+                props.SetFloat("_WrapMainTex", draw.MainWrap);
+                props.SetFloat("_WrapEmissionTex", draw.EmissionWrap);
+                props.SetFloat("_WrapBumpTex", draw.BumpWrap);
                 props.SetVector("_MultColor", draw.MultColor);
                 props.SetVector("_ScreenColor", draw.ScreenColor);
                 props.SetFloat("_DebugForceOpaque", 0.0f);
@@ -4526,6 +4556,7 @@ namespace Nicxlive.UnityBackend.Managed
             Mesh mesh,
             Material partMaterial,
             PropertyConfig cfg,
+            TextureRegistry textures,
             NicxliveNative.NjgPartDrawPacket packet,
             Texture t0,
             Texture t1,
@@ -4540,6 +4571,9 @@ namespace Nicxlive.UnityBackend.Managed
                 ClipMesh = mesh,
                 MainTexture = t0,
                 EmissionTexture = t1,
+                MainWrap = (float)textures.GetWrapping((ulong)packet.TextureHandle0),
+                EmissionWrap = (float)textures.GetWrapping((ulong)packet.TextureHandle1),
+                BumpWrap = (float)textures.GetWrapping((ulong)packet.TextureHandle2),
                 Opacity = packet.Opacity,
                 EmissionStrength = packet.EmissionStrength,
                 MaskThreshold = packet.MaskThreshold,
@@ -4903,6 +4937,9 @@ namespace Nicxlive.UnityBackend.Managed
             _props.SetColor("_BaseColor", new Color(1f, 1f, 1f, Mathf.Clamp01(packet.Opacity)));
             _props.SetTexture(cfg.EmissiveTex, t1);
             _props.SetTexture(cfg.BumpTex, t2);
+            _props.SetFloat(cfg.MainWrap, (float)textures.GetWrapping((ulong)packet.TextureHandle0));
+            _props.SetFloat(cfg.EmissiveWrap, (float)textures.GetWrapping((ulong)packet.TextureHandle1));
+            _props.SetFloat(cfg.BumpWrap, (float)textures.GetWrapping((ulong)packet.TextureHandle2));
             _props.SetFloat("_DebugForceOpaque", 0.0f);
             _props.SetFloat("_DebugFlipY", 1.0f);
             _props.SetFloat("_DebugFlipV", 0.0f);
@@ -4976,7 +5013,7 @@ namespace Nicxlive.UnityBackend.Managed
                 _currentShaderStage == 2;
             if (queueSceneDebugDraw)
             {
-                QueueSceneDebugDraw(mesh, partMaterial, cfg, packet, t0, t1, t2);
+                QueueSceneDebugDraw(mesh, partMaterial, cfg, textures, packet, t0, t1, t2);
             }
             LastPartDrawIssuedCount++;
         }
@@ -5470,6 +5507,12 @@ namespace Nicxlive.UnityBackend.Managed
             var dxBase = checked((int)packet.DeformOffset);
             var dyBase = checked((int)(packet.DeformOffset + packet.DeformAtlasStride));
 
+            if (!TryValidatePartPacketIndices(packet, shared, vertexCount, indexCount, out var partValidationReason))
+            {
+                LastPartBuildDiag = $"Pkt={_currentPartPacketOrdinal} InvalidPartPacket={partValidationReason}";
+                return null;
+            }
+
             if (!RangeInBounds(vxBase, vertexCount, shared.Vertices.Length) ||
                 !RangeInBounds(vyBase, vertexCount, shared.Vertices.Length) ||
                 !RangeInBounds(uxBase, vertexCount, shared.Uvs.Length) ||
@@ -5529,8 +5572,7 @@ namespace Nicxlive.UnityBackend.Managed
             var triangles = new int[indexCount];
             for (var i = 0; i < indexCount; i++)
             {
-                var idx = packet.Indices[i];
-                triangles[i] = idx < vertexCount ? idx : 0;
+                triangles[i] = packet.Indices[i];
             }
 
             var mesh = new Mesh
@@ -5562,6 +5604,11 @@ namespace Nicxlive.UnityBackend.Managed
             var vyBase = checked((int)(packet.VertexOffset + packet.VertexAtlasStride));
             var dxBase = checked((int)packet.DeformOffset);
             var dyBase = checked((int)(packet.DeformOffset + packet.DeformAtlasStride));
+
+            if (!TryValidateMaskPacketIndices(packet, shared, vertexCount, indexCount))
+            {
+                return null;
+            }
 
             if (!RangeInBounds(vxBase, vertexCount, shared.Vertices.Length) ||
                 !RangeInBounds(vyBase, vertexCount, shared.Vertices.Length) ||
@@ -5598,8 +5645,7 @@ namespace Nicxlive.UnityBackend.Managed
             var triangles = new int[indexCount];
             for (var i = 0; i < indexCount; i++)
             {
-                var idx = packet.Indices[i];
-                triangles[i] = idx < vertexCount ? idx : 0;
+                triangles[i] = packet.Indices[i];
             }
 
             var mesh = new Mesh
@@ -5611,6 +5657,88 @@ namespace Nicxlive.UnityBackend.Managed
             mesh.triangles = triangles;
             mesh.RecalculateBounds();
             return mesh;
+        }
+
+        private static unsafe bool TryValidatePartPacketIndices(
+            NicxliveNative.NjgPartDrawPacket packet,
+            SharedBuffers shared,
+            int vertexCount,
+            int indexCount,
+            out string reason)
+        {
+            var maxIndex = 0;
+            for (var i = 0; i < indexCount; i++)
+            {
+                var idx = packet.Indices[i];
+                if (idx > maxIndex)
+                {
+                    maxIndex = idx;
+                }
+            }
+
+            if (maxIndex >= vertexCount)
+            {
+                reason = $"index out of vertexCount maxIndex={maxIndex} vertexCount={vertexCount} indexCount={indexCount}";
+                return false;
+            }
+
+            var vxBase = checked((int)packet.VertexOffset);
+            var vyBase = checked((int)(packet.VertexOffset + packet.VertexAtlasStride));
+            var uxBase = checked((int)packet.UvOffset);
+            var uyBase = checked((int)(packet.UvOffset + packet.UvAtlasStride));
+            var dxBase = checked((int)packet.DeformOffset);
+            var dyBase = checked((int)(packet.DeformOffset + packet.DeformAtlasStride));
+
+            if (vxBase + maxIndex >= shared.Vertices.Length ||
+                vyBase + maxIndex >= shared.Vertices.Length ||
+                uxBase + maxIndex >= shared.Uvs.Length ||
+                uyBase + maxIndex >= shared.Uvs.Length ||
+                dxBase + maxIndex >= shared.Deform.Length ||
+                dyBase + maxIndex >= shared.Deform.Length)
+            {
+                reason =
+                    $"soa range overflow maxIndex={maxIndex} vertexCount={vertexCount} " +
+                    $"vx={vxBase + maxIndex}/{shared.Vertices.Length} vy={vyBase + maxIndex}/{shared.Vertices.Length} " +
+                    $"ux={uxBase + maxIndex}/{shared.Uvs.Length} uy={uyBase + maxIndex}/{shared.Uvs.Length} " +
+                    $"dx={dxBase + maxIndex}/{shared.Deform.Length} dy={dyBase + maxIndex}/{shared.Deform.Length}";
+                return false;
+            }
+
+            reason = string.Empty;
+            return true;
+        }
+
+        private static unsafe bool TryValidateMaskPacketIndices(
+            NicxliveNative.NjgMaskDrawPacket packet,
+            SharedBuffers shared,
+            int vertexCount,
+            int indexCount)
+        {
+            var maxIndex = 0;
+            for (var i = 0; i < indexCount; i++)
+            {
+                var idx = packet.Indices[i];
+                if (idx > maxIndex)
+                {
+                    maxIndex = idx;
+                }
+            }
+
+            if (maxIndex >= vertexCount)
+            {
+                return false;
+            }
+
+            var vxBase = checked((int)packet.VertexOffset);
+            var vyBase = checked((int)(packet.VertexOffset + packet.VertexAtlasStride));
+            var dxBase = checked((int)packet.DeformOffset);
+            var dyBase = checked((int)(packet.DeformOffset + packet.DeformAtlasStride));
+
+            return
+                vxBase + maxIndex < shared.Vertices.Length &&
+                vyBase + maxIndex < shared.Vertices.Length &&
+                dxBase + maxIndex < shared.Deform.Length &&
+                dyBase + maxIndex < shared.Deform.Length;
         }
 
         private static bool RangeInBounds(int offset, int count, int length)
