@@ -569,17 +569,18 @@ namespace Nicxlive.UnityBackend.Managed
 {
     public enum Filtering
     {
-        Nearest = 0,
-        Linear = 1,
+        Linear = 0,
+        Nearest = 1,
         Bilinear = 2,
         Trilinear = 3,
     }
 
     public enum Wrapping
     {
-        Repeat = 0,
-        MirroredRepeat = 1,
-        ClampToEdge = 2,
+        Clamp = 0,
+        ClampToEdge = 0,
+        Repeat = 1,
+        MirroredRepeat = 2,
         ClampToBorder = 3,
     }
 
@@ -591,7 +592,7 @@ namespace Nicxlive.UnityBackend.Managed
 
     internal static class UnityObjectUtil
     {
-        public static void DestroyObject(UnityEngine.Object obj)
+        public static void DestroyObject(UnityEngine.Object? obj)
         {
             if (obj == null)
             {
@@ -640,6 +641,9 @@ namespace Nicxlive.UnityBackend.Managed
                 };
                 var tex = new Texture2D(Mathf.Max(1, width), Mathf.Max(1, height), format, false, false);
                 tex.name = $"nicx_tex_{handle}";
+                tex.wrapMode = TextureWrapMode.Clamp;
+                tex.filterMode = FilterMode.Bilinear;
+                tex.anisoLevel = 1;
                 _textures[handle] = tex;
             }
 
@@ -675,6 +679,9 @@ namespace Nicxlive.UnityBackend.Managed
 
             tex2D.LoadRawTextureData(bytes);
             tex2D.Apply(false, false);
+            tex2D.wrapMode = TextureWrapMode.Clamp;
+            tex2D.filterMode = FilterMode.Bilinear;
+            tex2D.anisoLevel = 1;
         }
 
         public void ReleaseTexture(ulong handle)
@@ -1226,6 +1233,7 @@ namespace Nicxlive.UnityBackend.Compat
 
         private static void OnEndCameraRendering(ScriptableRenderContext context, Camera camera)
         {
+            _ = context;
             if (!BuffersByCamera.TryGetValue(camera, out var list) || list.Count == 0)
             {
                 return;
@@ -1238,9 +1246,9 @@ namespace Nicxlive.UnityBackend.Compat
                 {
                     continue;
                 }
-                context.ExecuteCommandBuffer(buffer);
+                Graphics.ExecuteCommandBuffer(buffer);
                 LastExecutionByBuffer[buffer] =
-                    $"Phase=end Camera={camera.name} Type={camera.cameraType} Frame={Time.frameCount}";
+                    $"Phase=end GraphicsExecute Camera={camera.name} Type={camera.cameraType} Frame={Time.frameCount}";
                 buffer.Clear();
             }
         }
@@ -3070,8 +3078,15 @@ namespace Nicxlive.UnityBackend.Managed
             public Texture? EmissionTexture;
             public float Opacity;
             public float EmissionStrength;
+            public float MaskThreshold;
             public Vector4 MultColor;
             public Vector4 ScreenColor;
+            public float StencilRef;
+            public float StencilComp;
+            public float StencilPass;
+            public float ColorMask;
+            public bool UseMaskMaterial;
+            public bool ShowAlbedo;
         }
 
         [Serializable]
@@ -3094,6 +3109,12 @@ namespace Nicxlive.UnityBackend.Managed
             public string ShaderStage = "_ShaderStage";
             public string LegacyBlendOnly = "_LegacyBlendOnly";
             public string AdvancedBlend = "_AdvancedBlend";
+            public string SrcBlend = "_SrcBlend";
+            public string DstBlend = "_DstBlend";
+            public string SrcBlendAlpha = "_SrcBlendAlpha";
+            public string DstBlendAlpha = "_DstBlendAlpha";
+            public string BlendOp = "_BlendOp";
+            public string BlendOpAlpha = "_BlendOpAlpha";
         }
 
         private readonly Texture2D _whiteTexture;
@@ -3121,8 +3142,10 @@ namespace Nicxlive.UnityBackend.Managed
         private bool _presentProgramInitialized;
         private Material? _presentMaterial;
         private Material? _sceneDebugMaterial;
+        private Material? _sceneDebugMaskMaterial;
         private Mesh? _presentMesh;
         private Mesh? _debugOverlayMesh;
+        private CommandBuffer? _sceneDebugReplayBuffer;
         private int _presentProgramHandle;
         private int _viewportW = 1280;
         private int _viewportH = 720;
@@ -3137,6 +3160,11 @@ namespace Nicxlive.UnityBackend.Managed
         private readonly int _colorKeyId = Shader.PropertyToID("_ColorKey");
         private RenderTargetIdentifier _backbufferTarget = new RenderTargetIdentifier(BuiltinRenderTextureType.CameraTarget);
         private RenderTargetIdentifier _rootSceneTarget = new RenderTargetIdentifier(BuiltinRenderTextureType.CameraTarget);
+        private RenderTexture? _rootSceneTexture;
+        private RenderTexture? _rootSceneEmissiveTexture;
+        private RenderTexture? _rootSceneBumpTexture;
+        private RenderTexture? _rootSceneDepthTexture;
+        private RenderTargetIdentifier[]? _rootSceneColorTargets;
         private Matrix4x4 _clipSpaceDrawMatrix = Matrix4x4.identity;
         private Vector2 _clipPuppetTranslation = Vector2.zero;
         private Vector2 _clipPuppetScale = Vector2.one;
@@ -3146,9 +3174,78 @@ namespace Nicxlive.UnityBackend.Managed
         private ulong _sceneDebugSignature;
         private int _currentPartPacketOrdinal;
         private int _currentShaderStage;
+        private NicxliveNative.BlendMode _currentBlendMode = NicxliveNative.BlendMode.Normal;
+        private bool _currentLegacyBlendOnly = true;
+        private bool _currentAdvancedBlendEnabled;
         private bool _accumulateCurrentPartBounds = true;
         private float _worstPartAbsClip;
         private int _partBoundsWarnCooldown;
+        private float _currentStencilRef = 1.0f;
+        private float _currentStencilComp = (float)CompareFunction.Always;
+        private float _currentStencilPass = (float)StencilOp.Keep;
+        private float _currentColorMask = 15.0f;
+        private int _currentSrcBlend = (int)UnityEngine.Rendering.BlendMode.One;
+        private int _currentDstBlend = (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha;
+        private int _currentSrcBlendAlpha = (int)UnityEngine.Rendering.BlendMode.One;
+        private int _currentDstBlendAlpha = (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha;
+        private int _currentBlendOp = (int)UnityEngine.Rendering.BlendOp.Add;
+        private int _currentBlendOpAlpha = (int)UnityEngine.Rendering.BlendOp.Add;
+        private bool _forceRootSceneVisiblePass;
+        private readonly Dictionary<MaterialRenderStateKey, Material> _renderStateMaterialCache = new();
+
+        private struct MaterialRenderStateKey : IEquatable<MaterialRenderStateKey>
+        {
+            public int BaseMaterialId;
+            public int SrcBlend;
+            public int DstBlend;
+            public int SrcBlendAlpha;
+            public int DstBlendAlpha;
+            public int BlendOp;
+            public int BlendOpAlpha;
+            public int StencilRef;
+            public int StencilComp;
+            public int StencilPass;
+            public int ColorMask;
+
+            public bool Equals(MaterialRenderStateKey other)
+            {
+                return BaseMaterialId == other.BaseMaterialId &&
+                    SrcBlend == other.SrcBlend &&
+                    DstBlend == other.DstBlend &&
+                    SrcBlendAlpha == other.SrcBlendAlpha &&
+                    DstBlendAlpha == other.DstBlendAlpha &&
+                    BlendOp == other.BlendOp &&
+                    BlendOpAlpha == other.BlendOpAlpha &&
+                    StencilRef == other.StencilRef &&
+                    StencilComp == other.StencilComp &&
+                    StencilPass == other.StencilPass &&
+                    ColorMask == other.ColorMask;
+            }
+
+            public override bool Equals(object? obj)
+            {
+                return obj is MaterialRenderStateKey other && Equals(other);
+            }
+
+            public override int GetHashCode()
+            {
+                unchecked
+                {
+                    var hash = BaseMaterialId;
+                    hash = (hash * 397) ^ SrcBlend;
+                    hash = (hash * 397) ^ DstBlend;
+                    hash = (hash * 397) ^ SrcBlendAlpha;
+                    hash = (hash * 397) ^ DstBlendAlpha;
+                    hash = (hash * 397) ^ BlendOp;
+                    hash = (hash * 397) ^ BlendOpAlpha;
+                    hash = (hash * 397) ^ StencilRef;
+                    hash = (hash * 397) ^ StencilComp;
+                    hash = (hash * 397) ^ StencilPass;
+                    hash = (hash * 397) ^ ColorMask;
+                    return hash;
+                }
+            }
+        }
 
         public int LastPartPacketCount { get; private set; }
         public int LastMaskPacketCount { get; private set; }
@@ -3169,7 +3266,9 @@ namespace Nicxlive.UnityBackend.Managed
         public string LastPartBuildDiag { get; private set; } = string.Empty;
         public string LastRenderPathDiag { get; private set; } = string.Empty;
         public string LastClipFitDiag { get; private set; } = string.Empty;
+        public string LastRootSceneDiag { get; private set; } = string.Empty;
         public ulong LastSceneDebugSignature { get; private set; }
+        public RenderTexture? RootSceneTexture => _rootSceneTexture;
 
         public CommandExecutor()
         {
@@ -3201,20 +3300,27 @@ namespace Nicxlive.UnityBackend.Managed
             }
 
             EnsureSceneDebugMaterial();
-            var previous = RenderTexture.active;
-            RenderTexture.active = target;
-            GL.Clear(true, true, Color.clear);
-            if (_sceneDebugPresentedDraws.Count == 0 || _sceneDebugMaterial == null)
+            EnsureSceneDebugMaskMaterial();
+            EnsureSceneDebugReplayBuffer();
+            if (_sceneDebugReplayBuffer == null)
             {
-                RenderTexture.active = previous;
                 return;
             }
-            DrawPresentedSceneDebugContents();
-            RenderTexture.active = previous;
+
+            _sceneDebugReplayBuffer.Clear();
+            _sceneDebugReplayBuffer.SetViewProjectionMatrices(Matrix4x4.identity, Matrix4x4.identity);
+            _sceneDebugReplayBuffer.SetRenderTarget(target);
+            _sceneDebugReplayBuffer.ClearRenderTarget(RTClearFlags.All, Color.clear, 1.0f, 0);
+            if (_sceneDebugPresentedDraws.Count > 0)
+            {
+                AppendSceneDebugReplayCommands(_sceneDebugReplayBuffer);
+            }
+            Graphics.ExecuteCommandBuffer(_sceneDebugReplayBuffer);
         }
 
         private void DrawPresentedSceneDebugContents()
         {
+            EnsureSceneDebugMaskMaterial();
             for (var i = 0; i < _sceneDebugPresentedDraws.Count; i++)
             {
                 var draw = _sceneDebugPresentedDraws[i];
@@ -3229,22 +3335,14 @@ namespace Nicxlive.UnityBackend.Managed
                     continue;
                 }
 
-                _sceneDebugMaterial.SetTexture("_MainTex", draw.MainTexture != null ? draw.MainTexture : _whiteTexture);
-                _sceneDebugMaterial.SetTexture("_BaseMap", draw.MainTexture != null ? draw.MainTexture : _whiteTexture);
-                _sceneDebugMaterial.SetTexture("_EmissionTex", draw.EmissionTexture != null ? draw.EmissionTexture : Texture2D.blackTexture);
-                _sceneDebugMaterial.SetFloat("_Opacity", Mathf.Clamp01(draw.Opacity));
-                _sceneDebugMaterial.SetFloat("_EmissionStrength", Mathf.Max(0f, draw.EmissionStrength));
-                _sceneDebugMaterial.SetVector("_MultColor", draw.MultColor);
-                _sceneDebugMaterial.SetVector("_ScreenColor", draw.ScreenColor);
-                _sceneDebugMaterial.SetFloat("_StencilRef", 1.0f);
-                _sceneDebugMaterial.SetFloat("_StencilComp", (float)CompareFunction.Always);
-                _sceneDebugMaterial.SetFloat("_StencilPass", (float)StencilOp.Keep);
-                _sceneDebugMaterial.SetFloat("_ColorMask", 15.0f);
-                _sceneDebugMaterial.SetFloat("_DebugForceOpaque", 0.0f);
-                _sceneDebugMaterial.SetFloat("_DebugFlipY", 1.0f);
-                _sceneDebugMaterial.SetFloat("_DebugFlipV", 0.0f);
-                _sceneDebugMaterial.SetFloat("_DebugShowAlbedo", 1.0f);
-                if (!_sceneDebugMaterial.SetPass(0))
+                var material = draw.UseMaskMaterial ? _sceneDebugMaskMaterial : _sceneDebugMaterial;
+                if (material == null)
+                {
+                    continue;
+                }
+
+                ConfigureSceneDebugMaterial(material, draw);
+                if (!material.SetPass(0))
                 {
                     continue;
                 }
@@ -3310,6 +3408,164 @@ namespace Nicxlive.UnityBackend.Managed
             }
         }
 
+        private void EnsureSceneDebugMaskMaterial()
+        {
+            if (_sceneDebugMaskMaterial != null)
+            {
+                return;
+            }
+
+            try
+            {
+                var shader = Nicxlive.UnityBackend.Compat.UrpShaderCatalog.RequireMaskShader();
+                if (shader == null)
+                {
+                    _sceneDebugMaskMaterial = null;
+                    return;
+                }
+
+                _sceneDebugMaskMaterial = new Material(shader)
+                {
+                    name = "nicxlive_scene_debug_mask",
+                    hideFlags = HideFlags.HideAndDontSave
+                };
+                _sceneDebugMaskMaterial.SetFloat("_StencilRef", 1.0f);
+                _sceneDebugMaskMaterial.SetFloat("_StencilComp", (float)CompareFunction.Always);
+                _sceneDebugMaskMaterial.SetFloat("_StencilPass", (float)StencilOp.Keep);
+                _sceneDebugMaskMaterial.SetFloat("_ColorMask", 0.0f);
+            }
+            catch
+            {
+                _sceneDebugMaskMaterial = null;
+            }
+        }
+
+        private void EnsureSceneDebugReplayBuffer()
+        {
+            if (_sceneDebugReplayBuffer != null)
+            {
+                return;
+            }
+
+            _sceneDebugReplayBuffer = new CommandBuffer
+            {
+                name = "nicxlive_scene_debug_replay"
+            };
+        }
+
+        private void AppendSceneDebugReplayCommands(CommandBuffer buffer)
+        {
+            AppendSceneDebugReplayCommands(buffer, _sceneDebugPresentedDraws);
+        }
+
+        private void AppendSceneDebugReplayCommands(CommandBuffer buffer, List<SceneDebugDraw> draws)
+        {
+            for (var i = 0; i < draws.Count; i++)
+            {
+                var draw = draws[i];
+                var clipMesh = draw.ClipMesh;
+                if (clipMesh == null || clipMesh.vertexCount == 0)
+                {
+                    continue;
+                }
+
+                var material = draw.UseMaskMaterial ? _sceneDebugMaskMaterial : _sceneDebugMaterial;
+                if (material == null)
+                {
+                    continue;
+                }
+                material = ResolveRenderStateMaterial(
+                    material,
+                    (int)UnityEngine.Rendering.BlendMode.One,
+                    (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha,
+                    (int)UnityEngine.Rendering.BlendMode.One,
+                    (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha,
+                    (int)UnityEngine.Rendering.BlendOp.Add,
+                    (int)UnityEngine.Rendering.BlendOp.Add,
+                    Mathf.RoundToInt(draw.StencilRef),
+                    Mathf.RoundToInt(draw.StencilComp),
+                    Mathf.RoundToInt(draw.StencilPass),
+                    Mathf.RoundToInt(draw.ColorMask));
+
+                _props.Clear();
+                ApplySceneDebugProperties(_props, draw);
+                buffer.DrawMesh(clipMesh, Matrix4x4.identity, material, 0, 0, _props);
+            }
+        }
+
+        private void ReplayCurrentSceneDebugToRootScene(CommandBuffer buffer)
+        {
+            if (buffer == null || _sceneDebugDraws.Count == 0 || _rootSceneTexture == null)
+            {
+                return;
+            }
+
+            EnsureSceneDebugMaterial();
+            EnsureSceneDebugMaskMaterial();
+            if (_sceneDebugMaterial == null)
+            {
+                return;
+            }
+
+            var depthTarget = _rootSceneDepthTexture != null
+                ? new RenderTargetIdentifier(_rootSceneDepthTexture)
+                : _rootSceneTarget;
+            buffer.SetViewProjectionMatrices(Matrix4x4.identity, Matrix4x4.identity);
+            buffer.SetRenderTarget(_rootSceneTarget, depthTarget);
+            buffer.ClearRenderTarget(RTClearFlags.All, Color.clear, 1.0f, 0);
+            AppendSceneDebugReplayCommands(buffer, _sceneDebugDraws);
+            _renderTargetStack.Clear();
+            _renderTargetStack.Push(_rootSceneTarget);
+        }
+
+        private void ConfigureSceneDebugMaterial(Material material, SceneDebugDraw draw)
+        {
+            if (!draw.UseMaskMaterial)
+            {
+                material.SetTexture("_MainTex", draw.MainTexture != null ? draw.MainTexture : _whiteTexture);
+                material.SetTexture("_BaseMap", draw.MainTexture != null ? draw.MainTexture : _whiteTexture);
+                material.SetTexture("_EmissionTex", draw.EmissionTexture != null ? draw.EmissionTexture : Texture2D.blackTexture);
+                material.SetFloat("_Opacity", Mathf.Clamp01(draw.Opacity));
+                material.SetFloat("_EmissionStrength", Mathf.Max(0f, draw.EmissionStrength));
+                material.SetFloat("_MaskThreshold", Mathf.Clamp01(draw.MaskThreshold));
+                material.SetVector("_MultColor", draw.MultColor);
+                material.SetVector("_ScreenColor", draw.ScreenColor);
+                material.SetFloat("_DebugForceOpaque", 0.0f);
+                material.SetFloat("_DebugFlipY", 1.0f);
+                material.SetFloat("_DebugFlipV", 0.0f);
+                material.SetFloat("_DebugShowAlbedo", draw.ShowAlbedo ? 1.0f : 0.0f);
+            }
+
+            material.SetFloat("_StencilRef", draw.StencilRef);
+            material.SetFloat("_StencilComp", draw.StencilComp);
+            material.SetFloat("_StencilPass", draw.StencilPass);
+            material.SetFloat("_ColorMask", draw.ColorMask);
+        }
+
+        private void ApplySceneDebugProperties(MaterialPropertyBlock props, SceneDebugDraw draw)
+        {
+            if (!draw.UseMaskMaterial)
+            {
+                props.SetTexture("_MainTex", draw.MainTexture != null ? draw.MainTexture : _whiteTexture);
+                props.SetTexture("_BaseMap", draw.MainTexture != null ? draw.MainTexture : _whiteTexture);
+                props.SetTexture("_EmissionTex", draw.EmissionTexture != null ? draw.EmissionTexture : Texture2D.blackTexture);
+                props.SetFloat("_Opacity", Mathf.Clamp01(draw.Opacity));
+                props.SetFloat("_EmissionStrength", Mathf.Max(0f, draw.EmissionStrength));
+                props.SetFloat("_MaskThreshold", Mathf.Clamp01(draw.MaskThreshold));
+                props.SetVector("_MultColor", draw.MultColor);
+                props.SetVector("_ScreenColor", draw.ScreenColor);
+                props.SetFloat("_DebugForceOpaque", 0.0f);
+                props.SetFloat("_DebugFlipY", 1.0f);
+                props.SetFloat("_DebugFlipV", 0.0f);
+                props.SetFloat("_DebugShowAlbedo", draw.ShowAlbedo ? 1.0f : 0.0f);
+            }
+
+            props.SetFloat("_StencilRef", draw.StencilRef);
+            props.SetFloat("_StencilComp", draw.StencilComp);
+            props.SetFloat("_StencilPass", draw.StencilPass);
+            props.SetFloat("_ColorMask", draw.ColorMask);
+        }
+
         private static void ClearSceneDebugDrawList(List<SceneDebugDraw> draws)
         {
             for (var i = 0; i < draws.Count; i++)
@@ -3331,6 +3587,153 @@ namespace Nicxlive.UnityBackend.Managed
         private void ClearSceneDebugPresentedDraws()
         {
             ClearSceneDebugDrawList(_sceneDebugPresentedDraws);
+        }
+
+        private static RenderTexture CreateRootColorTexture(string name, int width, int height)
+        {
+            var desc = new RenderTextureDescriptor(width, height, RenderTextureFormat.ARGB32, 0)
+            {
+                msaaSamples = 1,
+                useMipMap = false,
+                autoGenerateMips = false
+            };
+
+            var texture = new RenderTexture(desc)
+            {
+                name = name,
+                filterMode = FilterMode.Bilinear,
+                wrapMode = TextureWrapMode.Clamp,
+                hideFlags = HideFlags.HideAndDontSave
+            };
+            texture.Create();
+            return texture;
+        }
+
+        private static RenderTexture CreateRootDepthTexture(string name, int width, int height)
+        {
+            var desc = new RenderTextureDescriptor(width, height)
+            {
+                msaaSamples = 1,
+                useMipMap = false,
+                autoGenerateMips = false,
+                graphicsFormat = UnityEngine.Experimental.Rendering.GraphicsFormat.None,
+                depthStencilFormat = UnityEngine.Experimental.Rendering.GraphicsFormat.D24_UNorm_S8_UInt,
+                sRGB = false
+            };
+
+            var texture = new RenderTexture(desc)
+            {
+                name = name,
+                filterMode = FilterMode.Point,
+                wrapMode = TextureWrapMode.Clamp,
+                hideFlags = HideFlags.HideAndDontSave
+            };
+            texture.Create();
+            return texture;
+        }
+
+        private void EnsureRootSceneTexture(int width, int height)
+        {
+            width = Mathf.Max(1, width);
+            height = Mathf.Max(1, height);
+            if (_rootSceneTexture != null &&
+                _rootSceneEmissiveTexture != null &&
+                _rootSceneBumpTexture != null &&
+                _rootSceneDepthTexture != null &&
+                _rootSceneTexture.width == width &&
+                _rootSceneTexture.height == height &&
+                _rootSceneEmissiveTexture.width == width &&
+                _rootSceneEmissiveTexture.height == height &&
+                _rootSceneBumpTexture.width == width &&
+                _rootSceneBumpTexture.height == height &&
+                _rootSceneDepthTexture.width == width &&
+                _rootSceneDepthTexture.height == height)
+            {
+                if (!_rootSceneTexture.IsCreated())
+                {
+                    _rootSceneTexture.Create();
+                }
+                if (!_rootSceneEmissiveTexture.IsCreated())
+                {
+                    _rootSceneEmissiveTexture.Create();
+                }
+                if (!_rootSceneBumpTexture.IsCreated())
+                {
+                    _rootSceneBumpTexture.Create();
+                }
+                if (!_rootSceneDepthTexture.IsCreated())
+                {
+                    _rootSceneDepthTexture.Create();
+                }
+                _rootSceneTarget = new RenderTargetIdentifier(_rootSceneTexture);
+                _rootSceneColorTargets = new[]
+                {
+                    new RenderTargetIdentifier(_rootSceneTexture),
+                    new RenderTargetIdentifier(_rootSceneEmissiveTexture),
+                    new RenderTargetIdentifier(_rootSceneBumpTexture),
+                };
+                return;
+            }
+
+            ReleasePersistentResources();
+            _rootSceneTexture = CreateRootColorTexture("nicxlive_root_scene_albedo_rt", width, height);
+            _rootSceneEmissiveTexture = CreateRootColorTexture("nicxlive_root_scene_emissive_rt", width, height);
+            _rootSceneBumpTexture = CreateRootColorTexture("nicxlive_root_scene_bump_rt", width, height);
+            _rootSceneDepthTexture = CreateRootDepthTexture("nicxlive_root_scene_depth_rt", width, height);
+            _rootSceneTarget = new RenderTargetIdentifier(_rootSceneTexture);
+            _rootSceneColorTargets = new[]
+            {
+                new RenderTargetIdentifier(_rootSceneTexture),
+                new RenderTargetIdentifier(_rootSceneEmissiveTexture),
+                new RenderTargetIdentifier(_rootSceneBumpTexture),
+            };
+        }
+
+        public void ReleasePersistentResources()
+        {
+            if (_rootSceneTexture == null &&
+                _rootSceneEmissiveTexture == null &&
+                _rootSceneBumpTexture == null &&
+                _rootSceneDepthTexture == null)
+            {
+                return;
+            }
+
+            if (_rootSceneTexture != null && _rootSceneTexture.IsCreated())
+            {
+                _rootSceneTexture.Release();
+            }
+            UnityObjectUtil.DestroyObject(_rootSceneTexture);
+            _rootSceneTexture = null;
+            if (_rootSceneEmissiveTexture != null)
+            {
+                if (_rootSceneEmissiveTexture.IsCreated())
+                {
+                    _rootSceneEmissiveTexture.Release();
+                }
+                UnityObjectUtil.DestroyObject(_rootSceneEmissiveTexture);
+                _rootSceneEmissiveTexture = null;
+            }
+            if (_rootSceneBumpTexture != null)
+            {
+                if (_rootSceneBumpTexture.IsCreated())
+                {
+                    _rootSceneBumpTexture.Release();
+                }
+                UnityObjectUtil.DestroyObject(_rootSceneBumpTexture);
+                _rootSceneBumpTexture = null;
+            }
+            if (_rootSceneDepthTexture != null)
+            {
+                if (_rootSceneDepthTexture.IsCreated())
+                {
+                    _rootSceneDepthTexture.Release();
+                }
+                UnityObjectUtil.DestroyObject(_rootSceneDepthTexture);
+                _rootSceneDepthTexture = null;
+            }
+            _rootSceneColorTargets = null;
+            _rootSceneTarget = new RenderTargetIdentifier(BuiltinRenderTextureType.CameraTarget);
         }
 
         private bool IsCurrentRenderTargetRootScene()
@@ -3599,6 +4002,7 @@ namespace Nicxlive.UnityBackend.Managed
             HasMaskClipBounds = false;
             LastPartBuildDiag = string.Empty;
             LastRenderPathDiag = string.Empty;
+            LastRootSceneDiag = string.Empty;
             _currentPartPacketOrdinal = 0;
             _worstPartAbsClip = float.NegativeInfinity;
 
@@ -3606,19 +4010,7 @@ namespace Nicxlive.UnityBackend.Managed
             _activeBuffer = buffer;
             buffer.SetViewProjectionMatrices(Matrix4x4.identity, Matrix4x4.identity);
             buffer.SetGlobalVector("_SceneAmbientLight", Vector4.one);
-            var sceneDesc = new RenderTextureDescriptor(
-                Mathf.Max(1, camera.pixelWidth),
-                Mathf.Max(1, camera.pixelHeight),
-                RenderTextureFormat.ARGB32,
-                0)
-            {
-                msaaSamples = 1,
-                useMipMap = false,
-                autoGenerateMips = false,
-                depthStencilFormat = UnityEngine.Experimental.Rendering.GraphicsFormat.D24_UNorm_S8_UInt
-            };
-            buffer.GetTemporaryRT(_sceneColorRtId, sceneDesc, FilterMode.Bilinear);
-            _rootSceneTarget = new RenderTargetIdentifier(_sceneColorRtId);
+            EnsureRootSceneTexture(camera.pixelWidth, camera.pixelHeight);
             _renderTargetStack.Clear();
             _renderTargetStack.Push(_rootSceneTarget);
             _viewportStack.Clear();
@@ -3630,6 +4022,16 @@ namespace Nicxlive.UnityBackend.Managed
             _dynamicCompositeDepth = 0;
             _advancedBlending = false;
             _advancedBlendingCoherent = false;
+            _currentBlendMode = NicxliveNative.BlendMode.Normal;
+            _currentLegacyBlendOnly = true;
+            _currentAdvancedBlendEnabled = false;
+            _currentSrcBlend = (int)UnityEngine.Rendering.BlendMode.One;
+            _currentDstBlend = (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha;
+            _currentSrcBlendAlpha = (int)UnityEngine.Rendering.BlendMode.One;
+            _currentDstBlendAlpha = (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha;
+            _currentBlendOp = (int)UnityEngine.Rendering.BlendOp.Add;
+            _currentBlendOpAlpha = (int)UnityEngine.Rendering.BlendOp.Add;
+            _forceRootSceneVisiblePass = false;
 
             if (!_rendererInitialized)
             {
@@ -3674,10 +4076,6 @@ namespace Nicxlive.UnityBackend.Managed
 
             postProcessScene(buffer);
             presentSceneToBackbuffer(buffer, camera.pixelWidth, camera.pixelHeight);
-            if (Application.isPlaying && camera.cameraType == CameraType.Game && LastPartDrawIssuedCount > 0)
-            {
-                drawRuntimeDebugOverlay(buffer);
-            }
             if (_disableStencilDebug && LastPartDrawIssuedCount > 0)
             {
                 drawDebugOverlay(buffer, partMaterial, propertyConfig);
@@ -3685,7 +4083,6 @@ namespace Nicxlive.UnityBackend.Managed
             _renderTargetStack.Clear();
             _renderTargetStack.Push(_backbufferTarget);
             endScene(buffer);
-            buffer.ReleaseTemporaryRT(_sceneColorRtId);
             var gpuProj = GL.GetGPUProjectionMatrix(camera.projectionMatrix, camera.targetTexture != null);
             buffer.SetViewProjectionMatrices(camera.worldToCameraMatrix, gpuProj);
             _activeBuffer = null;
@@ -3709,11 +4106,64 @@ namespace Nicxlive.UnityBackend.Managed
             }
 
             LastRenderPathDiag =
-                $"Backbuffer={_backbufferTarget}, Root={_rootSceneTarget}, PartMat={partMaterial.shader.name}, MaskMat={maskMaterial.shader.name}, " +
+                $"Backbuffer={_backbufferTarget}, Root={_rootSceneTarget}, RootMrt={(_rootSceneColorTargets != null ? _rootSceneColorTargets.Length : 0)}, RootDepth={(_rootSceneDepthTexture != null ? 1 : 0)}, PartMat={partMaterial.shader.name}, MaskMat={maskMaterial.shader.name}, " +
                 $"MirrorCurrentActive={(_mirrorPresentToCurrentActive ? 1 : 0)}, " +
                 $"StencilDebugOff={(_disableStencilDebug ? 1 : 0)}, " +
                 $"PartDraws={LastPartDrawIssuedCount}, MaskDraws={LastMaskDrawIssuedCount}";
             LastSceneDebugSignature = _sceneDebugSignature;
+        }
+
+        public void UpdateRootSceneDiag(Vector4 clipBounds, bool hasClipBounds)
+        {
+            if (_rootSceneTexture == null || !_rootSceneTexture.IsCreated())
+            {
+                LastRootSceneDiag = "RootSample=Unavailable";
+                return;
+            }
+
+            var centerUv = new Vector2(0.5f, 0.5f);
+            var boundsUv = centerUv;
+            if (hasClipBounds)
+            {
+                var clipCenterX = 0.5f * (clipBounds.x + clipBounds.z);
+                var clipCenterY = 0.5f * (clipBounds.y + clipBounds.w);
+                boundsUv = new Vector2(
+                    Mathf.Clamp01((clipCenterX * 0.5f) + 0.5f),
+                    Mathf.Clamp01((clipCenterY * 0.5f) + 0.5f));
+            }
+
+            var center = SampleRenderTexture(_rootSceneTexture, centerUv);
+            var boundsCenter = SampleRenderTexture(_rootSceneTexture, boundsUv);
+            var hasColor =
+                center.maxColorComponent > 0.01f ||
+                center.a > 0.01f ||
+                boundsCenter.maxColorComponent > 0.01f ||
+                boundsCenter.a > 0.01f;
+
+            LastRootSceneDiag =
+                $"RootSample=Center({center.r:F3},{center.g:F3},{center.b:F3},{center.a:F3}) " +
+                $"BoundsCenter@({boundsUv.x:F3},{boundsUv.y:F3})=({boundsCenter.r:F3},{boundsCenter.g:F3},{boundsCenter.b:F3},{boundsCenter.a:F3}) " +
+                $"HasColor={(hasColor ? 1 : 0)}";
+        }
+
+        private static Color SampleRenderTexture(RenderTexture texture, Vector2 uv)
+        {
+            var prev = RenderTexture.active;
+            var read = new Texture2D(1, 1, TextureFormat.RGBA32, false, false);
+            try
+            {
+                RenderTexture.active = texture;
+                var pixelX = Mathf.Clamp(Mathf.RoundToInt(uv.x * Mathf.Max(0, texture.width - 1)), 0, Mathf.Max(0, texture.width - 1));
+                var pixelY = Mathf.Clamp(Mathf.RoundToInt(uv.y * Mathf.Max(0, texture.height - 1)), 0, Mathf.Max(0, texture.height - 1));
+                read.ReadPixels(new Rect(pixelX, pixelY, 1, 1), 0, 0, false);
+                read.Apply(false, false);
+                return read.GetPixel(0, 0);
+            }
+            finally
+            {
+                UnityObjectUtil.DestroyObject(read);
+                RenderTexture.active = prev;
+            }
         }
 
         private static RenderTargetIdentifier ResolveBackbufferTarget(Camera camera)
@@ -3752,7 +4202,19 @@ namespace Nicxlive.UnityBackend.Managed
             {
                 _renderTargetStack.Push(_backbufferTarget);
             }
-            buffer.SetRenderTarget(_renderTargetStack.Peek());
+            var current = _renderTargetStack.Peek();
+            if (current.Equals(_rootSceneTarget) &&
+                _rootSceneTexture != null &&
+                _rootSceneColorTargets != null)
+            {
+                var depthTarget = _rootSceneDepthTexture != null
+                    ? new RenderTargetIdentifier(_rootSceneDepthTexture)
+                    : _rootSceneTarget;
+                buffer.SetRenderTarget(_rootSceneColorTargets, depthTarget);
+                return;
+            }
+
+            buffer.SetRenderTarget(current);
         }
 
         public void beginScene(CommandBuffer buffer, int width, int height)
@@ -3760,7 +4222,11 @@ namespace Nicxlive.UnityBackend.Managed
             setViewport(width, height);
             rebindActiveTargets(buffer);
             pushViewport(width, height);
-            if (_renderTargetStack.Count > 0 && !_renderTargetStack.Peek().Equals(_backbufferTarget))
+            if (_renderTargetStack.Count > 0 && _renderTargetStack.Peek().Equals(_rootSceneTarget))
+            {
+                buffer.ClearRenderTarget(RTClearFlags.All, Color.clear, 1.0f, 0);
+            }
+            else if (_renderTargetStack.Count > 0 && !_renderTargetStack.Peek().Equals(_backbufferTarget))
             {
                 buffer.ClearRenderTarget(RTClearFlags.Color, Color.clear, 1.0f, 0);
             }
@@ -3797,12 +4263,35 @@ namespace Nicxlive.UnityBackend.Managed
             buffer.SetRenderTarget(_backbufferTarget);
             if (!src.Equals(_backbufferTarget))
             {
-                // Runtime present should be a plain copy. Reusing the part shader here
-                // re-applies alpha/blend semantics and can blank the Game target.
-                buffer.Blit(src, _backbufferTarget);
-                if (_mirrorPresentToCurrentActive)
+                ensurePresentProgram();
+                var canPresentRootWithAlpha =
+                    src.Equals(_rootSceneTarget) &&
+                    _rootSceneTexture != null &&
+                    _presentMaterial != null &&
+                    _presentMesh != null;
+                if (canPresentRootWithAlpha)
                 {
-                    buffer.Blit(src, BuiltinRenderTextureType.CurrentActive);
+                    void drawTo(RenderTargetIdentifier target)
+                    {
+                        buffer.SetRenderTarget(target);
+                        _props.Clear();
+                        _props.SetTexture("_MainTex", _rootSceneTexture);
+                        buffer.DrawMesh(_presentMesh, Matrix4x4.identity, _presentMaterial, 0, 0, _props);
+                    }
+
+                    drawTo(_backbufferTarget);
+                    if (_mirrorPresentToCurrentActive)
+                    {
+                        drawTo(new RenderTargetIdentifier(BuiltinRenderTextureType.CurrentActive));
+                    }
+                }
+                else
+                {
+                    buffer.Blit(src, _backbufferTarget);
+                    if (_mirrorPresentToCurrentActive)
+                    {
+                        buffer.Blit(src, BuiltinRenderTextureType.CurrentActive);
+                    }
                 }
             }
         }
@@ -3877,11 +4366,31 @@ namespace Nicxlive.UnityBackend.Managed
             {
                 return;
             }
-            var shader = Nicxlive.UnityBackend.Compat.UrpShaderCatalog.RequirePartShader();
+            var shader = Shader.Find("Hidden/Nicxlive/Present");
+            if (shader == null)
+            {
+                throw new InvalidOperationException("Hidden/Nicxlive/Present shader not found.");
+            }
             _presentMaterial = new Material(shader)
             {
-                name = "nicxlive_present_program"
+                name = "nicxlive_present_program",
+                hideFlags = HideFlags.HideAndDontSave
             };
+            _presentMaterial.SetInt("_Cull", 0);
+            _presentMaterial.SetFloat("_ZWrite", 0.0f);
+            _presentMaterial.renderQueue = (int)RenderQueue.Transparent;
+            ApplyRenderStateToMaterial(
+                _presentMaterial,
+                (int)UnityEngine.Rendering.BlendMode.One,
+                (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha,
+                (int)UnityEngine.Rendering.BlendMode.One,
+                (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha,
+                (int)UnityEngine.Rendering.BlendOp.Add,
+                (int)UnityEngine.Rendering.BlendOp.Add,
+                1,
+                (int)CompareFunction.Always,
+                (int)StencilOp.Keep,
+                15);
             _presentMesh = buildFullscreenTriangleMesh();
             _presentProgramHandle = _presentMaterial.GetInstanceID();
             _presentProgramInitialized = true;
@@ -4033,8 +4542,30 @@ namespace Nicxlive.UnityBackend.Managed
                 EmissionTexture = t1,
                 Opacity = packet.Opacity,
                 EmissionStrength = packet.EmissionStrength,
+                MaskThreshold = packet.MaskThreshold,
                 MultColor = new Vector4(packet.ClampedTint.X, packet.ClampedTint.Y, packet.ClampedTint.Z, 1f),
                 ScreenColor = new Vector4(packet.ClampedScreen.X, packet.ClampedScreen.Y, packet.ClampedScreen.Z, 1f),
+                StencilRef = _currentStencilRef,
+                StencilComp = _currentStencilComp,
+                StencilPass = _currentStencilPass,
+                ColorMask = _currentColorMask,
+                UseMaskMaterial = false,
+                ShowAlbedo = true,
+            });
+        }
+
+        private void QueueSceneDebugMaskDraw(Mesh mesh)
+        {
+            AccumulateSceneDebugSignature(mesh);
+            _sceneDebugDraws.Add(new SceneDebugDraw
+            {
+                ClipMesh = mesh,
+                StencilRef = _currentStencilRef,
+                StencilComp = _currentStencilComp,
+                StencilPass = _currentStencilPass,
+                ColorMask = _currentColorMask,
+                UseMaskMaterial = true,
+                ShowAlbedo = false,
             });
         }
 
@@ -4213,7 +4744,7 @@ namespace Nicxlive.UnityBackend.Managed
                 _renderTargetStack.Pop();
             }
             popViewport();
-            buffer.SetRenderTarget(_renderTargetStack.Peek());
+            rebindActiveTargets(buffer);
         }
 
         public void drawPartPacket(
@@ -4266,11 +4797,11 @@ namespace Nicxlive.UnityBackend.Managed
             switch (stage)
             {
                 case 0:
-                    applyBlendMode(cfg, (NicxliveNative.BlendMode)packet.BlendingMode, true);
+                    applyBlendMode(cfg, (NicxliveNative.BlendMode)packet.BlendingMode, false);
                     break;
                 case 1:
                 case 2:
-                    applyBlendMode(cfg, (NicxliveNative.BlendMode)packet.BlendingMode, false);
+                    applyBlendMode(cfg, (NicxliveNative.BlendMode)packet.BlendingMode, true);
                     break;
                 default:
                     applyBlendMode(cfg, NicxliveNative.BlendMode.Normal, false);
@@ -4334,12 +4865,17 @@ namespace Nicxlive.UnityBackend.Managed
             }
 
             _props.Clear();
+            _props.SetFloat(cfg.ShaderStage, _currentShaderStage);
+            _props.SetFloat(cfg.BlendMode, (float)_currentBlendMode);
+            var legacyBlendOnly = fromMaskApply || _currentLegacyBlendOnly;
+            _props.SetFloat(cfg.LegacyBlendOnly, legacyBlendOnly ? 1.0f : 0.0f);
+            _props.SetFloat(cfg.AdvancedBlend, (!legacyBlendOnly && _currentAdvancedBlendEnabled) ? 1.0f : 0.0f);
+            SetBlendState(cfg, _currentBlendMode);
             _props.SetFloat(cfg.Opacity, packet.Opacity);
             _props.SetFloat(cfg.EmissionStrength, packet.EmissionStrength);
             _props.SetFloat(cfg.MaskThreshold, packet.MaskThreshold);
             _props.SetVector(cfg.MultColor, new Vector4(packet.ClampedTint.X, packet.ClampedTint.Y, packet.ClampedTint.Z, 1));
             _props.SetVector(cfg.ScreenColor, new Vector4(packet.ClampedScreen.X, packet.ClampedScreen.Y, packet.ClampedScreen.Z, 1));
-            _props.SetFloat(cfg.BlendMode, packet.BlendingMode);
 
             LastPartOpacityMin = Mathf.Min(LastPartOpacityMin, packet.Opacity);
             LastPartOpacityMax = Mathf.Max(LastPartOpacityMax, packet.Opacity);
@@ -4367,25 +4903,77 @@ namespace Nicxlive.UnityBackend.Managed
             _props.SetColor("_BaseColor", new Color(1f, 1f, 1f, Mathf.Clamp01(packet.Opacity)));
             _props.SetTexture(cfg.EmissiveTex, t1);
             _props.SetTexture(cfg.BumpTex, t2);
+            _props.SetFloat("_DebugForceOpaque", 0.0f);
+            _props.SetFloat("_DebugFlipY", 1.0f);
+            _props.SetFloat("_DebugFlipV", 0.0f);
+            _props.SetFloat("_DebugShowAlbedo", _forceRootSceneVisiblePass ? 1.0f : 0.0f);
+            if (_forceRootSceneVisiblePass)
+            {
+                _props.SetFloat(cfg.BlendMode, (float)NicxliveNative.BlendMode.Normal);
+                _props.SetFloat(cfg.LegacyBlendOnly, 1.0f);
+                _props.SetFloat(cfg.AdvancedBlend, 0.0f);
+                SetStandardAlphaBlendState(cfg);
+            }
 
             ConfigureStencil(cfg, forceStencilWrite, stencilRef);
             _props.SetFloat(cfg.IsMaskPass, packet.IsMask ? 1.0f : 0.0f);
-            _props.SetFloat(cfg.LegacyBlendOnly, fromMaskApply ? 1.0f : 0.0f);
-            _props.SetFloat(cfg.AdvancedBlend, _advancedBlending ? 1.0f : 0.0f);
             if (_inMaskPass && _inMaskContent && !forceStencilWrite)
             {
                 ConfigureStencilTest(cfg, _maskContentStencilRef);
             }
 
-            buffer.DrawMesh(mesh, _clipSpaceDrawMatrix, partMaterial, 0, 0, _props);
+            var drawMaterial = partMaterial;
+            var drawRootVisiblePass =
+                _forceRootSceneVisiblePass &&
+                _rootSceneTexture != null &&
+                IsCurrentRenderTargetRootScene();
+            if (_forceRootSceneVisiblePass)
+            {
+                EnsureSceneDebugMaterial();
+                if (_sceneDebugMaterial != null)
+                {
+                    drawMaterial = _sceneDebugMaterial;
+                    ApplySceneDebugProperties(
+                        _props,
+                        new SceneDebugDraw
+                        {
+                            ClipMesh = mesh,
+                            MainTexture = t0,
+                            EmissionTexture = t1,
+                            Opacity = packet.Opacity,
+                            EmissionStrength = packet.EmissionStrength,
+                            MaskThreshold = packet.MaskThreshold,
+                            MultColor = new Vector4(packet.ClampedTint.X, packet.ClampedTint.Y, packet.ClampedTint.Z, 1f),
+                            ScreenColor = new Vector4(packet.ClampedScreen.X, packet.ClampedScreen.Y, packet.ClampedScreen.Z, 1f),
+                            StencilRef = _currentStencilRef,
+                            StencilComp = _currentStencilComp,
+                            StencilPass = _currentStencilPass,
+                            ColorMask = _currentColorMask,
+                            UseMaskMaterial = false,
+                            ShowAlbedo = true,
+                        });
+                }
+            }
+
+            if (drawRootVisiblePass)
+            {
+                var depthTarget = _rootSceneDepthTexture != null
+                    ? new RenderTargetIdentifier(_rootSceneDepthTexture)
+                    : _rootSceneTarget;
+                buffer.SetRenderTarget(_rootSceneTarget, depthTarget);
+            }
+            drawMaterial = ResolveRenderStateMaterial(drawMaterial);
+            buffer.DrawMesh(mesh, _clipSpaceDrawMatrix, drawMaterial, 0, 0, _props);
+            if (drawRootVisiblePass)
+            {
+                rebindActiveTargets(buffer);
+            }
             var queueSceneDebugDraw =
-                (_disableStencilDebug || _queueSceneDebugDraws) &&
+                (_disableStencilDebug || _queueSceneDebugDraws || Application.isPlaying) &&
                 _dynamicCompositeDepth == 0 &&
                 IsCurrentRenderTargetRootScene() &&
-                !forceStencilWrite &&
-                !fromMaskApply &&
-                !packet.IsMask &&
-                ((packet.UseMultistageBlend && _currentShaderStage == 0) || (!packet.UseMultistageBlend && _currentShaderStage == 2));
+                !packet.UseMultistageBlend &&
+                _currentShaderStage == 2;
             if (queueSceneDebugDraw)
             {
                 QueueSceneDebugDraw(mesh, partMaterial, cfg, packet, t0, t1, t2);
@@ -4423,7 +5011,14 @@ namespace Nicxlive.UnityBackend.Managed
                 ConfigureStencilTest(cfg, _maskContentStencilRef);
             }
 
-            buffer.DrawMesh(mesh, _clipSpaceDrawMatrix, maskMaterial, 0, 0, _props);
+            var drawMaterial = ResolveRenderStateMaterial(maskMaterial);
+            buffer.DrawMesh(mesh, _clipSpaceDrawMatrix, drawMaterial, 0, 0, _props);
+            if ((_disableStencilDebug || _queueSceneDebugDraws || Application.isPlaying) &&
+                _dynamicCompositeDepth == 0 &&
+                IsCurrentRenderTargetRootScene())
+            {
+                QueueSceneDebugMaskDraw(mesh);
+            }
             LastMaskDrawIssuedCount++;
         }
 
@@ -4441,16 +5036,25 @@ namespace Nicxlive.UnityBackend.Managed
 
         public void setLegacyBlendMode(PropertyConfig cfg, NicxliveNative.BlendMode mode)
         {
+            _currentBlendMode = mode;
+            _currentLegacyBlendOnly = true;
+            _currentAdvancedBlendEnabled = false;
             _props.SetFloat(cfg.BlendMode, (float)mode);
             _props.SetFloat(cfg.LegacyBlendOnly, 1.0f);
+            _props.SetFloat(cfg.AdvancedBlend, 0.0f);
+            SetBlendState(cfg, mode);
         }
 
         public void setAdvancedBlendEquation(PropertyConfig cfg, NicxliveNative.BlendMode mode)
         {
             // Unity path maps advanced mode selection to shader properties.
+            _currentBlendMode = mode;
+            _currentLegacyBlendOnly = false;
+            _currentAdvancedBlendEnabled = true;
             _props.SetFloat(cfg.BlendMode, (float)mode);
             _props.SetFloat(cfg.LegacyBlendOnly, 0.0f);
             _props.SetFloat(cfg.AdvancedBlend, 1.0f);
+            SetBlendState(cfg, mode);
         }
 
         private static bool isAdvancedBlendMode(NicxliveNative.BlendMode mode)
@@ -4544,32 +5148,21 @@ namespace Nicxlive.UnityBackend.Managed
         {
             if (_disableStencilDebug)
             {
-                _props.SetFloat(cfg.StencilRef, 1.0f);
-                _props.SetFloat(cfg.StencilComp, (float)CompareFunction.Always);
-                _props.SetFloat(cfg.StencilPass, (float)StencilOp.Keep);
-                _props.SetFloat(cfg.ColorMask, 15.0f);
+                SetStencilState(cfg, 1.0f, (float)CompareFunction.Always, (float)StencilOp.Keep, 15.0f);
                 return;
             }
 
             if (forceStencilWrite)
             {
-                _props.SetFloat(cfg.StencilRef, stencilRef);
-                _props.SetFloat(cfg.StencilComp, (float)CompareFunction.Always);
-                _props.SetFloat(cfg.StencilPass, (float)StencilOp.Replace);
-                _props.SetFloat(cfg.ColorMask, 0.0f);
+                SetStencilState(cfg, stencilRef, (float)CompareFunction.Always, (float)StencilOp.Replace, 0.0f);
                 return;
             }
 
-            _props.SetFloat(cfg.StencilRef, 1.0f);
-            _props.SetFloat(cfg.StencilComp, (float)CompareFunction.Always);
-            _props.SetFloat(cfg.StencilPass, (float)StencilOp.Keep);
-            _props.SetFloat(cfg.ColorMask, 15.0f);
+            SetStencilState(cfg, 1.0f, (float)CompareFunction.Always, (float)StencilOp.Keep, 15.0f);
 
             if (_inMaskPass && !_inMaskContent && !_maskUsesStencil)
             {
-                _props.SetFloat(cfg.StencilRef, 1.0f);
-                _props.SetFloat(cfg.StencilComp, (float)CompareFunction.Always);
-                _props.SetFloat(cfg.StencilPass, (float)StencilOp.Keep);
+                SetStencilState(cfg, 1.0f, (float)CompareFunction.Always, (float)StencilOp.Keep, 15.0f);
             }
         }
 
@@ -4577,17 +5170,283 @@ namespace Nicxlive.UnityBackend.Managed
         {
             if (_disableStencilDebug)
             {
-                _props.SetFloat(cfg.StencilRef, 1.0f);
-                _props.SetFloat(cfg.StencilComp, (float)CompareFunction.Always);
-                _props.SetFloat(cfg.StencilPass, (float)StencilOp.Keep);
-                _props.SetFloat(cfg.ColorMask, 15.0f);
+                SetStencilState(cfg, 1.0f, (float)CompareFunction.Always, (float)StencilOp.Keep, 15.0f);
                 return;
             }
 
+            SetStencilState(cfg, stencilRef, (float)CompareFunction.Equal, (float)StencilOp.Keep, 15.0f);
+        }
+
+        private void SetStencilState(PropertyConfig cfg, float stencilRef, float stencilComp, float stencilPass, float colorMask)
+        {
+            _currentStencilRef = stencilRef;
+            _currentStencilComp = stencilComp;
+            _currentStencilPass = stencilPass;
+            _currentColorMask = colorMask;
             _props.SetFloat(cfg.StencilRef, stencilRef);
-            _props.SetFloat(cfg.StencilComp, (float)CompareFunction.Equal);
-            _props.SetFloat(cfg.StencilPass, (float)StencilOp.Keep);
-            _props.SetFloat(cfg.ColorMask, 15.0f);
+            _props.SetFloat(cfg.StencilComp, stencilComp);
+            _props.SetFloat(cfg.StencilPass, stencilPass);
+            _props.SetFloat(cfg.ColorMask, colorMask);
+        }
+
+        private Material ResolveRenderStateMaterial(Material baseMaterial)
+        {
+            return ResolveRenderStateMaterial(
+                baseMaterial,
+                _currentSrcBlend,
+                _currentDstBlend,
+                _currentSrcBlendAlpha,
+                _currentDstBlendAlpha,
+                _currentBlendOp,
+                _currentBlendOpAlpha,
+                Mathf.RoundToInt(_currentStencilRef),
+                Mathf.RoundToInt(_currentStencilComp),
+                Mathf.RoundToInt(_currentStencilPass),
+                Mathf.RoundToInt(_currentColorMask));
+        }
+
+        private Material ResolveRenderStateMaterial(
+            Material baseMaterial,
+            int srcBlend,
+            int dstBlend,
+            int srcBlendAlpha,
+            int dstBlendAlpha,
+            int blendOp,
+            int blendOpAlpha,
+            int stencilRef,
+            int stencilComp,
+            int stencilPass,
+            int colorMask)
+        {
+            var key = new MaterialRenderStateKey
+            {
+                BaseMaterialId = baseMaterial.GetInstanceID(),
+                SrcBlend = srcBlend,
+                DstBlend = dstBlend,
+                SrcBlendAlpha = srcBlendAlpha,
+                DstBlendAlpha = dstBlendAlpha,
+                BlendOp = blendOp,
+                BlendOpAlpha = blendOpAlpha,
+                StencilRef = stencilRef,
+                StencilComp = stencilComp,
+                StencilPass = stencilPass,
+                ColorMask = colorMask,
+            };
+            if (_renderStateMaterialCache.TryGetValue(key, out var cached) && cached != null)
+            {
+                return cached;
+            }
+
+            var material = new Material(baseMaterial)
+            {
+                name = $"{baseMaterial.name}_state_{srcBlend}_{dstBlend}_{stencilRef}_{stencilComp}_{stencilPass}_{colorMask}",
+                hideFlags = HideFlags.HideAndDontSave
+            };
+            ApplyRenderStateToMaterial(
+                material,
+                srcBlend,
+                dstBlend,
+                srcBlendAlpha,
+                dstBlendAlpha,
+                blendOp,
+                blendOpAlpha,
+                stencilRef,
+                stencilComp,
+                stencilPass,
+                colorMask);
+            _renderStateMaterialCache[key] = material;
+            return material;
+        }
+
+        private static void ApplyRenderStateToMaterial(
+            Material material,
+            int srcBlend,
+            int dstBlend,
+            int srcBlendAlpha,
+            int dstBlendAlpha,
+            int blendOp,
+            int blendOpAlpha,
+            int stencilRef,
+            int stencilComp,
+            int stencilPass,
+            int colorMask)
+        {
+            if (material.HasProperty("_SrcBlend"))
+            {
+                material.SetFloat("_SrcBlend", srcBlend);
+            }
+            if (material.HasProperty("_DstBlend"))
+            {
+                material.SetFloat("_DstBlend", dstBlend);
+            }
+            if (material.HasProperty("_SrcBlendAlpha"))
+            {
+                material.SetFloat("_SrcBlendAlpha", srcBlendAlpha);
+            }
+            if (material.HasProperty("_DstBlendAlpha"))
+            {
+                material.SetFloat("_DstBlendAlpha", dstBlendAlpha);
+            }
+            if (material.HasProperty("_BlendOp"))
+            {
+                material.SetFloat("_BlendOp", blendOp);
+            }
+            if (material.HasProperty("_BlendOpAlpha"))
+            {
+                material.SetFloat("_BlendOpAlpha", blendOpAlpha);
+            }
+            if (material.HasProperty("_StencilRef"))
+            {
+                material.SetFloat("_StencilRef", stencilRef);
+            }
+            if (material.HasProperty("_StencilComp"))
+            {
+                material.SetFloat("_StencilComp", stencilComp);
+            }
+            if (material.HasProperty("_StencilPass"))
+            {
+                material.SetFloat("_StencilPass", stencilPass);
+            }
+            if (material.HasProperty("_ColorMask"))
+            {
+                material.SetFloat("_ColorMask", colorMask);
+            }
+        }
+
+        private void SetBlendState(PropertyConfig cfg, NicxliveNative.BlendMode mode)
+        {
+            var srcColor = UnityEngine.Rendering.BlendMode.One;
+            var dstColor = UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha;
+            var srcAlpha = UnityEngine.Rendering.BlendMode.One;
+            var dstAlpha = UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha;
+            var opColor = UnityEngine.Rendering.BlendOp.Add;
+            var opAlpha = UnityEngine.Rendering.BlendOp.Add;
+
+            switch (mode)
+            {
+                case NicxliveNative.BlendMode.Normal:
+                    srcAlpha = UnityEngine.Rendering.BlendMode.One;
+                    dstAlpha = UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha;
+                    break;
+                case NicxliveNative.BlendMode.Multiply:
+                    srcColor = UnityEngine.Rendering.BlendMode.DstColor;
+                    dstColor = UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha;
+                    srcAlpha = UnityEngine.Rendering.BlendMode.DstColor;
+                    dstAlpha = UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha;
+                    break;
+                case NicxliveNative.BlendMode.Screen:
+                    srcColor = UnityEngine.Rendering.BlendMode.One;
+                    dstColor = UnityEngine.Rendering.BlendMode.OneMinusSrcColor;
+                    srcAlpha = UnityEngine.Rendering.BlendMode.One;
+                    dstAlpha = UnityEngine.Rendering.BlendMode.OneMinusSrcColor;
+                    break;
+                case NicxliveNative.BlendMode.Lighten:
+                    srcColor = UnityEngine.Rendering.BlendMode.One;
+                    dstColor = UnityEngine.Rendering.BlendMode.One;
+                    srcAlpha = UnityEngine.Rendering.BlendMode.One;
+                    dstAlpha = UnityEngine.Rendering.BlendMode.One;
+                    opColor = UnityEngine.Rendering.BlendOp.Max;
+                    opAlpha = UnityEngine.Rendering.BlendOp.Max;
+                    break;
+                case NicxliveNative.BlendMode.ColorDodge:
+                    srcColor = UnityEngine.Rendering.BlendMode.DstColor;
+                    dstColor = UnityEngine.Rendering.BlendMode.One;
+                    srcAlpha = UnityEngine.Rendering.BlendMode.DstColor;
+                    dstAlpha = UnityEngine.Rendering.BlendMode.One;
+                    break;
+                case NicxliveNative.BlendMode.LinearDodge:
+                    srcColor = UnityEngine.Rendering.BlendMode.One;
+                    dstColor = UnityEngine.Rendering.BlendMode.OneMinusSrcColor;
+                    srcAlpha = UnityEngine.Rendering.BlendMode.One;
+                    dstAlpha = UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha;
+                    break;
+                case NicxliveNative.BlendMode.AddGlow:
+                    srcColor = UnityEngine.Rendering.BlendMode.One;
+                    dstColor = UnityEngine.Rendering.BlendMode.One;
+                    srcAlpha = UnityEngine.Rendering.BlendMode.One;
+                    dstAlpha = UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha;
+                    break;
+                case NicxliveNative.BlendMode.Subtract:
+                    srcColor = UnityEngine.Rendering.BlendMode.OneMinusDstColor;
+                    dstColor = UnityEngine.Rendering.BlendMode.One;
+                    srcAlpha = UnityEngine.Rendering.BlendMode.OneMinusDstColor;
+                    dstAlpha = UnityEngine.Rendering.BlendMode.One;
+                    opColor = UnityEngine.Rendering.BlendOp.ReverseSubtract;
+                    opAlpha = UnityEngine.Rendering.BlendOp.Add;
+                    break;
+                case NicxliveNative.BlendMode.Exclusion:
+                    srcColor = UnityEngine.Rendering.BlendMode.OneMinusDstColor;
+                    dstColor = UnityEngine.Rendering.BlendMode.OneMinusSrcColor;
+                    srcAlpha = UnityEngine.Rendering.BlendMode.One;
+                    dstAlpha = UnityEngine.Rendering.BlendMode.One;
+                    break;
+                case NicxliveNative.BlendMode.Inverse:
+                    srcColor = UnityEngine.Rendering.BlendMode.OneMinusDstColor;
+                    dstColor = UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha;
+                    srcAlpha = UnityEngine.Rendering.BlendMode.OneMinusDstColor;
+                    dstAlpha = UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha;
+                    break;
+                case NicxliveNative.BlendMode.DestinationIn:
+                    srcColor = UnityEngine.Rendering.BlendMode.Zero;
+                    dstColor = UnityEngine.Rendering.BlendMode.SrcAlpha;
+                    srcAlpha = UnityEngine.Rendering.BlendMode.Zero;
+                    dstAlpha = UnityEngine.Rendering.BlendMode.SrcAlpha;
+                    break;
+                case NicxliveNative.BlendMode.ClipToLower:
+                    srcColor = UnityEngine.Rendering.BlendMode.DstAlpha;
+                    dstColor = UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha;
+                    srcAlpha = UnityEngine.Rendering.BlendMode.DstAlpha;
+                    dstAlpha = UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha;
+                    break;
+                case NicxliveNative.BlendMode.SliceFromLower:
+                    srcColor = UnityEngine.Rendering.BlendMode.Zero;
+                    dstColor = UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha;
+                    srcAlpha = UnityEngine.Rendering.BlendMode.Zero;
+                    dstAlpha = UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha;
+                    break;
+                case NicxliveNative.BlendMode.Overlay:
+                case NicxliveNative.BlendMode.Darken:
+                case NicxliveNative.BlendMode.ColorBurn:
+                case NicxliveNative.BlendMode.HardLight:
+                case NicxliveNative.BlendMode.SoftLight:
+                case NicxliveNative.BlendMode.Difference:
+                default:
+                    // Match the original fallback path when the exact equation is unavailable.
+                    srcColor = UnityEngine.Rendering.BlendMode.One;
+                    dstColor = UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha;
+                    srcAlpha = UnityEngine.Rendering.BlendMode.One;
+                    dstAlpha = UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha;
+                    break;
+            }
+
+            _currentSrcBlend = (int)srcColor;
+            _currentDstBlend = (int)dstColor;
+            _currentSrcBlendAlpha = (int)srcAlpha;
+            _currentDstBlendAlpha = (int)dstAlpha;
+            _currentBlendOp = (int)opColor;
+            _currentBlendOpAlpha = (int)opAlpha;
+            _props.SetFloat(cfg.SrcBlend, (float)srcColor);
+            _props.SetFloat(cfg.DstBlend, (float)dstColor);
+            _props.SetFloat(cfg.SrcBlendAlpha, (float)srcAlpha);
+            _props.SetFloat(cfg.DstBlendAlpha, (float)dstAlpha);
+            _props.SetFloat(cfg.BlendOp, (float)opColor);
+            _props.SetFloat(cfg.BlendOpAlpha, (float)opAlpha);
+        }
+
+        private void SetStandardAlphaBlendState(PropertyConfig cfg)
+        {
+            _currentSrcBlend = (int)UnityEngine.Rendering.BlendMode.One;
+            _currentDstBlend = (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha;
+            _currentSrcBlendAlpha = (int)UnityEngine.Rendering.BlendMode.One;
+            _currentDstBlendAlpha = (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha;
+            _currentBlendOp = (int)UnityEngine.Rendering.BlendOp.Add;
+            _currentBlendOpAlpha = (int)UnityEngine.Rendering.BlendOp.Add;
+            _props.SetFloat(cfg.SrcBlend, (float)UnityEngine.Rendering.BlendMode.One);
+            _props.SetFloat(cfg.DstBlend, (float)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+            _props.SetFloat(cfg.SrcBlendAlpha, (float)UnityEngine.Rendering.BlendMode.One);
+            _props.SetFloat(cfg.DstBlendAlpha, (float)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+            _props.SetFloat(cfg.BlendOp, (float)UnityEngine.Rendering.BlendOp.Add);
+            _props.SetFloat(cfg.BlendOpAlpha, (float)UnityEngine.Rendering.BlendOp.Add);
         }
 
         private unsafe Mesh? BuildPartMesh(SharedBuffers shared, NicxliveNative.NjgPartDrawPacket packet)
@@ -4994,6 +5853,7 @@ namespace Nicxlive.UnityBackend.Managed
         public Vector2 ModelScale = Vector2.one;
         public Vector2 ModelOffsetPixels = Vector2.zero;
         public bool DrawInEditMode = true;
+        public bool ShowRuntimeDebugOverlayComparison;
         public Camera? TargetCamera;
         public Material? PartMaterial;
         public Material? MaskMaterial;
@@ -5037,7 +5897,9 @@ namespace Nicxlive.UnityBackend.Managed
         [NonSerialized] public string LastFrameDiag = string.Empty;
         [NonSerialized] public string LastRenderPathDiag = string.Empty;
         [NonSerialized] public string LastClipFitDiag = string.Empty;
+        [NonSerialized] public string LastRootSceneDiag = string.Empty;
         [NonSerialized] public string LastRouterDiag = string.Empty;
+        [NonSerialized] public bool LastRootFallbackApplied;
         private int _emptyCommandLogCooldown;
         private int _noIssuedDrawLogCooldown;
         private int _transformGuardLogCooldown;
@@ -5103,6 +5965,7 @@ namespace Nicxlive.UnityBackend.Managed
             }
             LastResolvedCameraName = camera.name;
             EnsureAttachedCamera(camera);
+            EnsureRuntimeOverlayAfterRouter();
 
             TryReloadPuppet(false);
             if (_renderer.HasPuppet)
@@ -5166,7 +6029,9 @@ namespace Nicxlive.UnityBackend.Managed
             LastClipFitDiag = _executor.LastClipFitDiag;
             LastRouterDiag = Nicxlive.UnityBackend.Compat.UrpCommandBufferRouter.GetLastExecutionDiag(_commandBuffer);
             CommitSceneDebugIfStable(decoded.Count, shared.VertexCount);
-            LastRenderPathDiag = $"{LastRenderPathDiag}, GameGuiOverlay={(_runtimeGameOverlayTexture != null ? 1 : 0)}";
+            LastRootSceneDiag = string.Empty;
+            LastRenderPathDiag =
+                $"{LastRenderPathDiag}, GameGuiOverlay={(_runtimeGameOverlayTexture != null ? 1 : 0)}, GameGuiOverlayEnabled={(ShowRuntimeDebugOverlayComparison ? 1 : 0)}, RootSceneTexture={((_executor?.RootSceneTexture) != null ? 1 : 0)}";
             UpdateVisibilityDiagnostics(camera);
             LastFrameDiag = $"Obj={name}#{GetInstanceID()} Frame={Time.frameCount} Cmds={decoded.Count} PartDraws={LastPartDrawIssuedCount} MaskDraws={LastMaskDrawIssuedCount}";
             if (decoded.Count > 0 && LastPartDrawIssuedCount == 0 && LastMaskDrawIssuedCount == 0)
@@ -5448,11 +6313,27 @@ namespace Nicxlive.UnityBackend.Managed
             }
             if (material.HasProperty("_SrcBlend"))
             {
-                material.SetFloat("_SrcBlend", (float)UnityEngine.Rendering.BlendMode.SrcAlpha);
+                material.SetFloat("_SrcBlend", (float)UnityEngine.Rendering.BlendMode.One);
             }
             if (material.HasProperty("_DstBlend"))
             {
                 material.SetFloat("_DstBlend", (float)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+            }
+            if (material.HasProperty("_SrcBlendAlpha"))
+            {
+                material.SetFloat("_SrcBlendAlpha", (float)UnityEngine.Rendering.BlendMode.One);
+            }
+            if (material.HasProperty("_DstBlendAlpha"))
+            {
+                material.SetFloat("_DstBlendAlpha", (float)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+            }
+            if (material.HasProperty("_BlendOp"))
+            {
+                material.SetFloat("_BlendOp", (float)UnityEngine.Rendering.BlendOp.Add);
+            }
+            if (material.HasProperty("_BlendOpAlpha"))
+            {
+                material.SetFloat("_BlendOpAlpha", (float)UnityEngine.Rendering.BlendOp.Add);
             }
             if (material.HasProperty("_BaseColor"))
             {
@@ -5460,11 +6341,11 @@ namespace Nicxlive.UnityBackend.Managed
             }
             if (material.HasProperty("_DebugForceOpaque"))
             {
-                material.SetFloat("_DebugForceOpaque", 1f);
+                material.SetFloat("_DebugForceOpaque", 0f);
             }
             if (material.HasProperty("_DebugFlipY"))
             {
-                material.SetFloat("_DebugFlipY", 0f);
+                material.SetFloat("_DebugFlipY", 1f);
             }
             if (material.HasProperty("_DebugFlipV"))
             {
@@ -5570,25 +6451,50 @@ namespace Nicxlive.UnityBackend.Managed
                 return;
             }
 
-            EnsureRuntimeGameOverlayTexture(camera.pixelWidth, camera.pixelHeight);
-            _executor.RenderSceneDebugToTarget(_runtimeGameOverlayTexture);
+            LastRouterDiag = Nicxlive.UnityBackend.Compat.UrpCommandBufferRouter.GetLastExecutionDiag(_commandBuffer);
+            _executor.UpdateRootSceneDiag(LastPartClipBounds, HasPartClipBounds);
+            LastRootSceneDiag = _executor.LastRootSceneDiag;
+            LastRootFallbackApplied = false;
         }
 
         private void OnGUI()
         {
             if (!Application.isPlaying ||
-                _runtimeGameOverlayTexture == null ||
                 Event.current == null ||
                 Event.current.type != EventType.Repaint)
             {
                 return;
             }
 
-            GUI.DrawTexture(
-                new Rect(0f, 0f, Screen.width, Screen.height),
-                _runtimeGameOverlayTexture,
-                ScaleMode.StretchToFill,
-                true);
+            var camera = ResolveCamera();
+            if (ShowRuntimeDebugOverlayComparison && camera != null)
+            {
+                EnsureRuntimeGameOverlayTexture(camera.pixelWidth, camera.pixelHeight);
+            }
+            else
+            {
+                ReleaseRuntimeGameOverlayTexture();
+            }
+
+            if (ShowRuntimeDebugOverlayComparison && _runtimeGameOverlayTexture != null && _executor != null)
+            {
+                _executor.RenderSceneDebugToTarget(_runtimeGameOverlayTexture);
+            }
+
+            Texture? overlayTexture = ShowRuntimeDebugOverlayComparison ? _runtimeGameOverlayTexture : null;
+
+            if (overlayTexture == null)
+            {
+                return;
+            }
+            var insetWidth = Mathf.Max(256f, Screen.width * 0.28f);
+            var insetHeight = Mathf.Max(144f, Screen.height * 0.28f);
+            var insetRect = new Rect(
+                Screen.width - insetWidth - 16f,
+                16f,
+                insetWidth,
+                insetHeight);
+            GUI.DrawTexture(insetRect, overlayTexture, ScaleMode.ScaleToFit, true);
         }
 
 #if UNITY_EDITOR
@@ -5617,7 +6523,7 @@ namespace Nicxlive.UnityBackend.Managed
 
         private void OnRenderObject()
         {
-            if (!Application.isPlaying || _executor == null)
+            if (!Application.isPlaying || _executor == null || !ShowRuntimeDebugOverlayComparison)
             {
                 return;
             }
@@ -5649,6 +6555,12 @@ namespace Nicxlive.UnityBackend.Managed
             }
             Nicxlive.UnityBackend.Compat.UrpCommandBufferRouter.Attach(camera, _commandBuffer);
             _attachedCamera = camera;
+        }
+
+        private void EnsureRuntimeOverlayAfterRouter()
+        {
+            RenderPipelineManager.endCameraRendering -= OnEndCameraRenderingRuntimeOverlay;
+            RenderPipelineManager.endCameraRendering += OnEndCameraRenderingRuntimeOverlay;
         }
 
         private bool TryReloadPuppet(bool forceReload, bool reportFailure = false)
@@ -5921,6 +6833,7 @@ namespace Nicxlive.UnityBackend.Managed
             _commandBuffer?.Release();
             _commandBuffer = null;
 
+            _executor?.ReleasePersistentResources();
             _renderer?.Dispose();
             _renderer = null;
             _executor = null;
@@ -5972,6 +6885,7 @@ namespace Nicxlive.UnityBackend.Managed
             LastVisibilityDiag = string.Empty;
             LastPartBuildDiag = string.Empty;
             LastClipFitDiag = string.Empty;
+            LastRootSceneDiag = string.Empty;
             _desiredPuppetTranslation = Vector2.zero;
             _desiredPuppetScale = Vector2.one;
             LastRenderPathDiag = string.Empty;
@@ -5983,6 +6897,7 @@ namespace Nicxlive.UnityBackend.Managed
         }
     }
 }
+
 
 
 

@@ -4,11 +4,23 @@ Shader "Nicxlive/URP Part"
     {
         _MainTex("Main Tex", 2D) = "white" {}
         _EmissionTex("Emission Tex", 2D) = "black" {}
+        _BumpMap("Bump Map", 2D) = "black" {}
         _Opacity("Opacity", Range(0, 1)) = 1
+        _MaskThreshold("Mask Threshold", Range(0, 1)) = 0
+        _ShaderStage("Shader Stage", Float) = 2
+        _BlendMode("Blend Mode", Float) = 0
+        _LegacyBlendOnly("Legacy Blend Only", Float) = 1
+        _AdvancedBlend("Advanced Blend", Float) = 0
         _DebugForceOpaque("Debug Force Opaque", Float) = 1
         _DebugFlipY("Debug Flip Y", Float) = 0
         _DebugFlipV("Debug Flip V", Float) = 0
         _DebugShowAlbedo("Debug Show Albedo", Float) = 0
+        _SrcBlend("Src Blend", Float) = 1
+        _DstBlend("Dst Blend", Float) = 10
+        _SrcBlendAlpha("Src Blend Alpha", Float) = 1
+        _DstBlendAlpha("Dst Blend Alpha", Float) = 10
+        _BlendOp("Blend Op", Float) = 0
+        _BlendOpAlpha("Blend Op Alpha", Float) = 0
         _MultColor("Multiply", Color) = (1,1,1,1)
         _ScreenColor("Screen", Color) = (0,0,0,0)
         _EmissionStrength("Emission Strength", Float) = 1
@@ -23,7 +35,8 @@ Shader "Nicxlive/URP Part"
         Tags { "RenderType"="Transparent" "Queue"="Transparent" "RenderPipeline"="UniversalPipeline" }
         Pass
         {
-            Blend SrcAlpha OneMinusSrcAlpha
+            Blend [_SrcBlend] [_DstBlend], [_SrcBlendAlpha] [_DstBlendAlpha]
+            BlendOp [_BlendOp], [_BlendOpAlpha]
             ZWrite Off
             ZTest Always
             Cull Off
@@ -46,16 +59,29 @@ Shader "Nicxlive/URP Part"
             SAMPLER(sampler_MainTex);
             TEXTURE2D(_EmissionTex);
             SAMPLER(sampler_EmissionTex);
+            TEXTURE2D(_BumpMap);
+            SAMPLER(sampler_BumpMap);
 
             CBUFFER_START(UnityPerMaterial)
                 float4 _MainTex_ST;
                 float4 _MultColor;
                 float4 _ScreenColor;
                 float _Opacity;
+                float _MaskThreshold;
+                float _ShaderStage;
+                float _BlendMode;
+                float _LegacyBlendOnly;
+                float _AdvancedBlend;
                 float _DebugForceOpaque;
                 float _DebugFlipY;
                 float _DebugFlipV;
                 float _DebugShowAlbedo;
+                float _SrcBlend;
+                float _DstBlend;
+                float _SrcBlendAlpha;
+                float _DstBlendAlpha;
+                float _BlendOp;
+                float _BlendOpAlpha;
                 float _EmissionStrength;
             CBUFFER_END
 
@@ -71,6 +97,22 @@ Shader "Nicxlive/URP Part"
                 float2 uv : TEXCOORD0;
             };
 
+            struct FragOutputs
+            {
+                half4 outAlbedo : SV_Target0;
+                half4 outEmissive : SV_Target1;
+                half4 outBump : SV_Target2;
+            };
+
+            half4 ScreenColorize(half3 texRgb, half alpha)
+            {
+                return half4(
+                    half3(1.0h, 1.0h, 1.0h) -
+                    ((half3(1.0h, 1.0h, 1.0h) - texRgb) * (half3(1.0h, 1.0h, 1.0h) - (_ScreenColor.rgb * alpha))),
+                    alpha
+                );
+            }
+
             Varyings Vert(Attributes input)
             {
                 Varyings output;
@@ -80,32 +122,62 @@ Shader "Nicxlive/URP Part"
                 return output;
             }
 
-            half4 Frag(Varyings input) : SV_Target
+            FragOutputs Frag(Varyings input)
             {
+                FragOutputs output;
+                output.outAlbedo = 0;
+                output.outEmissive = 0;
+                output.outBump = 0;
+
                 float2 sampleUv = input.uv;
                 if (_DebugFlipV > 0.5)
                 {
                     sampleUv.y = 1.0 - sampleUv.y;
                 }
                 half4 texColor = SAMPLE_TEXTURE2D(_MainTex, sampler_MainTex, sampleUv);
-                half3 emission = SAMPLE_TEXTURE2D(_EmissionTex, sampler_EmissionTex, sampleUv).rgb * _EmissionStrength;
+                half4 emissionTex = SAMPLE_TEXTURE2D(_EmissionTex, sampler_EmissionTex, sampleUv);
+                half4 bumpColor = SAMPLE_TEXTURE2D(_BumpMap, sampler_BumpMap, sampleUv);
                 if (_DebugShowAlbedo > 0.5)
                 {
-                    return half4(texColor.rgb, texColor.a);
+                    half alpha = saturate(texColor.a * _Opacity);
+                    clip(alpha - max(0.001h, (half)_MaskThreshold));
+                    output.outAlbedo = half4(texColor.rgb * alpha, alpha);
+                    return output;
                 }
-                half3 rgb = texColor.rgb * _MultColor.rgb;
-                rgb = rgb + _ScreenColor.rgb - (rgb * _ScreenColor.rgb);
-                rgb += emission;
+                half4 mult = half4(_MultColor.rgb, 1.0h);
+                half4 albedoOut = ScreenColorize(texColor.rgb, texColor.a) * mult;
+                half4 emissionOut = ScreenColorize(emissionTex.rgb, texColor.a) * mult * _EmissionStrength;
                 half alpha = saturate(texColor.a * _Opacity);
+                clip(alpha - max(0.001h, (half)_MaskThreshold));
                 if (_DebugForceOpaque > 0.5)
                 {
                     if (alpha <= 0.001h)
                     {
-                        return half4(sampleUv.x, sampleUv.y, 1.0h, 1.0h);
+                        output.outAlbedo = half4(sampleUv.x, sampleUv.y, 1.0h, 1.0h);
+                        return output;
                     }
-                    return half4(max(rgb, half3(0.05h, 0.05h, 0.05h)), 1.0h);
+                    output.outAlbedo = half4(max(albedoOut.rgb + (emissionTex.rgb * _EmissionStrength), half3(0.05h, 0.05h, 0.05h)), 1.0h);
+                    return output;
                 }
-                return half4(rgb, alpha);
+
+                int shaderStage = (int)round(_ShaderStage);
+                if (shaderStage == 0)
+                {
+                    output.outAlbedo = half4(albedoOut.rgb * alpha, alpha);
+                    return output;
+                }
+
+                if (shaderStage == 1)
+                {
+                    output.outEmissive = emissionOut * texColor.a;
+                    output.outBump = bumpColor * texColor.a;
+                    return output;
+                }
+
+                output.outAlbedo = half4(albedoOut.rgb * alpha, alpha);
+                output.outEmissive = emissionOut * output.outAlbedo.a;
+                output.outBump = bumpColor * output.outAlbedo.a;
+                return output;
             }
             ENDHLSL
         }

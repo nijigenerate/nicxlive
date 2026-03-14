@@ -16,6 +16,7 @@ namespace Nicxlive.UnityBackend.Editor
         private SerializedProperty? _modelScale;
         private SerializedProperty? _modelOffsetPixels;
         private SerializedProperty? _drawInEditMode;
+        private SerializedProperty? _showRuntimeDebugOverlayComparison;
         private SerializedProperty? _targetCamera;
         private SerializedProperty? _partMaterial;
         private SerializedProperty? _maskMaterial;
@@ -28,6 +29,7 @@ namespace Nicxlive.UnityBackend.Editor
             _modelScale = serializedObject.FindProperty(nameof(NicxliveBehaviour.ModelScale));
             _modelOffsetPixels = serializedObject.FindProperty(nameof(NicxliveBehaviour.ModelOffsetPixels));
             _drawInEditMode = serializedObject.FindProperty(nameof(NicxliveBehaviour.DrawInEditMode));
+            _showRuntimeDebugOverlayComparison = serializedObject.FindProperty(nameof(NicxliveBehaviour.ShowRuntimeDebugOverlayComparison));
             _targetCamera = serializedObject.FindProperty(nameof(NicxliveBehaviour.TargetCamera));
             _partMaterial = serializedObject.FindProperty(nameof(NicxliveBehaviour.PartMaterial));
             _maskMaterial = serializedObject.FindProperty(nameof(NicxliveBehaviour.MaskMaterial));
@@ -94,6 +96,10 @@ namespace Nicxlive.UnityBackend.Editor
             {
                 EditorGUILayout.PropertyField(_targetCamera);
             }
+            if (_showRuntimeDebugOverlayComparison != null)
+            {
+                EditorGUILayout.PropertyField(_showRuntimeDebugOverlayComparison);
+            }
             if (_partMaterial != null)
             {
                 EditorGUILayout.PropertyField(_partMaterial);
@@ -112,6 +118,14 @@ namespace Nicxlive.UnityBackend.Editor
             var behaviour = (NicxliveBehaviour)target;
             EditorGUILayout.Space();
             EditorGUILayout.LabelField("Runtime Controls", EditorStyles.boldLabel);
+            if (!string.IsNullOrWhiteSpace(behaviour.LastRouterDiag))
+            {
+                EditorGUILayout.HelpBox(behaviour.LastRouterDiag, MessageType.None);
+            }
+            if (!string.IsNullOrWhiteSpace(behaviour.LastRootSceneDiag))
+            {
+                EditorGUILayout.HelpBox(behaviour.LastRootSceneDiag, MessageType.None);
+            }
             EditorGUILayout.LabelField("Has Loaded Puppet", behaviour.HasLoadedPuppet ? "Yes" : "No");
             EditorGUILayout.LabelField("Decoded Commands", behaviour.LastDecodedCommandCount.ToString());
             EditorGUILayout.LabelField("Shared Vertices", behaviour.LastSharedVertexCount.ToString());
@@ -161,10 +175,6 @@ namespace Nicxlive.UnityBackend.Editor
             if (!string.IsNullOrWhiteSpace(behaviour.LastRenderPathDiag))
             {
                 EditorGUILayout.HelpBox(behaviour.LastRenderPathDiag, MessageType.None);
-            }
-            if (!string.IsNullOrWhiteSpace(behaviour.LastRouterDiag))
-            {
-                EditorGUILayout.HelpBox(behaviour.LastRouterDiag, MessageType.None);
             }
             if (GUILayout.Button("Reload Puppet"))
             {
