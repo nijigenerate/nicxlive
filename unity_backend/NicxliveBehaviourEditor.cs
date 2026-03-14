@@ -16,6 +16,7 @@ namespace Nicxlive.UnityBackend.Editor
         private SerializedProperty? _modelScale;
         private SerializedProperty? _modelOffsetPixels;
         private SerializedProperty? _drawInEditMode;
+        private SerializedProperty? _enableManagedDebugDiagnostics;
         private SerializedProperty? _showRuntimeDebugOverlayComparison;
         private SerializedProperty? _targetCamera;
         private SerializedProperty? _partMaterial;
@@ -29,6 +30,7 @@ namespace Nicxlive.UnityBackend.Editor
             _modelScale = serializedObject.FindProperty(nameof(NicxliveBehaviour.ModelScale));
             _modelOffsetPixels = serializedObject.FindProperty(nameof(NicxliveBehaviour.ModelOffsetPixels));
             _drawInEditMode = serializedObject.FindProperty(nameof(NicxliveBehaviour.DrawInEditMode));
+            _enableManagedDebugDiagnostics = serializedObject.FindProperty(nameof(NicxliveBehaviour.EnableManagedDebugDiagnostics));
             _showRuntimeDebugOverlayComparison = serializedObject.FindProperty(nameof(NicxliveBehaviour.ShowRuntimeDebugOverlayComparison));
             _targetCamera = serializedObject.FindProperty(nameof(NicxliveBehaviour.TargetCamera));
             _partMaterial = serializedObject.FindProperty(nameof(NicxliveBehaviour.PartMaterial));
@@ -88,6 +90,10 @@ namespace Nicxlive.UnityBackend.Editor
             if (_drawInEditMode != null)
             {
                 EditorGUILayout.PropertyField(_drawInEditMode);
+            }
+            if (_enableManagedDebugDiagnostics != null)
+            {
+                EditorGUILayout.PropertyField(_enableManagedDebugDiagnostics);
             }
 
             EditorGUILayout.Space();

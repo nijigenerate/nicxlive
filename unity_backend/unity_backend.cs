@@ -3213,6 +3213,27 @@ namespace Nicxlive.UnityBackend.Managed
         private int _currentBlendOpAlpha = (int)UnityEngine.Rendering.BlendOp.Add;
         private bool _forceRootSceneVisiblePass;
         private readonly Dictionary<MaterialRenderStateKey, Material> _renderStateMaterialCache = new();
+        private readonly List<ReusableMeshData> _partMeshPool = new();
+        private readonly List<ReusableMeshData> _maskMeshPool = new();
+        private int _partMeshPoolUsed;
+        private int _maskMeshPoolUsed;
+
+        private sealed class ReusableMeshData
+        {
+            public readonly Mesh Mesh;
+            public Vector3[] Vertices = Array.Empty<Vector3>();
+            public Vector2[] Uvs = Array.Empty<Vector2>();
+            public int[] Indices = Array.Empty<int>();
+
+            public ReusableMeshData(string name)
+            {
+                Mesh = new Mesh
+                {
+                    name = name
+                };
+                Mesh.MarkDynamic();
+            }
+        }
 
         private struct MaterialRenderStateKey : IEquatable<MaterialRenderStateKey>
         {
@@ -3289,6 +3310,8 @@ namespace Nicxlive.UnityBackend.Managed
         public string LastClipFitDiag { get; private set; } = string.Empty;
         public string LastRootSceneDiag { get; private set; } = string.Empty;
         public ulong LastSceneDebugSignature { get; private set; }
+        public bool EnableDiagnostics { get; set; }
+        public bool EnableRuntimeSceneDebugCapture { get; set; }
         public RenderTexture? RootSceneTexture => _rootSceneTexture;
 
         public CommandExecutor()
@@ -3721,6 +3744,11 @@ namespace Nicxlive.UnityBackend.Managed
 
         public void ReleasePersistentResources()
         {
+            ReleaseReusableMeshes(_partMeshPool);
+            ReleaseReusableMeshes(_maskMeshPool);
+            _partMeshPoolUsed = 0;
+            _maskMeshPoolUsed = 0;
+
             if (_rootSceneTexture == null &&
                 _rootSceneEmissiveTexture == null &&
                 _rootSceneBumpTexture == null &&
@@ -3766,6 +3794,15 @@ namespace Nicxlive.UnityBackend.Managed
             _rootSceneTarget = new RenderTargetIdentifier(BuiltinRenderTextureType.CameraTarget);
         }
 
+        private static void ReleaseReusableMeshes(List<ReusableMeshData> pool)
+        {
+            for (var i = 0; i < pool.Count; i++)
+            {
+                UnityObjectUtil.DestroyObject(pool[i].Mesh);
+            }
+            pool.Clear();
+        }
+
         private bool IsCurrentRenderTargetRootScene()
         {
             return _renderTargetStack.Count > 0 && _renderTargetStack.Peek().Equals(_rootSceneTarget);
@@ -3802,6 +3839,11 @@ namespace Nicxlive.UnityBackend.Managed
 
             _clipPuppetTranslation = targetClip;
             _clipPuppetScale = requestedScale;
+            if (!EnableDiagnostics)
+            {
+                LastClipFitDiag = string.Empty;
+                return;
+            }
             LastClipFitDiag = $"Target=({targetClip.x:F3},{targetClip.y:F3}) Scale=({requestedScale.x:F3},{requestedScale.y:F3}) Aggregate=N/A";
 
             if (commands == null || shared == null || !TryComputeAggregateClipBounds(commands, shared, out var bounds))
@@ -3998,9 +4040,9 @@ namespace Nicxlive.UnityBackend.Managed
 #if UNITY_EDITOR
             _queueSceneDebugDraws =
                 (!Application.isPlaying && UnityEditor.SceneView.lastActiveSceneView != null) ||
-                (Application.isPlaying && camera.cameraType == CameraType.Game);
+                (Application.isPlaying && EnableRuntimeSceneDebugCapture && camera.cameraType == CameraType.Game);
 #else
-            _queueSceneDebugDraws = Application.isPlaying && camera.cameraType == CameraType.Game;
+            _queueSceneDebugDraws = Application.isPlaying && EnableRuntimeSceneDebugCapture && camera.cameraType == CameraType.Game;
 #endif
             _sceneDebugSignature = 1469598103934665603UL;
             ClearSceneDebugDraws();
@@ -4024,6 +4066,8 @@ namespace Nicxlive.UnityBackend.Managed
             LastRenderPathDiag = string.Empty;
             LastRootSceneDiag = string.Empty;
             _currentPartPacketOrdinal = 0;
+            _partMeshPoolUsed = 0;
+            _maskMeshPoolUsed = 0;
             _worstPartAbsClip = float.NegativeInfinity;
 
             buffer.Clear();
@@ -4108,7 +4152,7 @@ namespace Nicxlive.UnityBackend.Managed
             _activeBuffer = null;
             _mirrorPresentToCurrentActive = false;
 
-            if (_worstPartAbsClip > 1.25f && LastPartDrawIssuedCount > 0)
+            if (EnableDiagnostics && _worstPartAbsClip > 1.25f && LastPartDrawIssuedCount > 0)
             {
                 if (_partBoundsWarnCooldown <= 0)
                 {
@@ -4125,16 +4169,29 @@ namespace Nicxlive.UnityBackend.Managed
                 _partBoundsWarnCooldown = 0;
             }
 
-            LastRenderPathDiag =
-                $"Backbuffer={_backbufferTarget}, Root={_rootSceneTarget}, RootMrt={(_rootSceneColorTargets != null ? _rootSceneColorTargets.Length : 0)}, RootDepth={(_rootSceneDepthTexture != null ? 1 : 0)}, PartMat={partMaterial.shader.name}, MaskMat={maskMaterial.shader.name}, " +
-                $"MirrorCurrentActive={(_mirrorPresentToCurrentActive ? 1 : 0)}, " +
-                $"StencilDebugOff={(_disableStencilDebug ? 1 : 0)}, " +
-                $"PartDraws={LastPartDrawIssuedCount}, MaskDraws={LastMaskDrawIssuedCount}";
+            if (EnableDiagnostics)
+            {
+                LastRenderPathDiag =
+                    $"Backbuffer={_backbufferTarget}, Root={_rootSceneTarget}, RootMrt={(_rootSceneColorTargets != null ? _rootSceneColorTargets.Length : 0)}, RootDepth={(_rootSceneDepthTexture != null ? 1 : 0)}, PartMat={partMaterial.shader.name}, MaskMat={maskMaterial.shader.name}, " +
+                    $"MirrorCurrentActive={(_mirrorPresentToCurrentActive ? 1 : 0)}, " +
+                    $"StencilDebugOff={(_disableStencilDebug ? 1 : 0)}, " +
+                    $"PartDraws={LastPartDrawIssuedCount}, MaskDraws={LastMaskDrawIssuedCount}";
+            }
+            else
+            {
+                LastRenderPathDiag = string.Empty;
+            }
             LastSceneDebugSignature = _sceneDebugSignature;
         }
 
         public void UpdateRootSceneDiag(Vector4 clipBounds, bool hasClipBounds)
         {
+            if (!EnableDiagnostics)
+            {
+                LastRootSceneDiag = string.Empty;
+                return;
+            }
+
             if (_rootSceneTexture == null || !_rootSceneTexture.IsCreated())
             {
                 LastRootSceneDiag = "RootSample=Unavailable";
@@ -4996,7 +5053,7 @@ namespace Nicxlive.UnityBackend.Managed
                 rebindActiveTargets(buffer);
             }
             var queueSceneDebugDraw =
-                (_disableStencilDebug || _queueSceneDebugDraws || Application.isPlaying) &&
+                (_disableStencilDebug || _queueSceneDebugDraws) &&
                 _dynamicCompositeDepth == 0 &&
                 IsCurrentRenderTargetRootScene() &&
                 !packet.UseMultistageBlend &&
@@ -5040,7 +5097,7 @@ namespace Nicxlive.UnityBackend.Managed
 
             var drawMaterial = ResolveRenderStateMaterial(maskMaterial);
             buffer.DrawMesh(mesh, _clipSpaceDrawMatrix, drawMaterial, 0, 0, _props);
-            if ((_disableStencilDebug || _queueSceneDebugDraws || Application.isPlaying) &&
+            if ((_disableStencilDebug || _queueSceneDebugDraws) &&
                 _dynamicCompositeDepth == 0 &&
                 IsCurrentRenderTargetRootScene())
             {
@@ -5499,7 +5556,10 @@ namespace Nicxlive.UnityBackend.Managed
 
             if (!TryValidatePartPacketIndices(packet, shared, vertexCount, indexCount, out var partValidationReason))
             {
-                LastPartBuildDiag = $"Pkt={_currentPartPacketOrdinal} InvalidPartPacket={partValidationReason}";
+                if (EnableDiagnostics)
+                {
+                    LastPartBuildDiag = $"Pkt={_currentPartPacketOrdinal} InvalidPartPacket={partValidationReason}";
+                }
                 return null;
             }
 
@@ -5515,8 +5575,10 @@ namespace Nicxlive.UnityBackend.Managed
 
             var mvp = MulMat4(packet.RenderMatrix, packet.ModelMatrix);
 
-            var vertices = new Vector3[vertexCount];
-            var uvs = new Vector2[vertexCount];
+            var reusable = AcquireReusableMeshData(_partMeshPool, ref _partMeshPoolUsed, "nicxlive_part_mesh");
+            EnsureMeshArrayCapacity(reusable, vertexCount, indexCount);
+            var vertices = reusable.Vertices;
+            var uvs = reusable.Uvs;
             var bounds = new Vector4(float.PositiveInfinity, float.PositiveInfinity, float.NegativeInfinity, float.NegativeInfinity);
             for (var i = 0; i < vertexCount; i++)
             {
@@ -5545,30 +5607,32 @@ namespace Nicxlive.UnityBackend.Managed
                     if (absClip > _worstPartAbsClip)
                     {
                         _worstPartAbsClip = absClip;
-                        LastPartBuildDiag =
-                            $"Pkt={_currentPartPacketOrdinal} Vtx={vertexCount} Idx={indexCount} " +
-                            $"Bounds=x:[{bounds.x:F4},{bounds.z:F4}] y:[{bounds.y:F4},{bounds.w:F4}] " +
-                            $"Origin=({packet.Origin.X:F3},{packet.Origin.Y:F3}) " +
-                            $"MvpScale=({mvp.M11:F4},{mvp.M22:F4}) " +
-                            $"ClipAdj=({_clipPuppetTranslation.x:F3},{_clipPuppetTranslation.y:F3}) " +
-                            $"ClipScale=({_clipPuppetScale.x:F3},{_clipPuppetScale.y:F3}) " +
-                            $"ModelT=({packet.ModelMatrix.M14:F3},{packet.ModelMatrix.M24:F3}) " +
-                            $"RenderT=({packet.RenderMatrix.M14:F3},{packet.RenderMatrix.M24:F3}) " +
-                            $"MvpT=({mvp.M14:F3},{mvp.M24:F3})";
+                        if (EnableDiagnostics)
+                        {
+                            LastPartBuildDiag =
+                                $"Pkt={_currentPartPacketOrdinal} Vtx={vertexCount} Idx={indexCount} " +
+                                $"Bounds=x:[{bounds.x:F4},{bounds.z:F4}] y:[{bounds.y:F4},{bounds.w:F4}] " +
+                                $"Origin=({packet.Origin.X:F3},{packet.Origin.Y:F3}) " +
+                                $"MvpScale=({mvp.M11:F4},{mvp.M22:F4}) " +
+                                $"ClipAdj=({_clipPuppetTranslation.x:F3},{_clipPuppetTranslation.y:F3}) " +
+                                $"ClipScale=({_clipPuppetScale.x:F3},{_clipPuppetScale.y:F3}) " +
+                                $"ModelT=({packet.ModelMatrix.M14:F3},{packet.ModelMatrix.M24:F3}) " +
+                                $"RenderT=({packet.RenderMatrix.M14:F3},{packet.RenderMatrix.M24:F3}) " +
+                                $"MvpT=({mvp.M14:F3},{mvp.M24:F3})";
+                        }
                     }
                 }
             }
 
-            var triangles = new int[indexCount];
+            var triangles = reusable.Indices;
             for (var i = 0; i < indexCount; i++)
             {
                 triangles[i] = packet.Indices[i];
             }
 
-            var mesh = new Mesh
-            {
-                indexFormat = vertexCount > 65535 ? IndexFormat.UInt32 : IndexFormat.UInt16
-            };
+            var mesh = reusable.Mesh;
+            mesh.indexFormat = vertexCount > 65535 ? IndexFormat.UInt32 : IndexFormat.UInt16;
+            mesh.Clear(false);
             mesh.vertices = vertices;
             mesh.uv = uvs;
             mesh.triangles = triangles;
@@ -5609,8 +5673,10 @@ namespace Nicxlive.UnityBackend.Managed
             }
 
             var mvp = packet.Mvp;
-            var vertices = new Vector3[vertexCount];
-            var uvs = new Vector2[vertexCount];
+            var reusable = AcquireReusableMeshData(_maskMeshPool, ref _maskMeshPoolUsed, "nicxlive_mask_mesh");
+            EnsureMeshArrayCapacity(reusable, vertexCount, indexCount);
+            var vertices = reusable.Vertices;
+            var uvs = reusable.Uvs;
             var bounds = new Vector4(float.PositiveInfinity, float.PositiveInfinity, float.NegativeInfinity, float.NegativeInfinity);
             for (var i = 0; i < vertexCount; i++)
             {
@@ -5632,21 +5698,46 @@ namespace Nicxlive.UnityBackend.Managed
                 HasMaskClipBounds = true;
             }
 
-            var triangles = new int[indexCount];
+            var triangles = reusable.Indices;
             for (var i = 0; i < indexCount; i++)
             {
                 triangles[i] = packet.Indices[i];
             }
 
-            var mesh = new Mesh
-            {
-                indexFormat = vertexCount > 65535 ? IndexFormat.UInt32 : IndexFormat.UInt16
-            };
+            var mesh = reusable.Mesh;
+            mesh.indexFormat = vertexCount > 65535 ? IndexFormat.UInt32 : IndexFormat.UInt16;
+            mesh.Clear(false);
             mesh.vertices = vertices;
             mesh.uv = uvs;
             mesh.triangles = triangles;
             mesh.RecalculateBounds();
             return mesh;
+        }
+
+        private static ReusableMeshData AcquireReusableMeshData(List<ReusableMeshData> pool, ref int usedCount, string name)
+        {
+            if (usedCount >= pool.Count)
+            {
+                pool.Add(new ReusableMeshData($"{name}_{pool.Count}"));
+            }
+
+            return pool[usedCount++];
+        }
+
+        private static void EnsureMeshArrayCapacity(ReusableMeshData reusable, int vertexCount, int indexCount)
+        {
+            if (reusable.Vertices.Length != vertexCount)
+            {
+                reusable.Vertices = new Vector3[vertexCount];
+            }
+            if (reusable.Uvs.Length != vertexCount)
+            {
+                reusable.Uvs = new Vector2[vertexCount];
+            }
+            if (reusable.Indices.Length != indexCount)
+            {
+                reusable.Indices = new int[indexCount];
+            }
         }
 
         private static unsafe bool TryValidatePartPacketIndices(
@@ -5971,6 +6062,7 @@ namespace Nicxlive.UnityBackend.Managed
         public Vector2 ModelScale = Vector2.one;
         public Vector2 ModelOffsetPixels = Vector2.zero;
         public bool DrawInEditMode = true;
+        public bool EnableManagedDebugDiagnostics;
         public bool ShowRuntimeDebugOverlayComparison;
         public Camera? TargetCamera;
         public Material? PartMaterial;
@@ -6100,7 +6192,11 @@ namespace Nicxlive.UnityBackend.Managed
             var decoded = CommandStream.Decode(view);
             LastDecodedCommandCount = decoded.Count;
             LastSharedVertexCount = shared.VertexCount;
-            if (decoded.Count == 0)
+            if (!EnableManagedDebugDiagnostics)
+            {
+                _emptyCommandLogCooldown = 0;
+            }
+            else if (decoded.Count == 0)
             {
                 if (_emptyCommandLogCooldown <= 0)
                 {
@@ -6116,6 +6212,8 @@ namespace Nicxlive.UnityBackend.Managed
             {
                 _emptyCommandLogCooldown = 0;
             }
+            _executor.EnableDiagnostics = EnableManagedDebugDiagnostics;
+            _executor.EnableRuntimeSceneDebugCapture = ShowRuntimeDebugOverlayComparison;
             _executor.ConfigureInjectedPuppetTransform(
                 decoded,
                 shared,
@@ -6142,17 +6240,25 @@ namespace Nicxlive.UnityBackend.Managed
             LastMaskClipBounds = _executor.LastMaskClipBounds;
             HasPartClipBounds = _executor.HasPartClipBounds;
             HasMaskClipBounds = _executor.HasMaskClipBounds;
-            LastPartBuildDiag = _executor.LastPartBuildDiag;
-            LastRenderPathDiag = _executor.LastRenderPathDiag;
-            LastClipFitDiag = _executor.LastClipFitDiag;
-            LastRouterDiag = Nicxlive.UnityBackend.Compat.UrpCommandBufferRouter.GetLastExecutionDiag(_commandBuffer);
+            LastPartBuildDiag = EnableManagedDebugDiagnostics ? _executor.LastPartBuildDiag : string.Empty;
+            LastRenderPathDiag = EnableManagedDebugDiagnostics ? _executor.LastRenderPathDiag : string.Empty;
+            LastClipFitDiag = EnableManagedDebugDiagnostics ? _executor.LastClipFitDiag : string.Empty;
+            LastRouterDiag = EnableManagedDebugDiagnostics ? Nicxlive.UnityBackend.Compat.UrpCommandBufferRouter.GetLastExecutionDiag(_commandBuffer) : string.Empty;
             CommitSceneDebugIfStable(decoded.Count, shared.VertexCount);
             LastRootSceneDiag = string.Empty;
-            LastRenderPathDiag =
-                $"{LastRenderPathDiag}, GameGuiOverlay={(_runtimeGameOverlayTexture != null ? 1 : 0)}, GameGuiOverlayEnabled={(ShowRuntimeDebugOverlayComparison ? 1 : 0)}, RootSceneTexture={((_executor?.RootSceneTexture) != null ? 1 : 0)}";
-            UpdateVisibilityDiagnostics(camera);
-            LastFrameDiag = $"Obj={name}#{GetInstanceID()} Frame={Time.frameCount} Cmds={decoded.Count} PartDraws={LastPartDrawIssuedCount} MaskDraws={LastMaskDrawIssuedCount}";
-            if (decoded.Count > 0 && LastPartDrawIssuedCount == 0 && LastMaskDrawIssuedCount == 0)
+            if (EnableManagedDebugDiagnostics)
+            {
+                LastRenderPathDiag =
+                    $"{LastRenderPathDiag}, GameGuiOverlay={(_runtimeGameOverlayTexture != null ? 1 : 0)}, GameGuiOverlayEnabled={(ShowRuntimeDebugOverlayComparison ? 1 : 0)}, RootSceneTexture={((_executor?.RootSceneTexture) != null ? 1 : 0)}";
+                UpdateVisibilityDiagnostics(camera);
+                LastFrameDiag = $"Obj={name}#{GetInstanceID()} Frame={Time.frameCount} Cmds={decoded.Count} PartDraws={LastPartDrawIssuedCount} MaskDraws={LastMaskDrawIssuedCount}";
+            }
+            else
+            {
+                LastVisibilityDiag = string.Empty;
+                LastFrameDiag = string.Empty;
+            }
+            if (EnableManagedDebugDiagnostics && decoded.Count > 0 && LastPartDrawIssuedCount == 0 && LastMaskDrawIssuedCount == 0)
             {
                 if (_noIssuedDrawLogCooldown <= 0)
                 {
@@ -6569,6 +6675,14 @@ namespace Nicxlive.UnityBackend.Managed
                 return;
             }
 
+            if (!EnableManagedDebugDiagnostics)
+            {
+                LastRouterDiag = string.Empty;
+                LastRootSceneDiag = string.Empty;
+                LastRootFallbackApplied = false;
+                return;
+            }
+
             LastRouterDiag = Nicxlive.UnityBackend.Compat.UrpCommandBufferRouter.GetLastExecutionDiag(_commandBuffer);
             _executor.UpdateRootSceneDiag(LastPartClipBounds, HasPartClipBounds);
             LastRootSceneDiag = _executor.LastRootSceneDiag;
@@ -6766,6 +6880,13 @@ namespace Nicxlive.UnityBackend.Managed
 
         private void UpdateVisibilityDiagnostics(Camera camera)
         {
+            if (!EnableManagedDebugDiagnostics)
+            {
+                LastVisibilityDiag = string.Empty;
+                _visibilityDiagLogCooldown = 0;
+                return;
+            }
+
             if (camera == null)
             {
                 LastVisibilityDiag = string.Empty;
@@ -6838,7 +6959,7 @@ namespace Nicxlive.UnityBackend.Managed
                 tx = ModelOffsetPixels.x;
                 ty = ModelOffsetPixels.y;
                 LastTranslationMode = "world_to_viewport_guarded";
-                if (_transformGuardLogCooldown <= 0)
+                if (EnableManagedDebugDiagnostics && _transformGuardLogCooldown <= 0)
                 {
                     Debug.LogWarning(
                         $"[nicxlive] Guarded puppet translation. Camera={camera.name}, Mode=world_to_viewport, " +
@@ -6849,7 +6970,7 @@ namespace Nicxlive.UnityBackend.Managed
                 }
                 else
                 {
-                    _transformGuardLogCooldown--;
+                    _transformGuardLogCooldown = EnableManagedDebugDiagnostics ? (_transformGuardLogCooldown - 1) : 0;
                 }
             }
             else
@@ -6904,7 +7025,10 @@ namespace Nicxlive.UnityBackend.Managed
 
             if (Application.isPlaying)
             {
-                _executor.CommitSceneDebugDraws(decodedCount > 0 && LastPartDrawIssuedCount > 0);
+                _executor.CommitSceneDebugDraws(
+                    ShowRuntimeDebugOverlayComparison &&
+                    decodedCount > 0 &&
+                    LastPartDrawIssuedCount > 0);
                 return;
             }
 
