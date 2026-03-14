@@ -1,37 +1,37 @@
 # nicxlive unity_backend
 
-`nijiv/source/opengl/opengl_backend.d` と `nijiv/source/directx/directx_backend.d` のキュー再生順を基準にした Unity managed 実装です。
+This directory contains the Unity managed backend that mirrors the rendering flow of the OpenGL and DirectX backends implemented in `nijiv/source/opengl/opengl_backend.d` and `nijiv/source/directx/directx_backend.d`.
 
-## 構成
+## Overview
 
 - `unity_backend.cs`
-  - `nicxlive/core/unity_native.hpp` と同一 ABI の P/Invoke/struct 定義
-  - `CommandQueueView` decode / `SharedBufferSnapshot` SoA コピー
-  - `UnityResourceCallbacks` 実装
-  - `DrawPart/Mask/DynamicComposite` の再生器
-  - `njgCreateRenderer` から `njgEmitCommands` の呼び出しラッパ
-  - Unity scene でのフレーム駆動 (`NicxliveBehaviour`)
+  - Defines the P/Invoke bindings and packet structs that must stay ABI-compatible with `nicxlive/core/unity_native.hpp`
+  - Decodes `CommandQueueView` and reads `SharedBufferSnapshot` SoA buffers
+  - Registers `UnityResourceCallbacks`
+  - Executes `DrawPart`, `ApplyMask`, `BeginMask`, `BeginMaskContent`, `EndMask`, and `DynamicComposite`
+  - Wraps renderer creation and command emission
+  - Drives the Unity scene integration through `NicxliveBehaviour`
 
-## 前提
+## Assumptions
 
-- Native DLL 名は `nicxlive`（`DllImport("nicxlive")`）
-- Unity 側マテリアルで以下プロパティ名を使う前提:
+- The native plugin is exposed as `nicxlive` and loaded through `DllImport("nicxlive")`
+- The Unity project uses URP materials with the expected property names
   - `_MainTex`, `_EmissionTex`, `_BumpMap`
   - `_Opacity`, `_MultColor`, `_ScreenColor`, `_EmissionStrength`, `_MaskThreshold`
   - `_BlendMode`, `_StencilComp`, `_StencilRef`, `_StencilPass`, `_ColorMask`, `_IsMaskPass`
 
-## Unity への導入（自動セットアップ）
+## Installing Into a Unity Project
 
-`install-unity-plugin.ps1` を使うと、`nicxlive.dll` のビルドから Unity プロジェクトへの配置、さらに Unity 設定の点検・差分更新までを一括で行えます。
+Use `install-unity-plugin.ps1` to build `nicxlive.dll`, copy the managed runtime files into a Unity project, and optionally apply Unity project settings in batchmode.
 
-### 実行例（通常）
+### Build and install
 
 ```powershell
 cd nicxlive/unity_backend
 .\install-unity-plugin.ps1 -UnityProjectPath "C:\path\to\YourUnityProject"
 ```
 
-### 実行例（Unity 実行ファイルを明示）
+### Build, install, and run Unity in batchmode
 
 ```powershell
 .\install-unity-plugin.ps1 `
@@ -39,41 +39,44 @@ cd nicxlive/unity_backend
   -UnityExe "C:\Program Files\Unity\Hub\Editor\2022.3.22f1\Editor\Unity.exe"
 ```
 
-### 主なオプション
+### Main options
 
 - `-Config Debug|RelWithDebInfo|Release`
-  - Native DLL のビルド構成を指定（既定: `RelWithDebInfo`）
+  - Selects the native DLL build configuration. Default is `RelWithDebInfo`.
 - `-SkipNativeBuild`
-  - `nicxlive.dll` のビルドをスキップして、既存成果物のみコピー
+  - Skips rebuilding `nicxlive.dll` and only copies managed files.
 - `-SkipUnitySetup`
-  - Unity バッチ実行による設定確認・更新をスキップ
+  - Skips the Unity project setup pass.
 - `-UnityExe <path>`
-  - 使用する `Unity.exe` を明示指定（未指定時は一般的なパスを自動探索）
+  - Explicit path to `Unity.exe`. Required only when auto-detection is not enough.
 - `-CMakeExe <path>`
-  - 使用する `cmake` 実行ファイルを指定
+  - Explicit path to `cmake`.
 
-### スクリプトが行う配置
+### Files copied into the Unity project
 
 - `Assets/Plugins/x86_64/nicxlive.dll`
 - `Assets/Nicxlive/Runtime/unity_backend.cs`
+- `Assets/Nicxlive/Runtime/NicxlivePartURP.shader`
+- `Assets/Nicxlive/Runtime/NicxliveMaskURP.shader`
+- `Assets/Nicxlive/Runtime/NicxlivePresentURP.shader`
 - `Assets/Nicxlive/Editor/NicxliveBehaviourEditor.cs`
 - `Assets/Nicxlive/Editor/NicxliveProjectSetup.cs`
 
-### 自動設定（状態確認して必要時のみ更新）
+### Automatic Unity project setup
 
-`NicxliveProjectSetup.ApplyFromCommandLine` を `Unity -batchmode` で実行し、次を確認・更新します。
+`NicxliveProjectSetup.ApplyFromCommandLine` can be invoked from `Unity -batchmode` to apply the required project settings. The setup currently enforces:
 
 1. `PlayerSettings.allowUnsafeCode == true`
-2. `GraphicsSettings.currentRenderPipeline` が URP Asset
-3. `QualitySettings` の各レベルで URP Asset を使用
-4. `Assets/Plugins/x86_64/nicxlive.dll` の `PluginImporter` 設定（Editor/Windows x64 有効）
+2. `GraphicsSettings.currentRenderPipeline` is assigned to a URP asset
+3. Every quality level uses the same URP asset
+4. `Assets/Plugins/x86_64/nicxlive.dll` is imported for Editor / Windows x64
 
-### Unity 側で最後に行うこと
+### After import in Unity
 
-1. `NicxliveBehaviour` を GameObject に追加
-2. `PartMaterial` / `MaskMaterial` を設定
+1. Add `NicxliveBehaviour` to a `GameObject`
+2. Assign `PartMaterial` and `MaskMaterial`
 
-## 備考
+## Notes
 
-- 実装は `nijiv` の OpenGL/DirectX バックエンドのコマンド順序と状態遷移を合わせています。
-- Unity 固有制約（RenderTarget 復帰先、Blend 実機差分）は managed 側で吸収する構成です。
+- The implementation keeps the command model close to the OpenGL and DirectX backends so behavior differences are easier to isolate.
+- Render target management, blending, stencil handling, and present behavior are implemented on the managed side for Unity.
