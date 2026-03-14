@@ -3809,21 +3809,11 @@ namespace Nicxlive.UnityBackend.Managed
                 return;
             }
 
-            var spanX = Mathf.Max(1e-5f, bounds.z - bounds.x);
-            var spanY = Mathf.Max(1e-5f, bounds.w - bounds.y);
-            var uniformFit = Mathf.Min(1f, Mathf.Min(2f / spanX, 2f / spanY));
-            var combinedScale = new Vector2(requestedScale.x * uniformFit, requestedScale.y * uniformFit);
-            _clipPuppetScale = combinedScale;
-            var centerX = (bounds.x + bounds.z) * 0.5f;
-            var centerY = (bounds.y + bounds.w) * 0.5f;
-            _clipPuppetTranslation = new Vector2(
-                targetClip.x - (centerX * combinedScale.x),
-                targetClip.y - (centerY * combinedScale.y));
             LastClipFitDiag =
                 $"Target=({targetClip.x:F3},{targetClip.y:F3}) ReqScale=({requestedScale.x:F3},{requestedScale.y:F3}) " +
                 $"Agg=x:[{bounds.x:F3},{bounds.z:F3}] y:[{bounds.y:F3},{bounds.w:F3}] " +
-                $"UniformFit={uniformFit:F3} FinalScale=({combinedScale.x:F3},{combinedScale.y:F3}) " +
-                $"Adj=({_clipPuppetTranslation.x:F3},{_clipPuppetTranslation.y:F3})";
+                $"PivotMode=origin FinalScale=({requestedScale.x:F3},{requestedScale.y:F3}) " +
+                $"Adj=({targetClip.x:F3},{targetClip.y:F3})";
         }
 
         private static Vector4 ExpandBounds(Vector4 current, float x, float y)
@@ -4703,14 +4693,14 @@ namespace Nicxlive.UnityBackend.Managed
             PropertyConfig cfg,
             NicxliveNative.NjgMaskApplyPacket packet)
         {
-            _maskContentStencilRef = packet.IsDodge ? (byte)0 : (byte)1;
+            var maskWriteStencilRef = packet.IsDodge ? (byte)0 : (byte)1;
             if (packet.Kind == NicxliveNative.MaskDrawableKind.Part)
             {
-                drawPart(buffer, shared, textures, partMaterial, cfg, packet.PartPacket, true, _maskContentStencilRef, true);
+                drawPart(buffer, shared, textures, partMaterial, cfg, packet.PartPacket, true, maskWriteStencilRef, true);
             }
             else
             {
-                executeMaskPacket(buffer, shared, maskMaterial, cfg, packet.MaskPacket, true, _maskContentStencilRef);
+                executeMaskPacket(buffer, shared, maskMaterial, cfg, packet.MaskPacket, true, maskWriteStencilRef);
             }
         }
 
