@@ -27,6 +27,7 @@ Shader "Nicxlive/URP Part"
         _MultColor("Multiply", Color) = (1,1,1,1)
         _ScreenColor("Screen", Color) = (0,0,0,0)
         _EmissionStrength("Emission Strength", Float) = 1
+        _IsMaskPass("Is Mask Pass", Float) = 0
         _StencilRef("Stencil Ref", Float) = 1
         _StencilComp("Stencil Comp", Float) = 8
         _StencilPass("Stencil Pass", Float) = 0
@@ -89,6 +90,7 @@ Shader "Nicxlive/URP Part"
                 float _BlendOp;
                 float _BlendOpAlpha;
                 float _EmissionStrength;
+                float _IsMaskPass;
             CBUFFER_END
 
             struct Attributes
@@ -179,6 +181,12 @@ Shader "Nicxlive/URP Part"
                 half4 texColor = SampleWrapMain(sampleUv);
                 half4 emissionTex = SampleWrapEmission(sampleUv);
                 half4 bumpColor = SampleWrapBump(sampleUv);
+                if (_IsMaskPass > 0.5)
+                {
+                    clip(texColor.a - max(0.001h, (half)_MaskThreshold));
+                    output.outAlbedo = half4(1.0h, 1.0h, 1.0h, 1.0h);
+                    return output;
+                }
                 if (_DebugShowAlbedo > 0.5)
                 {
                     half alpha = saturate(texColor.a * _Opacity);

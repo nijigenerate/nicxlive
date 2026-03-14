@@ -4135,7 +4135,10 @@ namespace Nicxlive.UnityBackend.Managed
 
             _backbufferTarget = ResolveBackbufferTarget(camera);
             _clipSpaceDrawMatrix = Matrix4x4.identity;
-            _disableStencilDebug = !Application.isPlaying && camera.cameraType == CameraType.SceneView;
+            _disableStencilDebug =
+                EnableDiagnostics &&
+                !Application.isPlaying &&
+                camera.cameraType == CameraType.SceneView;
             _mirrorPresentToCurrentActive =
                 Application.isPlaying &&
                 camera.cameraType == CameraType.Game &&
@@ -5032,7 +5035,7 @@ namespace Nicxlive.UnityBackend.Managed
             byte stencilRef,
             bool fromMaskApply)
         {
-            if (!packet.Renderable || packet.IndexCount == 0 || packet.VertexCount == 0)
+            if (((!fromMaskApply && !packet.Renderable) || packet.IndexCount == 0 || packet.VertexCount == 0))
             {
                 return;
             }
@@ -5107,7 +5110,8 @@ namespace Nicxlive.UnityBackend.Managed
             }
 
             ConfigureStencil(cfg, forceStencilWrite, stencilRef);
-            _props.SetFloat(cfg.IsMaskPass, packet.IsMask ? 1.0f : 0.0f);
+            var isMaskSourceDraw = packet.IsMask || forceStencilWrite || fromMaskApply;
+            _props.SetFloat(cfg.IsMaskPass, isMaskSourceDraw ? 1.0f : 0.0f);
             if (_inMaskPass && _inMaskContent && !forceStencilWrite)
             {
                 ConfigureStencilTest(cfg, _maskContentStencilRef);
@@ -5779,7 +5783,7 @@ namespace Nicxlive.UnityBackend.Managed
                 return null;
             }
 
-            var mvp = packet.Mvp;
+            var mvp = SelectBestMaskMvp(packet.Mvp, packet.ModelMatrix, shared, packet, vxBase, vyBase, dxBase, dyBase, vertexCount);
             var reusable = AcquireReusableMeshData(_maskMeshPool, ref _maskMeshPoolUsed, "nicxlive_mask_mesh");
             EnsureMeshArrayCapacity(reusable, vertexCount, indexCount);
             var vertices = reusable.Vertices;
@@ -6030,6 +6034,7 @@ namespace Nicxlive.UnityBackend.Managed
 
         private static NicxliveNative.Mat4 SelectBestMaskMvp(
             in NicxliveNative.Mat4 mvp,
+            in NicxliveNative.Mat4 model,
             SharedBuffers shared,
             NicxliveNative.NjgMaskDrawPacket packet,
             int vxBase,
@@ -6040,10 +6045,14 @@ namespace Nicxlive.UnityBackend.Managed
         {
             var c0 = mvp;
             var c1 = TransposeMat4(mvp);
+            var c2 = model;
+            var c3 = TransposeMat4(model);
             var candidates = new[]
             {
                 c0,
                 c1,
+                c2,
+                c3,
             };
 
             var best = candidates[0];
@@ -7075,7 +7084,7 @@ namespace Nicxlive.UnityBackend.Managed
             {
                 return;
             }
-            if (!Application.isPlaying && camera != null && camera.cameraType == CameraType.SceneView)
+            if (!Application.isPlaying && camera.cameraType == CameraType.SceneView)
             {
                 if (_attachedCamera != null && _commandBuffer != null)
                 {
@@ -7093,7 +7102,7 @@ namespace Nicxlive.UnityBackend.Managed
             {
                 Nicxlive.UnityBackend.Compat.UrpCommandBufferRouter.Detach(_attachedCamera, _commandBuffer);
             }
-            Nicxlive.UnityBackend.Compat.UrpCommandBufferRouter.Attach(camera, _commandBuffer);
+            Nicxlive.UnityBackend.Compat.UrpCommandBufferRouter.Attach(camera!, _commandBuffer);
             _attachedCamera = camera;
         }
 

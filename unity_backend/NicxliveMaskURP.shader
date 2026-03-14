@@ -43,7 +43,7 @@ Shader "Nicxlive/URP Mask"
             Varyings Vert(Attributes input)
             {
                 Varyings output;
-                output.positionCS = float4(input.positionOS.xy, 0.0, 1.0);
+                output.positionCS = float4(input.positionOS.x, -input.positionOS.y, 0.0, 1.0);
                 return output;
             }
 
