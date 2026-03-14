@@ -713,6 +713,26 @@ namespace Nicxlive.UnityBackend.Managed
             }
         }
 
+        public void Dispose()
+        {
+            foreach (var texture in _textures.Values)
+            {
+                UnityObjectUtil.DestroyObject(texture);
+            }
+            _textures.Clear();
+            _wrappingByHandle.Clear();
+
+            foreach (var shaderHandle in _shaders.Values)
+            {
+                UnityObjectUtil.DestroyObject(shaderHandle.Material);
+            }
+            _shaders.Clear();
+            _shaderUniformIds.Clear();
+
+            _nextHandle = 1;
+            _nextShaderHandle = 1;
+        }
+
         public Texture? TryGet(ulong handle)
         {
             _textures.TryGetValue(handle, out var texture);
@@ -3348,6 +3368,75 @@ namespace Nicxlive.UnityBackend.Managed
             DrawPresentedSceneDebugContents();
         }
 
+        public void RenderRootSceneOverlay(Camera? camera)
+        {
+            _ = camera;
+            if (_rootSceneTexture == null || !_rootSceneTexture.IsCreated())
+            {
+                return;
+            }
+
+            ensurePresentProgram();
+            if (_presentMaterial == null || _presentMesh == null)
+            {
+                return;
+            }
+
+            _props.Clear();
+            _props.SetTexture("_MainTex", _rootSceneTexture);
+            if (!_presentMaterial.SetPass(0))
+            {
+                return;
+            }
+
+            Graphics.DrawMeshNow(_presentMesh, Matrix4x4.identity);
+        }
+
+        public void DrawRootSceneOverlay(Rect destinationRect, Rect sourceRect)
+        {
+            if (_rootSceneTexture == null || !_rootSceneTexture.IsCreated())
+            {
+                return;
+            }
+
+#if UNITY_EDITOR
+            ensurePresentProgram();
+            if (_presentMaterial != null &&
+                Mathf.Approximately(sourceRect.x, 0f) &&
+                Mathf.Approximately(sourceRect.y, 0f) &&
+                Mathf.Approximately(sourceRect.width, 1f) &&
+                Mathf.Approximately(sourceRect.height, 1f))
+            {
+                UnityEditor.EditorGUI.DrawPreviewTexture(destinationRect, _rootSceneTexture, _presentMaterial, ScaleMode.StretchToFill);
+                return;
+            }
+#endif
+            GUI.DrawTextureWithTexCoords(destinationRect, _rootSceneTexture, sourceRect, true);
+        }
+
+        public void RenderRootSceneToTarget(RenderTexture? target)
+        {
+            if (target == null || _rootSceneTexture == null || !_rootSceneTexture.IsCreated())
+            {
+                return;
+            }
+
+            ensurePresentProgram();
+            EnsureSceneDebugReplayBuffer();
+            if (_presentMaterial == null || _presentMesh == null || _sceneDebugReplayBuffer == null)
+            {
+                return;
+            }
+
+            _props.Clear();
+            _props.SetTexture("_MainTex", _rootSceneTexture);
+            _sceneDebugReplayBuffer.Clear();
+            _sceneDebugReplayBuffer.SetRenderTarget(target);
+            _sceneDebugReplayBuffer.ClearRenderTarget(RTClearFlags.All, Color.clear, 1.0f, 0);
+            _sceneDebugReplayBuffer.DrawMesh(_presentMesh, Matrix4x4.identity, _presentMaterial, 0, 0, _props);
+            Graphics.ExecuteCommandBuffer(_sceneDebugReplayBuffer);
+        }
+
         public void RenderSceneDebugToTarget(RenderTexture? target)
         {
             if (target == null)
@@ -4036,7 +4125,8 @@ namespace Nicxlive.UnityBackend.Managed
             TextureRegistry textures,
             Material partMaterial,
             Material maskMaterial,
-            PropertyConfig propertyConfig)
+            PropertyConfig propertyConfig,
+            bool skipPresentToBackbuffer = false)
         {
             if (buffer == null || camera == null || partMaterial == null || maskMaterial == null)
             {
@@ -4152,7 +4242,10 @@ namespace Nicxlive.UnityBackend.Managed
             }
 
             postProcessScene(buffer);
-            presentSceneToBackbuffer(buffer, camera.pixelWidth, camera.pixelHeight);
+            if (!skipPresentToBackbuffer)
+            {
+                presentSceneToBackbuffer(buffer, camera.pixelWidth, camera.pixelHeight);
+            }
             if (_disableStencilDebug && LastPartDrawIssuedCount > 0)
             {
                 drawDebugOverlay(buffer, partMaterial, propertyConfig);
@@ -4186,6 +4279,7 @@ namespace Nicxlive.UnityBackend.Managed
             {
                 LastRenderPathDiag =
                     $"Backbuffer={_backbufferTarget}, Root={_rootSceneTarget}, RootMrt={(_rootSceneColorTargets != null ? _rootSceneColorTargets.Length : 0)}, RootDepth={(_rootSceneDepthTexture != null ? 1 : 0)}, PartMat={partMaterial.shader.name}, MaskMat={maskMaterial.shader.name}, " +
+                    $"SkipPresent={(skipPresentToBackbuffer ? 1 : 0)}, " +
                     $"MirrorCurrentActive={(_mirrorPresentToCurrentActive ? 1 : 0)}, " +
                     $"StencilDebugOff={(_disableStencilDebug ? 1 : 0)}, " +
                     $"PartDraws={LastPartDrawIssuedCount}, MaskDraws={LastMaskDrawIssuedCount}";
@@ -6086,6 +6180,7 @@ namespace Nicxlive.UnityBackend.Managed
         private NicxliveRenderer? _renderer;
         private CommandExecutor? _executor;
         private CommandBuffer? _commandBuffer;
+        private CommandBuffer? _editorPreviewCommandBuffer;
         private Camera? _attachedCamera;
         private string _loadedPuppetPath = string.Empty;
         private Material? _autoPartMaterial;
@@ -6127,7 +6222,6 @@ namespace Nicxlive.UnityBackend.Managed
         private int _noIssuedDrawLogCooldown;
         private int _transformGuardLogCooldown;
         private int _visibilityDiagLogCooldown;
-        private int _sceneDebugStableFrames;
         private int _sceneDebugPrevSharedVertexCount = -1;
         private int _sceneDebugPrevDecodedCount = -1;
         private int _sceneDebugPrevPartDrawCount = -1;
@@ -6138,6 +6232,7 @@ namespace Nicxlive.UnityBackend.Managed
         private Vector2 _desiredPuppetTranslation = Vector2.zero;
         private Vector2 _desiredPuppetScale = Vector2.one;
         private RenderTexture? _runtimeGameOverlayTexture;
+        private RenderTexture? _sceneViewOverlayTexture;
 
         public IReadOnlyList<PuppetParameterState> ParameterStates => _parameterStates;
         public bool HasLoadedPuppet => _renderer != null && _renderer.HasPuppet;
@@ -6237,6 +6332,24 @@ namespace Nicxlive.UnityBackend.Managed
                 camera.pixelWidth,
                 camera.pixelHeight);
             _executor.Execute(_commandBuffer, camera, decoded, shared, _renderer.TextureRegistry, PartMaterial, MaskMaterial, ShaderProperties);
+#if UNITY_EDITOR
+            if (!Application.isPlaying)
+            {
+                _editorPreviewCommandBuffer ??= new CommandBuffer { name = "nicxlive_editor_preview" };
+                _executor.Execute(
+                    _editorPreviewCommandBuffer,
+                    camera,
+                    decoded,
+                    shared,
+                    _renderer.TextureRegistry,
+                    PartMaterial,
+                    MaskMaterial,
+                    ShaderProperties,
+                    true);
+                Graphics.ExecuteCommandBuffer(_editorPreviewCommandBuffer);
+                _editorPreviewCommandBuffer.Clear();
+            }
+#endif
             LastPartPacketCount = _executor.LastPartPacketCount;
             LastPartDrawIssuedCount = _executor.LastPartDrawIssuedCount;
             LastPartSkippedNoTextureCount = _executor.LastPartSkippedNoTextureCount;
@@ -6681,6 +6794,56 @@ namespace Nicxlive.UnityBackend.Managed
             _runtimeGameOverlayTexture = null;
         }
 
+        private void EnsureSceneViewOverlayTexture(int width, int height)
+        {
+            width = Mathf.Max(1, width);
+            height = Mathf.Max(1, height);
+            if (_sceneViewOverlayTexture != null &&
+                _sceneViewOverlayTexture.width == width &&
+                _sceneViewOverlayTexture.height == height)
+            {
+                if (!_sceneViewOverlayTexture.IsCreated())
+                {
+                    _sceneViewOverlayTexture.Create();
+                }
+                return;
+            }
+
+            ReleaseSceneViewOverlayTexture();
+            var desc = new RenderTextureDescriptor(width, height, RenderTextureFormat.ARGB32, 0)
+            {
+                msaaSamples = 1,
+                useMipMap = false,
+                autoGenerateMips = false,
+                sRGB = false
+            };
+            _sceneViewOverlayTexture = new RenderTexture(desc)
+            {
+                name = "nicxlive_scene_overlay_rt",
+                useMipMap = false,
+                autoGenerateMips = false,
+                filterMode = FilterMode.Bilinear,
+                wrapMode = TextureWrapMode.Clamp,
+                hideFlags = HideFlags.HideAndDontSave
+            };
+            _sceneViewOverlayTexture.Create();
+        }
+
+        private void ReleaseSceneViewOverlayTexture()
+        {
+            if (_sceneViewOverlayTexture == null)
+            {
+                return;
+            }
+
+            if (_sceneViewOverlayTexture.IsCreated())
+            {
+                _sceneViewOverlayTexture.Release();
+            }
+            UnityObjectUtil.DestroyObject(_sceneViewOverlayTexture);
+            _sceneViewOverlayTexture = null;
+        }
+
         private void OnEndCameraRenderingRuntimeOverlay(ScriptableRenderContext context, Camera camera)
         {
             _ = context;
@@ -6769,7 +6932,118 @@ namespace Nicxlive.UnityBackend.Managed
                 return;
             }
 
-            _executor.RenderSceneDebug(sceneView.camera);
+            if (!TryRenderEditorPreviewFrame())
+            {
+                return;
+            }
+
+            var rootSceneTexture = _executor.RootSceneTexture;
+            if (rootSceneTexture == null || !rootSceneTexture.IsCreated())
+            {
+                return;
+            }
+
+            var cameraRect = sceneView.camera.pixelRect;
+            var guiViewportRect = new Rect(
+                cameraRect.x,
+                sceneView.position.height - cameraRect.y - cameraRect.height,
+                cameraRect.width,
+                cameraRect.height);
+            var previewWidth = Mathf.Max(1, rootSceneTexture.width);
+            var previewHeight = Mathf.Max(1, rootSceneTexture.height);
+            EnsureSceneViewOverlayTexture(previewWidth, previewHeight);
+            if (_sceneViewOverlayTexture == null)
+            {
+                return;
+            }
+            _executor.RenderRootSceneToTarget(_sceneViewOverlayTexture);
+
+            var scale = Mathf.Min(
+                1f,
+                Mathf.Min(
+                    guiViewportRect.width / previewWidth,
+                    guiViewportRect.height / previewHeight));
+            var drawWidth = previewWidth * scale;
+            var drawHeight = previewHeight * scale;
+            var drawRect = new Rect(
+                guiViewportRect.x + ((guiViewportRect.width - drawWidth) * 0.5f),
+                guiViewportRect.y + ((guiViewportRect.height - drawHeight) * 0.5f),
+                drawWidth,
+                drawHeight);
+
+            UnityEditor.Handles.BeginGUI();
+            GUI.DrawTextureWithTexCoords(
+                drawRect,
+                _sceneViewOverlayTexture,
+                new Rect(0f, 1f, 1f, -1f),
+                true);
+            UnityEditor.Handles.EndGUI();
+            UnityEditor.EditorApplication.QueuePlayerLoopUpdate();
+            sceneView.Repaint();
+        }
+
+        private bool TryRenderEditorPreviewFrame(Camera? previewCameraOverride = null)
+        {
+            if (Application.isPlaying)
+            {
+                return false;
+            }
+            if (!TryEnsureRuntime() ||
+                _renderer == null ||
+                _executor == null ||
+                PartMaterial == null ||
+                MaskMaterial == null)
+            {
+                return false;
+            }
+
+            var previewCamera = previewCameraOverride ?? ResolveCamera();
+            if (previewCamera == null)
+            {
+                return false;
+            }
+
+            TryReloadPuppet(false);
+            if (!_renderer.HasPuppet)
+            {
+                return false;
+            }
+
+            ApplyTransformToPuppet(previewCamera);
+            var viewportWidth = Mathf.Max(1, previewCamera.pixelWidth);
+            var viewportHeight = Mathf.Max(1, previewCamera.pixelHeight);
+            _renderer.BeginFrame(viewportWidth, viewportHeight);
+            _renderer.Tick(ComputeDeltaSeconds());
+            var view = _renderer.EmitCommands();
+            var shared = _renderer.GetSharedBuffers();
+            var decoded = CommandStream.Decode(view);
+
+            _executor.EnableDiagnostics = EnableManagedDebugDiagnostics;
+            _executor.EnableRuntimeSceneDebugCapture = false;
+            _executor.ConfigureInjectedPuppetTransform(
+                decoded,
+                shared,
+                _desiredPuppetTranslation.x,
+                _desiredPuppetTranslation.y,
+                _desiredPuppetScale.x,
+                _desiredPuppetScale.y,
+                previewCamera.pixelWidth,
+                previewCamera.pixelHeight);
+
+            _editorPreviewCommandBuffer ??= new CommandBuffer { name = "nicxlive_editor_preview" };
+            _executor.Execute(
+                _editorPreviewCommandBuffer,
+                previewCamera,
+                decoded,
+                shared,
+                _renderer.TextureRegistry,
+                PartMaterial,
+                MaskMaterial,
+                ShaderProperties,
+                true);
+            Graphics.ExecuteCommandBuffer(_editorPreviewCommandBuffer);
+            _editorPreviewCommandBuffer.Clear();
+            return _executor.RootSceneTexture != null && _executor.RootSceneTexture.IsCreated();
         }
 #endif
 
@@ -6795,8 +7069,22 @@ namespace Nicxlive.UnityBackend.Managed
             _executor.RenderSceneDebug(current);
         }
 
-        private void EnsureAttachedCamera(Camera camera)
+        private void EnsureAttachedCamera(Camera? camera)
         {
+            if (camera == null)
+            {
+                return;
+            }
+            if (!Application.isPlaying && camera != null && camera.cameraType == CameraType.SceneView)
+            {
+                if (_attachedCamera != null && _commandBuffer != null)
+                {
+                    Nicxlive.UnityBackend.Compat.UrpCommandBufferRouter.Detach(_attachedCamera, _commandBuffer);
+                }
+                _attachedCamera = null;
+                return;
+            }
+
             if (_commandBuffer == null || _attachedCamera == camera)
             {
                 return;
@@ -6815,25 +7103,48 @@ namespace Nicxlive.UnityBackend.Managed
             RenderPipelineManager.endCameraRendering += OnEndCameraRenderingRuntimeOverlay;
         }
 
+        private void ResetRuntimeForPuppetReload()
+        {
+            if (_attachedCamera != null && _commandBuffer != null)
+            {
+                Nicxlive.UnityBackend.Compat.UrpCommandBufferRouter.Detach(_attachedCamera, _commandBuffer);
+            }
+            _attachedCamera = null;
+
+            _commandBuffer?.Release();
+            _commandBuffer = null;
+            _editorPreviewCommandBuffer?.Release();
+            _editorPreviewCommandBuffer = null;
+
+            _executor?.ReleasePersistentResources();
+            _executor = null;
+
+            _renderer?.Dispose();
+            _renderer = null;
+
+            _textureRegistry?.Dispose();
+            _textureRegistry = null;
+
+            ReleaseRuntimeGameOverlayTexture();
+            ReleaseSceneViewOverlayTexture();
+
+            _loadedPuppetPath = string.Empty;
+            _parameterStates.Clear();
+            _parameterStatesByUuid.Clear();
+            _sceneDebugPrevSharedVertexCount = -1;
+            _sceneDebugPrevDecodedCount = -1;
+            _sceneDebugPrevPartDrawCount = -1;
+            _sceneDebugPrevSignature = 0;
+        }
+
         private bool TryReloadPuppet(bool forceReload, bool reportFailure = false)
         {
-            if (!TryEnsureRenderer())
-            {
-                if (reportFailure)
-                {
-                    Debug.LogWarning("[nicxlive] Reload Puppet failed: renderer is not initialized.", this);
-                }
-                return false;
-            }
-            var renderer = _renderer!;
-
             var resolvedPath = ResolvePuppetPath();
             if (string.IsNullOrWhiteSpace(resolvedPath))
             {
-                if (renderer.HasPuppet)
+                if (_renderer != null && _renderer.HasPuppet)
                 {
-                    renderer.UnloadPuppet();
-                    _loadedPuppetPath = string.Empty;
+                    ResetRuntimeForPuppetReload();
                     _parameterStates.Clear();
                     _parameterStatesByUuid.Clear();
                 }
@@ -6854,12 +7165,30 @@ namespace Nicxlive.UnityBackend.Managed
             }
 
             var normalizedPath = Path.GetFullPath(resolvedPath);
+            var samePath = string.Equals(_loadedPuppetPath, normalizedPath, StringComparison.OrdinalIgnoreCase);
             if (!forceReload &&
-                renderer.HasPuppet &&
-                string.Equals(_loadedPuppetPath, normalizedPath, StringComparison.OrdinalIgnoreCase))
+                _renderer != null &&
+                _renderer.HasPuppet &&
+                samePath)
             {
                 return true;
             }
+
+            if (forceReload || !samePath)
+            {
+                ResetRuntimeForPuppetReload();
+            }
+
+            if (!TryEnsureRuntime() || _renderer == null)
+            {
+                if (reportFailure)
+                {
+                    Debug.LogWarning("[nicxlive] Reload Puppet failed: renderer is not initialized.", this);
+                }
+                return false;
+            }
+
+            var renderer = _renderer;
 
             try
             {
@@ -7053,23 +7382,13 @@ namespace Nicxlive.UnityBackend.Managed
             }
 
 #if UNITY_EDITOR
-            const int RequiredStableFrames = 2;
-
-            var stableNow =
-                decodedCount > 0 &&
-                LastPartDrawIssuedCount > 0 &&
-                decodedCount == _sceneDebugPrevDecodedCount &&
-                sharedVertexCount == _sceneDebugPrevSharedVertexCount &&
-                LastPartDrawIssuedCount == _sceneDebugPrevPartDrawCount &&
-                _executor.LastSceneDebugSignature == _sceneDebugPrevSignature;
-
-            _sceneDebugStableFrames = stableNow ? (_sceneDebugStableFrames + 1) : 0;
             _sceneDebugPrevDecodedCount = decodedCount;
             _sceneDebugPrevSharedVertexCount = sharedVertexCount;
             _sceneDebugPrevPartDrawCount = LastPartDrawIssuedCount;
             _sceneDebugPrevSignature = _executor.LastSceneDebugSignature;
-
-            _executor.CommitSceneDebugDraws(_sceneDebugStableFrames >= RequiredStableFrames);
+            _executor.CommitSceneDebugDraws(
+                decodedCount > 0 &&
+                LastPartDrawIssuedCount > 0);
 #endif
         }
 
@@ -7094,12 +7413,17 @@ namespace Nicxlive.UnityBackend.Managed
 
             _commandBuffer?.Release();
             _commandBuffer = null;
+            _editorPreviewCommandBuffer?.Release();
+            _editorPreviewCommandBuffer = null;
 
             _executor?.ReleasePersistentResources();
             _renderer?.Dispose();
             _renderer = null;
             _executor = null;
+            _textureRegistry?.Dispose();
             _textureRegistry = null;
+            ReleaseRuntimeGameOverlayTexture();
+            ReleaseSceneViewOverlayTexture();
             _loadedPuppetPath = string.Empty;
             if (_autoPartMaterial != null)
             {
@@ -7125,7 +7449,6 @@ namespace Nicxlive.UnityBackend.Managed
             _noIssuedDrawLogCooldown = 0;
             _transformGuardLogCooldown = 0;
             _visibilityDiagLogCooldown = 0;
-            _sceneDebugStableFrames = 0;
             _sceneDebugPrevSharedVertexCount = -1;
             _sceneDebugPrevDecodedCount = -1;
             _sceneDebugPrevPartDrawCount = -1;
