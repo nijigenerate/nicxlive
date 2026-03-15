@@ -9,7 +9,6 @@ using Nicxlive.UnityBackend.Interop;
 using UnityEngine;
 using UnityEngine.Rendering;
 using Debug = UnityEngine.Debug;
-using Process = System.Diagnostics.Process;
 
 namespace System.Runtime.CompilerServices
 {
@@ -583,13 +582,6 @@ namespace Nicxlive.UnityBackend.Managed
         MirroredRepeat = 2,
         ClampToBorder = 3,
     }
-
-    public sealed class ShaderHandle
-    {
-        public ulong HandleId;
-        public Material? Material;
-    }
-
     internal static class UnityObjectUtil
     {
         public static void DestroyObject(UnityEngine.Object? obj)
@@ -613,10 +605,7 @@ namespace Nicxlive.UnityBackend.Managed
     {
         private readonly Dictionary<ulong, Texture> _textures = new Dictionary<ulong, Texture>();
         private readonly Dictionary<ulong, Wrapping> _wrappingByHandle = new Dictionary<ulong, Wrapping>();
-        private readonly Dictionary<ulong, ShaderHandle> _shaders = new Dictionary<ulong, ShaderHandle>();
-        private readonly Dictionary<ulong, Dictionary<string, int>> _shaderUniformIds = new Dictionary<ulong, Dictionary<string, int>>();
         private ulong _nextHandle = 1;
-        private ulong _nextShaderHandle = 1;
 
         public ulong CreateTexture(int width, int height, int channels, bool renderTarget, bool stencil)
         {
@@ -721,16 +710,7 @@ namespace Nicxlive.UnityBackend.Managed
             }
             _textures.Clear();
             _wrappingByHandle.Clear();
-
-            foreach (var shaderHandle in _shaders.Values)
-            {
-                UnityObjectUtil.DestroyObject(shaderHandle.Material);
-            }
-            _shaders.Clear();
-            _shaderUniformIds.Clear();
-
             _nextHandle = 1;
-            _nextShaderHandle = 1;
         }
 
         public Texture? TryGet(ulong handle)
@@ -742,91 +722,6 @@ namespace Nicxlive.UnityBackend.Managed
         public RenderTexture? TryGetRenderTexture(ulong handle)
         {
             return TryGet(handle) as RenderTexture;
-        }
-
-        public ulong createTextureHandle()
-        {
-            return CreateTexture(1, 1, 4, false, false);
-        }
-
-        public void destroyTextureHandle(ulong handle)
-        {
-            ReleaseTexture(handle);
-        }
-
-        public void bindTextureHandle(ulong handle, int unit)
-        {
-            if (!_textures.TryGetValue(handle, out var texture) || texture == null)
-            {
-                Shader.SetGlobalTexture($"_NicxTex{unit}", _whiteFallback());
-                return;
-            }
-            Shader.SetGlobalTexture($"_NicxTex{unit}", texture);
-        }
-
-        public void uploadTextureData(ulong handle, int width, int height, int channels, byte[] data)
-        {
-            if (data == null || data.Length == 0)
-            {
-                return;
-            }
-            var pinned = GCHandle.Alloc(data, GCHandleType.Pinned);
-            try
-            {
-                UpdateTexture(handle, pinned.AddrOfPinnedObject(), (nuint)data.Length, width, height, channels);
-            }
-            finally
-            {
-                pinned.Free();
-            }
-        }
-
-        public void generateTextureMipmap(ulong handle)
-        {
-            if (!_textures.TryGetValue(handle, out var texture) || texture == null)
-            {
-                return;
-            }
-            if (texture is Texture2D tex2D)
-            {
-                tex2D.Apply(true, false);
-            }
-            else if (texture is RenderTexture rt)
-            {
-                rt.useMipMap = true;
-                rt.autoGenerateMips = true;
-                rt.GenerateMips();
-            }
-        }
-
-        public void applyTextureFiltering(ulong handle, Filtering filtering, bool useMipmaps = true)
-        {
-            if (!_textures.TryGetValue(handle, out var texture) || texture == null)
-            {
-                return;
-            }
-            texture.filterMode = filtering switch
-            {
-                Filtering.Nearest => FilterMode.Point,
-                Filtering.Linear => FilterMode.Bilinear,
-                Filtering.Bilinear => FilterMode.Bilinear,
-                Filtering.Trilinear => FilterMode.Trilinear,
-                _ => FilterMode.Bilinear,
-            };
-            if (texture is Texture2D tex2D)
-            {
-                tex2D.Apply(useMipmaps, false);
-            }
-        }
-
-        public void applyTextureWrapping(ulong handle, Wrapping wrapping)
-        {
-            if (!_textures.TryGetValue(handle, out var texture) || texture == null)
-            {
-                return;
-            }
-            _wrappingByHandle[handle] = wrapping;
-            texture.wrapMode = ToTextureWrapMode(wrapping);
         }
 
         public Wrapping GetWrapping(ulong handle)
@@ -845,362 +740,23 @@ namespace Nicxlive.UnityBackend.Managed
                 _ => TextureWrapMode.Clamp,
             };
         }
-
-        public void applyTextureAnisotropy(ulong handle, float value)
-        {
-            if (!_textures.TryGetValue(handle, out var texture) || texture == null)
-            {
-                return;
-            }
-            texture.anisoLevel = Mathf.Clamp(Mathf.RoundToInt(value), 1, 16);
-        }
-
-        public byte[] readTextureData(ulong handle, int channels, bool stencil)
-        {
-            _ = stencil;
-            if (!_textures.TryGetValue(handle, out var texture) || texture == null)
-            {
-                return Array.Empty<byte>();
-            }
-
-            if (texture is Texture2D tex2D)
-            {
-                return tex2D.GetRawTextureData();
-            }
-
-            if (texture is RenderTexture rt)
-            {
-                var prev = RenderTexture.active;
-                RenderTexture.active = rt;
-                var copy = new Texture2D(rt.width, rt.height, channels == 3 ? TextureFormat.RGB24 : TextureFormat.RGBA32, false, true);
-                copy.ReadPixels(new Rect(0, 0, rt.width, rt.height), 0, 0);
-                copy.Apply(false, false);
-                var data = copy.GetRawTextureData();
-                UnityObjectUtil.DestroyObject(copy);
-                RenderTexture.active = prev;
-                return data;
-            }
-
-            return Array.Empty<byte>();
-        }
-
-        public ulong textureNativeHandle(ulong handle)
-        {
-            if (!_textures.TryGetValue(handle, out var texture) || texture == null)
-            {
-                return 0;
-            }
-            return (ulong)texture.GetNativeTexturePtr().ToInt64();
-        }
-
-        public ulong createShader(Shader shader)
-        {
-            var handle = _nextShaderHandle++;
-            _shaders[handle] = new ShaderHandle
-            {
-                HandleId = handle,
-                Material = shader != null ? new Material(shader) : null,
-            };
-            _shaderUniformIds[handle] = new Dictionary<string, int>(StringComparer.Ordinal);
-            return handle;
-        }
-
-        public void destroyShader(ulong handle)
-        {
-            if (_shaders.TryGetValue(handle, out var shaderHandle))
-            {
-                if (shaderHandle.Material != null)
-                {
-                    UnityObjectUtil.DestroyObject(shaderHandle.Material);
-                }
-                _shaders.Remove(handle);
-            }
-            _shaderUniformIds.Remove(handle);
-        }
-
-        public Material? useShader(ulong handle)
-        {
-            if (_shaders.TryGetValue(handle, out var shaderHandle))
-            {
-                return shaderHandle.Material;
-            }
-            return null;
-        }
-
-        public bool hasShader(ulong handle)
-        {
-            return _shaders.ContainsKey(handle);
-        }
-
-        public int getShaderUniformLocation(ulong handle, string name)
-        {
-            if (!_shaderUniformIds.TryGetValue(handle, out var map))
-            {
-                return -1;
-            }
-            if (!map.TryGetValue(name, out var id))
-            {
-                id = Shader.PropertyToID(name);
-                map[name] = id;
-            }
-            return id;
-        }
-
-        public void setShaderUniform(ulong handle, int location, bool value)
-        {
-            if (_shaders.TryGetValue(handle, out var shaderHandle) && shaderHandle.Material != null)
-            {
-                shaderHandle.Material.SetFloat(location, value ? 1.0f : 0.0f);
-            }
-        }
-
-        public void setShaderUniform(ulong handle, int location, int value)
-        {
-            if (_shaders.TryGetValue(handle, out var shaderHandle) && shaderHandle.Material != null)
-            {
-                shaderHandle.Material.SetInt(location, value);
-            }
-        }
-
-        public void setShaderUniform(ulong handle, int location, float value)
-        {
-            if (_shaders.TryGetValue(handle, out var shaderHandle) && shaderHandle.Material != null)
-            {
-                shaderHandle.Material.SetFloat(location, value);
-            }
-        }
-
-        public void setShaderUniform(ulong handle, int location, Vector2 value)
-        {
-            if (_shaders.TryGetValue(handle, out var shaderHandle) && shaderHandle.Material != null)
-            {
-                shaderHandle.Material.SetVector(location, value);
-            }
-        }
-
-        public void setShaderUniform(ulong handle, int location, Vector3 value)
-        {
-            if (_shaders.TryGetValue(handle, out var shaderHandle) && shaderHandle.Material != null)
-            {
-                shaderHandle.Material.SetVector(location, value);
-            }
-        }
-
-        public void setShaderUniform(ulong handle, int location, Vector4 value)
-        {
-            if (_shaders.TryGetValue(handle, out var shaderHandle) && shaderHandle.Material != null)
-            {
-                shaderHandle.Material.SetVector(location, value);
-            }
-        }
-
-        public void setShaderUniform(ulong handle, int location, Matrix4x4 value)
-        {
-            if (_shaders.TryGetValue(handle, out var shaderHandle) && shaderHandle.Material != null)
-            {
-                shaderHandle.Material.SetMatrix(location, value);
-            }
-        }
-
-        private Texture _whiteFallback()
-        {
-            return Texture2D.whiteTexture;
-        }
     }
 }
 
 namespace Nicxlive.UnityBackend.Compat
 {
-    using Nicxlive.UnityBackend.Managed;
-    using Nicxlive.UnityBackend.Interop;
-
-    public enum RenderCommandKind { DrawPart, BeginDynamicComposite, EndDynamicComposite, BeginMask, ApplyMask, BeginMaskContent, EndMask }
-    public enum RenderPassKind { Root, DynamicComposite }
-    public enum MaskDrawableKind { Part, Mask }
-    public enum BlendMode
-    {
-        Normal, Multiply, Screen, Overlay, Darken, Lighten, ColorDodge, LinearDodge, AddGlow, ColorBurn, HardLight, SoftLight, Difference, Exclusion, Subtract, Inverse, DestinationIn, ClipToLower, SliceFromLower
-    }
-
-    public struct ShaderProgramHandle { public int Program; }
-    public struct GLShaderHandle { public ulong Handle; }
-    public struct GLTextureHandle { public ulong Handle; }
-    public struct ShaderStageSource { public string Vertex; public string Fragment; }
-    public struct ShaderAsset { public ShaderStageSource Stage; }
-    public struct PartDrawPacket { }
-    public struct MaskDrawPacket { }
-    public struct MaskApplyPacket { }
-    public struct DynamicCompositeSurface { }
-    public struct DynamicCompositePass { }
-    public struct OpenGLBackendInit { public int Width; public int Height; }
-    public struct DirectXBackendInit { public int Width; public int Height; }
-    public struct Vertex { public float X; public float Y; public float U; public float V; }
-    public struct Vec2f { public float X; public float Y; }
-    public struct Vec3f { public float X; public float Y; public float Z; }
-    public struct Vec4f { public float X; public float Y; public float Z; public float W; }
-    public struct DrawSpan { public int FirstIndex; public int IndexCount; }
-    public struct CompositeState { public bool Valid; }
-    public struct VSInput { public Vector4 Position; }
-    public struct VSOutput { public Vector4 Position; }
-    public enum StencilMode { None, Write, TestEqual }
-    public struct DirectXRuntimeOptions { public bool SkipDraw; public bool SkipPresent; }
-    public struct PostProcessingShader { public Material Material; }
-    public struct NSOpenGLCPSurfaceOpacity { public int Value; }
-
-    public sealed class Texture
-    {
-        public int WidthValue;
-        public int HeightValue;
-        public int Channels;
-        public bool Stencil;
-        public bool RenderTarget;
-        public ulong BackendHandleValue;
-        private byte[] _data = Array.Empty<byte>();
-        private uint _boundUnit;
-
-        public int width() => WidthValue;
-        public int height() => HeightValue;
-        public int maxAnisotropy() => 16;
-        public int channelFormat() => Channels;
-        public void setFiltering(Filtering filtering)
-        {
-            BackendRegistry.currentRenderBackend().applyTextureFiltering(BackendHandleValue, filtering);
-        }
-        public void setWrapping(Wrapping wrapping)
-        {
-            BackendRegistry.currentRenderBackend().applyTextureWrapping(BackendHandleValue, wrapping);
-        }
-        public void setAnisotropy(float value)
-        {
-            var backend = BackendRegistry.currentRenderBackend();
-            backend.applyTextureAnisotropy(BackendHandleValue, Mathf.Clamp(value, 1f, backend.maxTextureAnisotropy()));
-        }
-        public void setData(byte[] data)
-        {
-            _data = data != null ? (byte[])data.Clone() : Array.Empty<byte>();
-            if (_data.Length == 0)
-            {
-                return;
-            }
-            BackendRegistry.currentRenderBackend().uploadTextureData(BackendHandleValue, WidthValue, HeightValue, Channels, _data);
-            genMipmap();
-        }
-        public void genMipmap()
-        {
-            BackendRegistry.currentRenderBackend().generateTextureMipmap(BackendHandleValue);
-        }
-        public void bind(uint unit)
-        {
-            _boundUnit = unit;
-            BackendRegistry.currentRenderBackend().bindTextureHandle(BackendHandleValue, unit);
-        }
-        public ulong backendHandle() => BackendHandleValue;
-        public byte[] getTextureData()
-        {
-            var data = BackendRegistry.currentRenderBackend().readTextureData(BackendHandleValue, Channels, Stencil);
-            return BackendRegistry.unPremultiplyRgba(data);
-        }
-        public ulong getTextureId()
-        {
-            var backend = BackendRegistry.tryRenderBackend();
-            return backend != null ? backend.textureNativeHandle(BackendHandleValue) : 0;
-        }
-        public void dispose()
-        {
-            var backend = BackendRegistry.tryRenderBackend();
-            if (backend != null)
-            {
-                backend.destroyTextureHandle(BackendHandleValue);
-            }
-        }
-        public bool opEquals(Texture rhs) => ReferenceEquals(this, rhs);
-    }
-
-    public sealed class Shader
-    {
-        private readonly Material? _material;
-        public ulong Handle;
-        public Shader(ShaderAsset source)
-        {
-            _ = source;
-            var shader = UrpShaderCatalog.RequirePartShader();
-            _material = new Material(shader);
-            var vertexSource = source.Stage.Vertex ?? string.Empty;
-            var fragmentSource = source.Stage.Fragment ?? string.Empty;
-            Handle = BackendRegistry.currentRenderBackend().createShader(vertexSource, fragmentSource).Handle;
-        }
-        public static Shader fromOpenGLSource(string vertex, string fragment) => new Shader(new ShaderAsset { Stage = new ShaderStageSource { Vertex = vertex, Fragment = fragment } });
-        public void use()
-        {
-            BackendRegistry.currentRenderBackend().useShader(new GLShaderHandle { Handle = Handle });
-            _material?.SetPass(0);
-        }
-        public int getUniformLocation(string name)
-        {
-            return BackendRegistry.currentRenderBackend().getUniformLocation(new GLShaderHandle { Handle = Handle }, name);
-        }
-        public bool hasUniform(string name) => getUniformLocation(name) >= 0;
-        public int getUniform(string name) => getUniformLocation(name);
-        public void setUniform(int location, bool value)
-        {
-            BackendRegistry.currentRenderBackend().setShaderUniform(new GLShaderHandle { Handle = Handle }, location, value);
-            _material?.SetFloat(location, value ? 1f : 0f);
-        }
-        public void setUniform(int location, int value)
-        {
-            BackendRegistry.currentRenderBackend().setShaderUniform(new GLShaderHandle { Handle = Handle }, location, value);
-            _material?.SetInt(location, value);
-        }
-        public void setUniform(int location, float value)
-        {
-            BackendRegistry.currentRenderBackend().setShaderUniform(new GLShaderHandle { Handle = Handle }, location, value);
-            _material?.SetFloat(location, value);
-        }
-        public void setUniform(int location, Vector2 value)
-        {
-            BackendRegistry.currentRenderBackend().setShaderUniform(new GLShaderHandle { Handle = Handle }, location, value);
-            _material?.SetVector(location, value);
-        }
-        public void setUniform(int location, Vector3 value)
-        {
-            BackendRegistry.currentRenderBackend().setShaderUniform(new GLShaderHandle { Handle = Handle }, location, value);
-            _material?.SetVector(location, value);
-        }
-        public void setUniform(int location, Vector4 value)
-        {
-            BackendRegistry.currentRenderBackend().setShaderUniform(new GLShaderHandle { Handle = Handle }, location, value);
-            _material?.SetVector(location, value);
-        }
-        public void setUniform(int location, Matrix4x4 value)
-        {
-            BackendRegistry.currentRenderBackend().setShaderUniform(new GLShaderHandle { Handle = Handle }, location, value);
-            _material?.SetMatrix(location, value);
-        }
-        public void destroyShader()
-        {
-            BackendRegistry.currentRenderBackend().destroyShader(new GLShaderHandle { Handle = Handle });
-            if (_material != null)
-            {
-                UnityObjectUtil.DestroyObject(_material);
-            }
-        }
-    }
-
     internal static class UrpShaderCatalog
     {
         private const string NicxlivePart = "Nicxlive/URP Part";
         private const string NicxliveMask = "Nicxlive/URP Mask";
-
         public static UnityEngine.Shader RequirePartShader()
         {
             return RequireShader(NicxlivePart);
         }
-
         public static UnityEngine.Shader RequireMaskShader()
         {
             return RequireShader(NicxliveMask);
         }
-
         private static UnityEngine.Shader RequireShader(params string[] shaderNames)
         {
             foreach (var shaderName in shaderNames)
@@ -1214,20 +770,17 @@ namespace Nicxlive.UnityBackend.Compat
             throw new InvalidOperationException($"Required URP shader not found: {string.Join(", ", shaderNames)}");
         }
     }
-
     internal static class UrpCommandBufferRouter
     {
         private static readonly Dictionary<Camera, List<CommandBuffer>> BuffersByCamera = new Dictionary<Camera, List<CommandBuffer>>();
         private static readonly Dictionary<CommandBuffer, string> LastExecutionByBuffer = new Dictionary<CommandBuffer, string>();
         private static bool _hooked;
-
         public static void Attach(Camera camera, CommandBuffer buffer)
         {
             if (camera == null || buffer == null)
             {
                 return;
             }
-
             EnsureHooked();
             if (!BuffersByCamera.TryGetValue(camera, out var list))
             {
@@ -1239,7 +792,6 @@ namespace Nicxlive.UnityBackend.Compat
                 list.Add(buffer);
             }
         }
-
         public static void Detach(Camera camera, CommandBuffer buffer)
         {
             if (camera == null || buffer == null)
@@ -1256,17 +808,14 @@ namespace Nicxlive.UnityBackend.Compat
                 BuffersByCamera.Remove(camera);
             }
         }
-
         public static string GetLastExecutionDiag(CommandBuffer? buffer)
         {
             if (buffer == null)
             {
                 return string.Empty;
             }
-
             return LastExecutionByBuffer.TryGetValue(buffer, out var diag) ? diag : string.Empty;
         }
-
         private static void EnsureHooked()
         {
             if (_hooked)
@@ -1276,7 +825,6 @@ namespace Nicxlive.UnityBackend.Compat
             RenderPipelineManager.endCameraRendering += OnEndCameraRendering;
             _hooked = true;
         }
-
         private static void OnEndCameraRendering(ScriptableRenderContext context, Camera camera)
         {
             _ = context;
@@ -1284,7 +832,6 @@ namespace Nicxlive.UnityBackend.Compat
             {
                 return;
             }
-
             for (var i = 0; i < list.Count; i++)
             {
                 var buffer = list[i];
@@ -1299,1520 +846,7 @@ namespace Nicxlive.UnityBackend.Compat
             }
         }
     }
-
-    public sealed class RenderingBackend
-    {
-        private sealed class DynamicFramebufferEntry
-        {
-            public ulong Texture0;
-            public ulong Texture1;
-            public ulong Texture2;
-            public ulong Stencil;
-
-            public bool UsesTextureHandle(ulong handle)
-            {
-                return Texture0 == handle || Texture1 == handle || Texture2 == handle || Stencil == handle;
-            }
-        }
-
-        private sealed class ShaderSourceProfile
-        {
-            public bool WantsMaskPath;
-            public bool WantsPresentPath;
-            public bool WantsColorKey;
-            public readonly List<string> UniformNames = new List<string>();
-        }
-
-        public readonly CommandExecutor Executor = new CommandExecutor();
-        public readonly TextureRegistry Textures = new TextureRegistry();
-
-        private readonly Dictionary<ulong, ushort[]> _ibo = new Dictionary<ulong, ushort[]>();
-        private readonly Dictionary<ulong, DynamicFramebufferEntry> _dynamicFramebuffers = new Dictionary<ulong, DynamicFramebufferEntry>();
-        private readonly List<DecodedCommand> _immediateCommands = new List<DecodedCommand>();
-        private readonly List<DrawSpan> _queuedSpans = new List<DrawSpan>();
-        private readonly Dictionary<ulong, ShaderSourceProfile> _shaderProfiles = new Dictionary<ulong, ShaderSourceProfile>();
-        private SharedBuffers _sharedSnapshot = new SharedBuffers();
-        private CommandBuffer? _commandBuffer;
-        private Camera? _boundCamera;
-        private Camera? _attachedCamera;
-        private CommandBuffer? _attachedCommandBuffer;
-        private Material? _partMaterial;
-        private Material? _maskMaterial;
-        private readonly CommandExecutor.PropertyConfig _propertyConfig = new CommandExecutor.PropertyConfig();
-        private bool _sceneOpen;
-        private int _viewportWidth = 1280;
-        private int _viewportHeight = 720;
-        private bool _blendCapsInitialized;
-        private bool _supportsAdvancedBlend = true;
-        private bool _supportsAdvancedBlendCoherent = true;
-
-        public void initializeRenderer() => Executor.initializeRenderer();
-        public void initializePartBackendResources() => Executor.initializePartBackendResources();
-        public void initializeMaskBackend() => Executor.initializeMaskBackend();
-        public void bindPartShader() => Executor.bindPartShader();
-        public void bindDrawableVao() => Executor.bindDrawableVao();
-        public void beginScene(CommandBuffer buffer, int width, int height)
-        {
-            _commandBuffer = buffer;
-            EnsurePipelineObjects();
-            _viewportWidth = Mathf.Max(1, width);
-            _viewportHeight = Mathf.Max(1, height);
-            _immediateCommands.Clear();
-            _sceneOpen = true;
-            Executor.setViewport(_viewportWidth, _viewportHeight);
-            if (EnsureRuntimeReady())
-            {
-                Executor.beginScene(_commandBuffer!, _viewportWidth, _viewportHeight);
-            }
-        }
-
-        public void endScene()
-        {
-            if (!_sceneOpen)
-            {
-                return;
-            }
-            if (EnsureRuntimeReady())
-            {
-                Executor.endScene(_commandBuffer!);
-            }
-            _sceneOpen = false;
-        }
-
-        public void postProcessScene()
-        {
-            if (EnsureRuntimeReady())
-            {
-                Executor.postProcessScene(_commandBuffer!);
-            }
-        }
-
-        public void presentSceneToBackbuffer(int width, int height)
-        {
-            _viewportWidth = Mathf.Max(1, width);
-            _viewportHeight = Mathf.Max(1, height);
-            if (EnsureRuntimeReady())
-            {
-                Executor.ensurePresentProgram();
-                rebindActiveTargets();
-                Executor.setViewport(_viewportWidth, _viewportHeight);
-                Executor.presentSceneToBackbuffer(_commandBuffer!, _viewportWidth, _viewportHeight);
-            }
-        }
-        public void setViewport(int width, int height) => Executor.setViewport(width, height);
-        public ulong framebufferHandle() => Executor.framebufferHandle();
-        public void rebindActiveTargets()
-        {
-            if (EnsureRuntimeReady())
-            {
-                Executor.rebindActiveTargets(_commandBuffer!);
-            }
-        }
-
-        public void beginDynamicComposite(NicxliveNative.NjgDynamicCompositePass pass)
-        {
-            if (!EnsureRuntimeReady())
-            {
-                return;
-            }
-            Executor.beginDynamicComposite(_commandBuffer!, Textures, pass);
-        }
-
-        public void endDynamicComposite(NicxliveNative.NjgDynamicCompositePass pass)
-        {
-            if (!EnsureRuntimeReady())
-            {
-                return;
-            }
-            Executor.endDynamicComposite(_commandBuffer!, pass);
-        }
-        public NicxliveNative.NjgDynamicCompositePass createDynamicCompositePass(NicxliveNative.NjgDynamicCompositePass pass, Dictionary<ulong, Texture> texturesByHandle)
-        {
-            _ = texturesByHandle;
-            var count = Mathf.Min(3, Mathf.Max(0, pass.TextureCount));
-            var result = pass;
-            result.TextureCount = (uint)count;
-            return result;
-        }
-        public void beginMask(bool useStencil)
-        {
-            if (!EnsureRuntimeReady())
-            {
-                return;
-            }
-            Executor.beginMask(_commandBuffer!, useStencil);
-        }
-
-        public void applyMask(NicxliveNative.NjgMaskApplyPacket packet)
-        {
-            if (!EnsureRuntimeReady())
-            {
-                return;
-            }
-            initializeMaskBackend();
-            switch (packet.Kind)
-            {
-                case NicxliveNative.MaskDrawableKind.Part:
-                    drawPartPacket(packet.PartPacket, new Dictionary<ulong, Texture>());
-                    break;
-                case NicxliveNative.MaskDrawableKind.Mask:
-                    executeMaskPacket(packet.MaskPacket);
-                    break;
-                default:
-                    Executor.applyMask(_commandBuffer!, _sharedSnapshot, Textures, _partMaterial!, _maskMaterial!, _propertyConfig, packet);
-                    break;
-            }
-        }
-
-        public void beginMaskContent()
-        {
-            Executor.beginMaskContent();
-        }
-
-        public void endMask()
-        {
-            Executor.endMask();
-        }
-
-        public void drawPartPacket(NicxliveNative.NjgPartDrawPacket packet, Dictionary<ulong, Texture> texturesByHandle)
-        {
-            _ = texturesByHandle;
-            if (!EnsureRuntimeReady())
-            {
-                return;
-            }
-            if (!packet.Renderable || packet.TextureCount == 0)
-            {
-                return;
-            }
-
-            bindDrawableVao();
-
-            if (packet.IsMask)
-            {
-                renderStage(packet, false);
-                return;
-            }
-
-            if (packet.UseMultistageBlend)
-            {
-                setupShaderStage(packet, 0, Matrix4x4.identity, Matrix4x4.identity);
-                renderStage(packet, true);
-                if (packet.HasEmissionOrBumpmap)
-                {
-                    setupShaderStage(packet, 1, Matrix4x4.identity, Matrix4x4.identity);
-                    renderStage(packet, false);
-                }
-            }
-            else
-            {
-                setupShaderStage(packet, 2, Matrix4x4.identity, Matrix4x4.identity);
-                renderStage(packet, false);
-            }
-        }
-
-        public void executeMaskPacket(NicxliveNative.NjgMaskDrawPacket packet)
-        {
-            if (!EnsureRuntimeReady())
-            {
-                return;
-            }
-            initializeMaskBackend();
-            bindDrawableVao();
-            if (_maskMaterial != null)
-            {
-                _maskMaterial.SetPass(0);
-                _maskMaterial.SetFloat(_propertyConfig.MaskThreshold, 0f);
-            }
-            _ = sharedVertexBufferHandle();
-            _ = sharedDeformBufferHandle();
-            Executor.executeMaskPacket(_commandBuffer!, _sharedSnapshot, _maskMaterial!, _propertyConfig, packet, false, 1);
-        }
-        private NicxliveNative.NjgPartDrawPacket _stagedPacket;
-        private int _stagedShaderStage;
-
-        public void setupShaderStage(NicxliveNative.NjgPartDrawPacket packet, int stage, Matrix4x4 matrix, Matrix4x4 renderMatrix)
-        {
-            _ = (matrix, renderMatrix);
-            bindPartShader();
-            _partMaterial?.SetFloat(_propertyConfig.ShaderStage, stage);
-            applyBlendMode((BlendMode)packet.BlendingMode, stage == 0);
-            _stagedPacket = packet;
-            _stagedShaderStage = stage;
-            Executor.setupShaderStage(_propertyConfig, packet, stage);
-        }
-
-        public void renderStage(NicxliveNative.NjgPartDrawPacket packet, bool advanced)
-        {
-            if (!EnsureRuntimeReady())
-            {
-                return;
-            }
-            if (packet.VertexCount == 0 && _stagedPacket.VertexCount > 0)
-            {
-                packet = _stagedPacket;
-            }
-            Executor.renderStage(_commandBuffer!, _sharedSnapshot, Textures, _partMaterial!, _propertyConfig, packet, advanced);
-            _ = _stagedShaderStage;
-        }
-        public void setLegacyBlendMode(BlendMode mode)
-        {
-            Executor.setLegacyBlendMode(_propertyConfig, (NicxliveNative.BlendMode)mode);
-        }
-
-        public void setAdvancedBlendEquation(BlendMode mode)
-        {
-            setLegacyBlendMode(mode);
-            Executor.setAdvancedBlendEquation(_propertyConfig, (NicxliveNative.BlendMode)mode);
-        }
-
-        public void applyBlendMode(BlendMode mode, bool legacyOnly = false)
-        {
-            Executor.applyBlendMode(_propertyConfig, (NicxliveNative.BlendMode)mode, legacyOnly);
-        }
-
-        public void blendModeBarrier(BlendMode mode)
-        {
-            if (supportsAdvancedBlend() && !supportsAdvancedBlendCoherent() && isAdvancedBlendMode(mode))
-            {
-                issueBlendBarrier();
-            }
-        }
-
-        public void issueBlendBarrier()
-        {
-            if (EnsureRuntimeReady())
-            {
-                Executor.issueBlendBarrier();
-            }
-        }
-
-        public bool supportsAdvancedBlend()
-        {
-            EnsureBlendCapabilitiesInitialized();
-            return _supportsAdvancedBlend;
-        }
-        public bool supportsAdvancedBlendCoherent()
-        {
-            EnsureBlendCapabilitiesInitialized();
-            return _supportsAdvancedBlendCoherent;
-        }
-        public bool isAdvancedBlendMode(BlendMode mode) => mode is BlendMode.Multiply or BlendMode.Screen or BlendMode.Overlay or BlendMode.Darken or BlendMode.Lighten or BlendMode.ColorDodge or BlendMode.ColorBurn or BlendMode.HardLight or BlendMode.SoftLight or BlendMode.Difference or BlendMode.Exclusion;
-        public int maxTextureAnisotropy() => 16;
-        public int sharedVertexBufferHandle() => 1;
-        public int sharedUvBufferHandle() => 2;
-        public int sharedDeformBufferHandle() => 3;
-        public ulong textureId(Texture texture) => texture?.backendHandle() ?? 0;
-        public bool dynamicFramebufferKeyUsesHandle(ulong handle)
-        {
-            if (handle == 0)
-            {
-                return false;
-            }
-            foreach (var entry in _dynamicFramebuffers.Values)
-            {
-                if (entry.UsesTextureHandle(handle))
-                {
-                    return true;
-                }
-            }
-            return false;
-        }
-        public ulong acquireDynamicFramebuffer(ulong t0, ulong t1, ulong t2, ulong stencil)
-        {
-            var k = makeDynamicFramebufferKey(t0, t1, t2, stencil);
-            _dynamicFramebuffers[k] = new DynamicFramebufferEntry
-            {
-                Texture0 = t0,
-                Texture1 = t1,
-                Texture2 = t2,
-                Stencil = stencil,
-            };
-            return k;
-        }
-        private void glDeleteFramebuffers(ulong fb)
-        {
-            if (fb == 0)
-            {
-                return;
-            }
-            _dynamicFramebuffers.Remove(fb);
-        }
-        public void releaseDynamicFramebuffersForTextureHandle(ulong handle)
-        {
-            if (handle == 0)
-            {
-                return;
-            }
-            var staleKeys = new List<ulong>();
-            foreach (var kv in _dynamicFramebuffers)
-            {
-                if (kv.Value.UsesTextureHandle(handle))
-                {
-                    staleKeys.Add(kv.Key);
-                }
-            }
-            foreach (var key in staleKeys)
-            {
-                glDeleteFramebuffers(key);
-            }
-        }
-        public ulong makeDynamicFramebufferKey(ulong t0, ulong t1, ulong t2, ulong stencil) => toHash(t0, t1, t2, stencil);
-        public static ulong toHash(params ulong[] values)
-        {
-            unchecked
-            {
-                ulong h = 1469598103934665603UL;
-                foreach (var v in values)
-                {
-                    h ^= v;
-                    h *= 1099511628211UL;
-                }
-                return h;
-            }
-        }
-        public ulong quickIndexSignature(ushort[] indices)
-        {
-            if (indices == null || indices.Length == 0) return 0;
-            unchecked
-            {
-                ulong h = 2166136261;
-                for (int i = 0; i < indices.Length; i += Math.Max(1, indices.Length / 16))
-                {
-                    h ^= indices[i];
-                    h *= 16777619;
-                }
-                h ^= (ulong)indices.Length;
-                h *= 16777619;
-                return h;
-            }
-        }
-        public ulong getOrCreateIbo(ushort[] indices)
-        {
-            var sig = quickIndexSignature(indices);
-            if (!_ibo.ContainsKey(sig))
-            {
-                createDrawableBuffers();
-                uploadDrawableIndices(sig, indices);
-            }
-            return sig;
-        }
-        public ulong getOrCreateIboByHandle(ulong handle, ushort[] indices)
-        {
-            if (!_ibo.ContainsKey(handle))
-            {
-                createDrawableBuffers();
-                uploadDrawableIndices(handle, indices);
-            }
-            return handle;
-        }
-        public void uploadDrawableIndices(ulong ibo, ushort[] indices) => _ibo[ibo] = (ushort[])indices.Clone();
-        public void createDrawableBuffers() => Executor.createDrawableBuffers();
-        public void drawDrawableElements(ulong ibo, nuint indexCount)
-        {
-            if (!_ibo.TryGetValue(ibo, out var indices) || indices.Length == 0 || indexCount == 0)
-            {
-                return;
-            }
-            var requested = checked((int)Math.Min((nuint)indices.Length, indexCount));
-            DrawIndexedRange(indices, 0, requested, 0);
-        }
-        public void ensureDebugRendererInitialized() => Executor.initializeRenderer();
-        public ulong currentRtvHandle() => framebufferHandle();
-        public ulong offscreenRtvHandle() => framebufferHandle();
-        public ulong offscreenRtvHandleAt(int index)
-        {
-            if (index <= 0 || _dynamicFramebuffers.Count == 0)
-            {
-                return offscreenRtvHandle();
-            }
-            var keys = new List<ulong>(_dynamicFramebuffers.Keys);
-            keys.Sort();
-            var at = Mathf.Clamp(index - 1, 0, keys.Count - 1);
-            return keys[at];
-        }
-        public ulong dsvHandle() => framebufferHandle();
-        public ulong offscreenDsvHandle() => framebufferHandle();
-        public ulong descriptorHeapCpuStart() => framebufferHandle();
-        public ulong descriptorHeapGpuStart() => framebufferHandle();
-        public void enqueueSpan(DrawSpan span)
-        {
-            if (span.IndexCount <= 0)
-            {
-                return;
-            }
-            _queuedSpans.Add(span);
-        }
-        public void drawMaskPacket(NicxliveNative.NjgMaskDrawPacket packet) => executeMaskPacket(packet);
-        public void drawUploadedGeometry(List<DrawSpan> spans, Texture fallbackTexture)
-        {
-            var localSpans = spans;
-            if (localSpans == null || localSpans.Count == 0)
-            {
-                if (_queuedSpans.Count == 0)
-                {
-                    return;
-                }
-                localSpans = new List<DrawSpan>(_queuedSpans);
-                _queuedSpans.Clear();
-            }
-            if (_ibo.Count == 0 || !EnsureRuntimeReady())
-            {
-                return;
-            }
-            var fallbackHandle = fallbackTexture?.backendHandle() ?? 0;
-            foreach (var kv in _ibo)
-            {
-                var indices = kv.Value;
-                if (indices == null || indices.Length == 0)
-                {
-                    continue;
-                }
-                foreach (var span in localSpans)
-                {
-                    DrawIndexedRange(indices, span.FirstIndex, span.IndexCount, fallbackHandle);
-                }
-                break;
-            }
-        }
-        public void renderScene(Vector4 area, PostProcessingShader shaderToUse, ulong albedo, ulong emissive, ulong bump)
-        {
-            _ = (emissive, bump);
-            if (shaderToUse.Material == null && !EnsureRuntimeReady())
-            {
-                return;
-            }
-            if (_queuedSpans.Count > 0)
-            {
-                var texture = new Texture
-                {
-                    BackendHandleValue = albedo,
-                    WidthValue = Mathf.Max(1, Mathf.RoundToInt(area.z)),
-                    HeightValue = Mathf.Max(1, Mathf.RoundToInt(area.w)),
-                    Channels = 4,
-                };
-                drawUploadedGeometry(new List<DrawSpan>(_queuedSpans), texture);
-                _queuedSpans.Clear();
-            }
-            ExecuteQueuedCommands(_immediateCommands);
-            _immediateCommands.Clear();
-        }
-        public void applyBlendingCapabilities(bool advancedEnabled)
-        {
-            _supportsAdvancedBlend = supportsAdvancedBlend() && advancedEnabled;
-            _supportsAdvancedBlendCoherent = supportsAdvancedBlendCoherent() && advancedEnabled;
-            _blendCapsInitialized = true;
-            Executor.applyBlendingCapabilities(_supportsAdvancedBlend);
-            var coherent = _supportsAdvancedBlend && _supportsAdvancedBlendCoherent;
-            setAdvancedBlendCoherent(coherent);
-        }
-        public void setAdvancedBlendCoherent(bool enabled) => Executor.setAdvancedBlendCoherent(enabled);
-
-        private unsafe void DrawIndexedRange(ushort[] sourceIndices, int firstIndex, int indexCount, ulong textureHandle)
-        {
-            if (!EnsureRuntimeReady() || sourceIndices == null || sourceIndices.Length == 0 || indexCount <= 0)
-            {
-                return;
-            }
-            var start = Mathf.Clamp(firstIndex, 0, sourceIndices.Length);
-            var count = Mathf.Clamp(indexCount, 0, sourceIndices.Length - start);
-            if (count <= 0)
-            {
-                return;
-            }
-            var vertexCount = sharedVertexCountEstimate();
-            if (vertexCount <= 0)
-            {
-                return;
-            }
-
-            fixed (ushort* indicesPtr = sourceIndices)
-            {
-                var packet = new NicxliveNative.NjgPartDrawPacket
-                {
-                    IsMask = false,
-                    Renderable = true,
-                    ModelMatrix = identityMat4(),
-                    RenderMatrix = identityMat4(),
-                    RenderRotation = 0f,
-                    ClampedTint = new NicxliveNative.Vec3 { X = 1f, Y = 1f, Z = 1f },
-                    ClampedScreen = new NicxliveNative.Vec3 { X = 0f, Y = 0f, Z = 0f },
-                    Opacity = 1f,
-                    EmissionStrength = 0f,
-                    MaskThreshold = 0f,
-                    BlendingMode = (int)NicxliveNative.BlendMode.Normal,
-                    UseMultistageBlend = false,
-                    HasEmissionOrBumpmap = false,
-                    TextureHandle0 = (nuint)textureHandle,
-                    TextureHandle1 = 0,
-                    TextureHandle2 = 0,
-                    TextureCount = textureHandle != 0 ? 1u : 0u,
-                    Origin = new NicxliveNative.Vec2 { X = 0f, Y = 0f },
-                    VertexOffset = 0,
-                    VertexAtlasStride = (nuint)vertexCount,
-                    UvOffset = 0,
-                    UvAtlasStride = (nuint)vertexCount,
-                    DeformOffset = 0,
-                    DeformAtlasStride = (nuint)vertexCount,
-                    IndexHandle = 0,
-                    Indices = indicesPtr + start,
-                    IndexCount = (nuint)count,
-                    VertexCount = (nuint)vertexCount,
-                };
-                Executor.setupShaderStage(_propertyConfig, packet, 2);
-                Executor.renderStage(_commandBuffer!, _sharedSnapshot, Textures, _partMaterial!, _propertyConfig, packet, false);
-            }
-        }
-
-        private int sharedVertexCountEstimate()
-        {
-            var fromSnapshot = Mathf.Min(_sharedSnapshot.VertexCount, Mathf.Min(_sharedSnapshot.UvCount, _sharedSnapshot.DeformCount));
-            if (fromSnapshot > 0)
-            {
-                return fromSnapshot;
-            }
-            var minLength = Mathf.Min(_sharedSnapshot.Vertices.Length, Mathf.Min(_sharedSnapshot.Uvs.Length, _sharedSnapshot.Deform.Length));
-            return Mathf.Max(0, minLength / 2);
-        }
-
-        private static NicxliveNative.Mat4 identityMat4()
-        {
-            return new NicxliveNative.Mat4
-            {
-                M11 = 1f,
-                M22 = 1f,
-                M33 = 1f,
-                M44 = 1f,
-            };
-        }
-
-        public void setSharedSnapshot(NicxliveNative.SharedBufferSnapshot snapshot)
-        {
-            _sharedSnapshot = SharedBufferUploader.CopyFromNative(snapshot);
-        }
-
-        public void renderCommands(NicxliveNative.SharedBufferSnapshot snapshot, NicxliveNative.CommandQueueView view, int width, int height)
-        {
-            _viewportWidth = Mathf.Max(1, width);
-            _viewportHeight = Mathf.Max(1, height);
-            setSharedSnapshot(snapshot);
-            var decoded = CommandStream.Decode(view);
-            ExecuteQueuedCommands(decoded);
-        }
-
-        public ulong createTextureHandle() => Textures.createTextureHandle();
-        public void destroyTextureHandle(ulong texture) => Textures.destroyTextureHandle(texture);
-        public void bindTextureHandle(ulong texture, uint unit) => Textures.bindTextureHandle(texture, (int)unit);
-        public void uploadTextureData(ulong texture, int width, int height, int channels, byte[] data) => Textures.uploadTextureData(texture, width, height, channels, data);
-        public void generateTextureMipmap(ulong texture) => Textures.generateTextureMipmap(texture);
-        public void applyTextureFiltering(ulong texture, Filtering filtering, bool useMipmaps = true) => Textures.applyTextureFiltering(texture, filtering, useMipmaps);
-        public void applyTextureWrapping(ulong texture, Wrapping wrapping) => Textures.applyTextureWrapping(texture, wrapping);
-        public void applyTextureAnisotropy(ulong texture, float value) => Textures.applyTextureAnisotropy(texture, value);
-        public byte[] readTextureData(ulong texture, int channels, bool stencil) => Textures.readTextureData(texture, channels, stencil);
-        public ulong textureNativeHandle(ulong texture) => Textures.textureNativeHandle(texture);
-
-        public GLShaderHandle createShader(string vertexSource, string fragmentSource)
-        {
-            var profile = AnalyzeShaderSource(vertexSource, fragmentSource);
-            var shader = profile.WantsMaskPath ? UrpShaderCatalog.RequireMaskShader() : UrpShaderCatalog.RequirePartShader();
-            var h = Textures.createShader(shader);
-            _shaderProfiles[h] = profile;
-            InitializeShaderFromProfile(h, profile);
-            return new GLShaderHandle { Handle = h };
-        }
-        public void useShader(GLShaderHandle shader) { _ = Textures.useShader(shader.Handle); }
-        public void destroyShader(GLShaderHandle shader)
-        {
-            _shaderProfiles.Remove(shader.Handle);
-            Textures.destroyShader(shader.Handle);
-        }
-        public int glGetUniformLocation(GLShaderHandle shader, string name) => Textures.getShaderUniformLocation(shader.Handle, name);
-        public int getUniformLocation(GLShaderHandle shader, string name) => glGetUniformLocation(shader, name);
-        public void setShaderUniform(GLShaderHandle shader, int location, bool value) => Textures.setShaderUniform(shader.Handle, location, value);
-        public void setShaderUniform(GLShaderHandle shader, int location, int value) => Textures.setShaderUniform(shader.Handle, location, value);
-        public void setShaderUniform(GLShaderHandle shader, int location, float value) => Textures.setShaderUniform(shader.Handle, location, value);
-        public void setShaderUniform(GLShaderHandle shader, int location, Vector2 value) => Textures.setShaderUniform(shader.Handle, location, value);
-        public void setShaderUniform(GLShaderHandle shader, int location, Vector3 value) => Textures.setShaderUniform(shader.Handle, location, value);
-        public void setShaderUniform(GLShaderHandle shader, int location, Vector4 value) => Textures.setShaderUniform(shader.Handle, location, value);
-        public void setShaderUniform(GLShaderHandle shader, int location, Matrix4x4 value) => Textures.setShaderUniform(shader.Handle, location, value);
-
-        private void EnsurePipelineObjects()
-        {
-            if (_boundCamera == null)
-            {
-                _boundCamera = Camera.main;
-            }
-            if (_commandBuffer == null)
-            {
-                _commandBuffer = new CommandBuffer { name = "nicxlive_compat_backend" };
-            }
-            if (_partMaterial == null)
-            {
-                _partMaterial = new Material(UrpShaderCatalog.RequirePartShader());
-            }
-            if (_maskMaterial == null)
-            {
-                _maskMaterial = new Material(UrpShaderCatalog.RequireMaskShader());
-            }
-            if (_attachedCamera != _boundCamera || _attachedCommandBuffer != _commandBuffer)
-            {
-                if (_attachedCamera != null && _attachedCommandBuffer != null)
-                {
-                    UrpCommandBufferRouter.Detach(_attachedCamera, _attachedCommandBuffer);
-                }
-                _attachedCamera = null;
-                _attachedCommandBuffer = null;
-            }
-            if (_boundCamera != null && _commandBuffer != null && _attachedCamera == null)
-            {
-                UrpCommandBufferRouter.Attach(_boundCamera, _commandBuffer);
-                _attachedCamera = _boundCamera;
-                _attachedCommandBuffer = _commandBuffer;
-            }
-        }
-
-        private void ExecuteQueuedCommands(List<DecodedCommand> commands)
-        {
-            EnsurePipelineObjects();
-            if (_boundCamera == null || _commandBuffer == null || _partMaterial == null || _maskMaterial == null)
-            {
-                return;
-            }
-            Executor.setViewport(_viewportWidth, _viewportHeight);
-            Executor.Execute(_commandBuffer, _boundCamera, commands, _sharedSnapshot, Textures, _partMaterial, _maskMaterial, _propertyConfig);
-        }
-
-        private bool EnsureRuntimeReady()
-        {
-            EnsurePipelineObjects();
-            return _commandBuffer != null && _boundCamera != null && _partMaterial != null && _maskMaterial != null;
-        }
-
-        private void EnsureBlendCapabilitiesInitialized()
-        {
-            if (_blendCapsInitialized)
-            {
-                return;
-            }
-            _blendCapsInitialized = true;
-            var deviceType = SystemInfo.graphicsDeviceType;
-            _supportsAdvancedBlend = deviceType != GraphicsDeviceType.Null;
-            _supportsAdvancedBlendCoherent = _supportsAdvancedBlend;
-            Executor.applyBlendingCapabilities(_supportsAdvancedBlend);
-            Executor.setAdvancedBlendCoherent(_supportsAdvancedBlendCoherent);
-        }
-
-        private ShaderSourceProfile AnalyzeShaderSource(string vertexSource, string fragmentSource)
-        {
-            var merged = $"{vertexSource}\n{fragmentSource}";
-            var lower = merged.ToLowerInvariant();
-            var profile = new ShaderSourceProfile
-            {
-                WantsMaskPath = lower.Contains("mask") || lower.Contains("stencil"),
-                WantsPresentPath = lower.Contains("present") || lower.Contains("colorkey"),
-                WantsColorKey = lower.Contains("colorkey"),
-            };
-
-            var uniformPattern = new System.Text.RegularExpressions.Regex(@"\buniform\s+\w+\s+([A-Za-z_]\w*)", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
-            foreach (System.Text.RegularExpressions.Match match in uniformPattern.Matches(merged))
-            {
-                if (!match.Success)
-                {
-                    continue;
-                }
-                var uniform = match.Groups[1].Value;
-                if (string.IsNullOrWhiteSpace(uniform))
-                {
-                    continue;
-                }
-                if (!profile.UniformNames.Contains(uniform))
-                {
-                    profile.UniformNames.Add(uniform);
-                }
-            }
-            return profile;
-        }
-
-        private void InitializeShaderFromProfile(ulong shaderHandle, ShaderSourceProfile profile)
-        {
-            var material = Textures.useShader(shaderHandle);
-            if (material == null)
-            {
-                return;
-            }
-            material.SetFloat("_MaskThreshold", profile.WantsMaskPath ? 0.5f : 0f);
-            material.SetFloat("_UseColorKey", profile.WantsColorKey ? 1f : 0f);
-            material.SetFloat("_LegacyBlendOnly", profile.WantsPresentPath ? 0f : 1f);
-
-            foreach (var uniformName in profile.UniformNames)
-            {
-                _ = Textures.getShaderUniformLocation(shaderHandle, uniformName);
-            }
-        }
-    }
-
-    public static class BackendRegistry
-    {
-        private static RenderingBackend? _cachedRenderBackend;
-        private static readonly Dictionary<int, int> _sdlGlAttributes = new Dictionary<int, int>();
-        private static readonly Dictionary<string, IntPtr> _loadedNativeLibraries = new Dictionary<string, IntPtr>(StringComparer.OrdinalIgnoreCase);
-        private static readonly Dictionary<int, string> _shaderInfoLogs = new Dictionary<int, string>();
-        private static readonly Dictionary<int, string> _programInfoLogs = new Dictionary<int, string>();
-        private static IntPtr _rootDescriptorTablePtr = IntPtr.Zero;
-
-        [StructLayout(LayoutKind.Sequential)]
-        private struct Win32Rect
-        {
-            public int Left;
-            public int Top;
-            public int Right;
-            public int Bottom;
-        }
-
-        private static class Win32
-        {
-            [DllImport("user32.dll", SetLastError = true)]
-            public static extern bool GetClientRect(IntPtr hWnd, out Win32Rect rect);
-
-            [DllImport("user32.dll")]
-            public static extern IntPtr GetActiveWindow();
-        }
-
-        private static class NativeLibraryCompat
-        {
-            private const int RTLD_NOW = 2;
-
-            [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
-            private static extern IntPtr LoadLibraryW(string fileName);
-
-            [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Ansi)]
-            private static extern IntPtr GetProcAddress(IntPtr module, string symbol);
-
-            [DllImport("libdl")]
-            private static extern IntPtr dlopen(string fileName, int flags);
-
-            [DllImport("libdl")]
-            private static extern IntPtr dlsym(IntPtr handle, string symbol);
-
-            public static bool TryLoad(string path, out IntPtr handle)
-            {
-                handle = IntPtr.Zero;
-                if (string.IsNullOrWhiteSpace(path))
-                {
-                    return false;
-                }
-
-                if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-                {
-                    handle = LoadLibraryW(path);
-                }
-                else
-                {
-                    handle = dlopen(path, RTLD_NOW);
-                }
-
-                return handle != IntPtr.Zero;
-            }
-
-            public static bool TryGetExport(IntPtr handle, string symbol, out IntPtr entry)
-            {
-                entry = IntPtr.Zero;
-                if (handle == IntPtr.Zero || string.IsNullOrWhiteSpace(symbol))
-                {
-                    return false;
-                }
-
-                if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-                {
-                    entry = GetProcAddress(handle, symbol);
-                }
-                else
-                {
-                    entry = dlsym(handle, symbol);
-                }
-
-                return entry != IntPtr.Zero;
-            }
-        }
-
-        public static void ensureRenderBackend() { _cachedRenderBackend ??= new RenderingBackend(); }
-        public static void inSetRenderBackend(RenderingBackend backend) { _cachedRenderBackend = backend; }
-        public static RenderingBackend? tryRenderBackend() { ensureRenderBackend(); return _cachedRenderBackend; }
-        public static void enforce(bool condition, string message)
-        {
-            if (!condition)
-            {
-                throw new InvalidOperationException(message);
-            }
-        }
-        public static RenderingBackend requireRenderBackend()
-        {
-            var backend = tryRenderBackend();
-            enforce(backend != null, "Render backend is required.");
-            return backend!;
-        }
-        public static RenderingBackend currentRenderBackend() => requireRenderBackend();
-        public static string sdlError(string message) => $"SDL error: {message}";
-        public static byte[] unPremultiplyRgba(byte[] rgba)
-        {
-            if (rgba == null || rgba.Length == 0)
-            {
-                return Array.Empty<byte>();
-            }
-            var outData = new byte[rgba.Length];
-            Array.Copy(rgba, outData, rgba.Length);
-            for (var i = 0; i + 3 < outData.Length; i += 4)
-            {
-                var a = outData[i + 3];
-                if (a == 0)
-                {
-                    outData[i] = 0;
-                    outData[i + 1] = 0;
-                    outData[i + 2] = 0;
-                    continue;
-                }
-                var scale = 255.0f / a;
-                outData[i] = (byte)Mathf.Clamp(Mathf.RoundToInt(outData[i] * scale), 0, 255);
-                outData[i + 1] = (byte)Mathf.Clamp(Mathf.RoundToInt(outData[i + 1] * scale), 0, 255);
-                outData[i + 2] = (byte)Mathf.Clamp(Mathf.RoundToInt(outData[i + 2] * scale), 0, 255);
-            }
-            return outData;
-        }
-        public static void glGetShaderiv(int shader)
-        {
-            if (shader <= 0)
-            {
-                return;
-            }
-            var backend = tryRenderBackend();
-            if (backend != null && !backend.Textures.hasShader((ulong)shader))
-            {
-                _shaderInfoLogs[shader] = $"shader handle not found: {shader}";
-            }
-            else
-            {
-                _shaderInfoLogs[shader] = string.Empty;
-            }
-        }
-        public static void glGetShaderInfoLog(int shader)
-        {
-            if (!_shaderInfoLogs.ContainsKey(shader))
-            {
-                glGetShaderiv(shader);
-            }
-        }
-        public static void checkShader(int shader)
-        {
-            glGetShaderiv(shader);
-            glGetShaderiv(shader);
-            glGetShaderInfoLog(shader);
-        }
-        public static void glDeleteShader(int shader)
-        {
-            if (shader <= 0)
-            {
-                return;
-            }
-            var backend = tryRenderBackend();
-            backend?.destroyShader(new GLShaderHandle { Handle = (ulong)shader });
-            _shaderInfoLogs.Remove(shader);
-        }
-        public static void glGetProgramiv(int program)
-        {
-            if (program <= 0)
-            {
-                return;
-            }
-            var backend = tryRenderBackend();
-            if (backend != null && !backend.Textures.hasShader((ulong)program))
-            {
-                _programInfoLogs[program] = $"program handle not found: {program}";
-            }
-            else
-            {
-                _programInfoLogs[program] = string.Empty;
-            }
-        }
-        public static void glGetProgramInfoLog(int program)
-        {
-            if (!_programInfoLogs.ContainsKey(program))
-            {
-                glGetProgramiv(program);
-            }
-        }
-        public static void checkProgram(int program)
-        {
-            glGetProgramiv(program);
-            glGetProgramiv(program);
-            glGetProgramInfoLog(program);
-        }
-        public static IntPtr dlopen(string path)
-        {
-            if (string.IsNullOrWhiteSpace(path))
-            {
-                return IntPtr.Zero;
-            }
-            if (_loadedNativeLibraries.TryGetValue(path, out var existing) && existing != IntPtr.Zero)
-            {
-                return existing;
-            }
-
-            foreach (var candidate in enumerateLibraryCandidates(path))
-            {
-                if (NativeLibraryCompat.TryLoad(candidate, out var handle))
-                {
-                    _loadedNativeLibraries[path] = handle;
-                    return handle;
-                }
-            }
-            return IntPtr.Zero;
-        }
-        public static IntPtr dlsym(IntPtr handle, string symbol)
-        {
-            if (handle == IntPtr.Zero || string.IsNullOrWhiteSpace(symbol))
-            {
-                return IntPtr.Zero;
-            }
-            return NativeLibraryCompat.TryGetExport(handle, symbol, out var entry) ? entry : IntPtr.Zero;
-        }
-        public static void configureMacOpenGLSurfaceOpacity(IntPtr glContext)
-        {
-            var h = dlopen("AppKit");
-            var opacitySelector = dlsym(h, "NSOpenGLCPSurfaceOpacity");
-            var setValuesSelector = dlsym(h, "setValues");
-            _ = (opacitySelector, setValuesSelector);
-            _ = glContext;
-        }
-        public static ShaderAsset shaderAsset(string vertexPath, string fragmentPath) => new ShaderAsset { Stage = new ShaderStageSource { Vertex = vertexPath, Fragment = fragmentPath } };
-        public static bool loadSDL() => true;
-        public static int SDL_Init() => 0;
-        public static int SDL_GL_SetAttribute(int key, int value)
-        {
-            _sdlGlAttributes[key] = value;
-            return 0;
-        }
-        public static OpenGLBackendInit initOpenGLBackend(int width, int height, bool isTest)
-        {
-            _ = isTest;
-            var loaded = loadSDL();
-            enforce(loaded, "loadSDL failed");
-            enforce(SDL_Init() == 0, sdlError("SDL_Init"));
-            _ = SDL_GL_SetAttribute(0, 0);
-            _ = SDL_GL_SetAttribute(1, 0);
-            inSetRenderBackend(new RenderingBackend());
-            currentRenderBackend().setViewport(width, height);
-            return new OpenGLBackendInit { Width = width, Height = height };
-        }
-        public static void renderCommands(OpenGLBackendInit gl, NicxliveNative.SharedBufferSnapshot snapshot, NicxliveNative.CommandQueueView view)
-        {
-            var backend = requireRenderBackend();
-            backend.renderCommands(snapshot, view, gl.Width, gl.Height);
-        }
-        public static OpenGLBackendInit OpenGLBackendInit(int width, int height, bool isTest) => initOpenGLBackend(width, height, isTest);
-
-        // DirectX compatibility surface
-        public static bool dxSucceeded(int hr) => hr >= 0;
-        public static bool dxFailed(int hr) => hr < 0;
-        public static bool isDxTraceEnabled() => false;
-        public static void dxTrace(string message)
-        {
-            if (!isDxTraceEnabled())
-            {
-                return;
-            }
-            Console.WriteLine(message);
-            Console.Out.Flush();
-        }
-        public static void enforceHr(int hr, string context)
-        {
-            enforce(dxSucceeded(hr), $"{context}: hr={hr}");
-        }
-        public static bool isDeviceLossHr(int hr) => hr == unchecked((int)0x887A0005) || hr == unchecked((int)0x887A0006);
-        public static ulong alignUp(ulong value, ulong alignment) => alignment == 0 ? value : ((value + alignment - 1) / alignment) * alignment;
-        public static int version() => 1;
-        public static DirectXBackendInit initDirectXBackend(int width, int height, bool isTest)
-        {
-            _ = isTest;
-            dxTrace("initDirectXBackend");
-            enforce(loadSDL(), "loadSDL failed");
-            _ = version();
-            enforce(SDL_Init() == 0, sdlError("SDL_Init"));
-            return new DirectXBackendInit { Width = width, Height = height };
-        }
-        public static DirectXBackendInit DirectXBackendInit(int width, int height, bool isTest) => initDirectXBackend(width, height, isTest);
-        public static void renderCommands(DirectXBackendInit dx, NicxliveNative.SharedBufferSnapshot snapshot, NicxliveNative.CommandQueueView view)
-        {
-            var backend = requireRenderBackend();
-            backend.renderCommands(snapshot, view, dx.Width, dx.Height);
-        }
-        public static void shutdownDirectXBackend(ref DirectXBackendInit dx)
-        {
-            _cachedRenderBackend = null;
-            dx = default;
-        }
-        public static string fromStringz(IntPtr ptr) => ptr == IntPtr.Zero ? string.Empty : Marshal.PtrToStringAnsi(ptr) ?? string.Empty;
-        public static (int width, int height) queryWindowPixelSize(IntPtr hwnd)
-        {
-            var defaultWidth = Mathf.Max(0, Screen.width);
-            var defaultHeight = Mathf.Max(0, Screen.height);
-            if (hwnd != IntPtr.Zero && tryGetWindowClientSize(hwnd, out var width, out var height))
-            {
-                return (Mathf.Max(0, width), Mathf.Max(0, height));
-            }
-            return (defaultWidth, defaultHeight);
-        }
-        public static void queryWindowPixelSize(IntPtr hwnd, out int width, out int height)
-        {
-            (width, height) = queryWindowPixelSize(hwnd);
-        }
-        public static string sdlError() => "sdl error";
-        public static IntPtr requireWindowHandle()
-        {
-            var hwnd = Process.GetCurrentProcess().MainWindowHandle;
-            if (hwnd != IntPtr.Zero)
-            {
-                return hwnd;
-            }
-            if (Application.platform == RuntimePlatform.WindowsEditor || Application.platform == RuntimePlatform.WindowsPlayer)
-            {
-                hwnd = Win32.GetActiveWindow();
-                if (hwnd != IntPtr.Zero)
-                {
-                    return hwnd;
-                }
-            }
-            return new IntPtr(1);
-        }
-        public static CompositeState defaultCompositeState() => new CompositeState { Valid = true };
-        public static Vector4 float4(float x, float y, float z, float w) => new Vector4(x, y, z, w);
-        public static Matrix4x4 mulMat4(Matrix4x4 a, Matrix4x4 b) => a * b;
-        public static Vector4 mulMat4Vec4(Matrix4x4 m, float x, float y, float z, float w) => m * new Vector4(x, y, z, w);
-        public static bool rangeInBounds(ulong offset, ulong count, ulong length) => offset <= length && count <= (length - offset);
-        public static Vector4 screenBlend(Vector4 src, Vector4 dst) => src + dst - Vector4.Scale(src, dst);
-        public static Vector4 sampleTex(Texture2D tex, Vector2 uv)
-        {
-            if (tex == null)
-            {
-                return Vector4.zero;
-            }
-            var u = Mathf.Repeat(uv.x, 1f);
-            var v = Mathf.Repeat(uv.y, 1f);
-            if (tex.isReadable)
-            {
-                var c = tex.GetPixelBilinear(u, v);
-                return new Vector4(c.r, c.g, c.b, c.a);
-            }
-
-            var prev = RenderTexture.active;
-            var tmp = RenderTexture.GetTemporary(Mathf.Max(1, tex.width), Mathf.Max(1, tex.height), 0, RenderTextureFormat.ARGB32);
-            try
-            {
-                Graphics.Blit(tex, tmp);
-                RenderTexture.active = tmp;
-                var pixelX = Mathf.Clamp(Mathf.RoundToInt(u * (tex.width - 1)), 0, Mathf.Max(0, tex.width - 1));
-                var pixelY = Mathf.Clamp(Mathf.RoundToInt(v * (tex.height - 1)), 0, Mathf.Max(0, tex.height - 1));
-                var read = new Texture2D(1, 1, TextureFormat.RGBA32, false, false);
-                try
-                {
-                    read.ReadPixels(new Rect(pixelX, pixelY, 1, 1), 0, 0, false);
-                    read.Apply(false, true);
-                    var c = read.GetPixel(0, 0);
-                    return new Vector4(c.r, c.g, c.b, c.a);
-                }
-                finally
-                {
-                    Nicxlive.UnityBackend.Managed.UnityObjectUtil.DestroyObject(read);
-                }
-            }
-            finally
-            {
-                RenderTexture.active = prev;
-                RenderTexture.ReleaseTemporary(tmp);
-            }
-        }
-        public static Vector4 psMain(Vector4 input) => input;
-        public static Vector4 vsMain(Vector4 input) => input;
-        public static int sanitizeBlendMode(int mode) => Mathf.Clamp(mode, 0, 18);
-        public static object buildBlendDesc(int mode) => sanitizeBlendMode(mode);
-        public static void setDirectXRuntimeOptions(DirectXRuntimeOptions opts)
-        {
-            if (opts.SkipDraw)
-            {
-                _sdlGlAttributes[-1] = 1;
-            }
-            if (opts.SkipPresent)
-            {
-                _sdlGlAttributes[-2] = 1;
-            }
-        }
-
-        public static IntPtr WinD3D12CreateDevice() => resolveD3D12Export("D3D12CreateDevice");
-        public static IntPtr WinD3D12GetDebugInterface() => resolveD3D12Export("D3D12GetDebugInterface");
-        public static IntPtr WinD3D12SerializeRootSignature()
-        {
-            var ptr = resolveD3D12Export("D3D12SerializeRootSignature");
-            if (ptr != IntPtr.Zero)
-            {
-                return ptr;
-            }
-            var compiler = dlopen("d3dcompiler_47");
-            return dlsym(compiler, "D3D12SerializeRootSignature");
-        }
-        public static IntPtr D3D12_ROOT_DESCRIPTOR_TABLE()
-        {
-            if (_rootDescriptorTablePtr == IntPtr.Zero)
-            {
-                _rootDescriptorTablePtr = Marshal.AllocHGlobal(IntPtr.Size * 2);
-                for (var i = 0; i < IntPtr.Size * 2; i++)
-                {
-                    Marshal.WriteByte(_rootDescriptorTablePtr, i, 0);
-                }
-            }
-            return _rootDescriptorTablePtr;
-        }
-
-        private static bool tryGetWindowClientSize(IntPtr hwnd, out int width, out int height)
-        {
-            width = 0;
-            height = 0;
-            if (hwnd == IntPtr.Zero)
-            {
-                return false;
-            }
-            if (Application.platform != RuntimePlatform.WindowsEditor && Application.platform != RuntimePlatform.WindowsPlayer)
-            {
-                return false;
-            }
-            if (!Win32.GetClientRect(hwnd, out var rect))
-            {
-                return false;
-            }
-            width = Math.Max(0, rect.Right - rect.Left);
-            height = Math.Max(0, rect.Bottom - rect.Top);
-            return true;
-        }
-
-        private static IEnumerable<string> enumerateLibraryCandidates(string path)
-        {
-            yield return path;
-            if (path.EndsWith(".dll", StringComparison.OrdinalIgnoreCase) ||
-                path.EndsWith(".so", StringComparison.OrdinalIgnoreCase) ||
-                path.EndsWith(".dylib", StringComparison.OrdinalIgnoreCase))
-            {
-                yield break;
-            }
-
-            if (Application.platform == RuntimePlatform.WindowsEditor || Application.platform == RuntimePlatform.WindowsPlayer)
-            {
-                yield return $"{path}.dll";
-            }
-            else if (Application.platform == RuntimePlatform.OSXEditor || Application.platform == RuntimePlatform.OSXPlayer)
-            {
-                yield return $"/System/Library/Frameworks/{path}.framework/{path}";
-                yield return $"lib{path}.dylib";
-            }
-            else
-            {
-                yield return $"lib{path}.so";
-            }
-        }
-
-        private static IntPtr resolveD3D12Export(string symbol)
-        {
-            var module = dlopen("d3d12");
-            return dlsym(module, symbol);
-        }
-    }
-
-    public sealed class DirectXRuntime
-    {
-        private readonly RenderingBackend _backend = BackendRegistry.requireRenderBackend();
-        private NicxliveNative.SharedBufferSnapshot _snapshot;
-        private NicxliveNative.CommandQueueView _pendingView;
-        private bool _hasPendingView;
-        private int _width = 1280;
-        private int _height = 720;
-        private bool _deviceResetRequested;
-        private readonly Dictionary<ulong, int> _resourceStates = new Dictionary<ulong, int>();
-        private readonly Dictionary<int, ulong> _srvBindings = new Dictionary<int, ulong>();
-        private readonly List<ulong> _swapChainTargets = new List<ulong>();
-        private bool _srvResourcesCreated;
-        private byte[] _stagingUpload = Array.Empty<byte>();
-        private bool _pipelineStateCreated;
-        private bool _initialized;
-        private IntPtr _swapChainWindow;
-        private ulong _uploadCapacity;
-        private int _frameIndex;
-
-        public bool consumeDeviceResetFlag()
-        {
-            var v = _deviceResetRequested;
-            _deviceResetRequested = false;
-            return v;
-        }
-
-        public void createDepthStencilTarget(int width, int height)
-        {
-            _width = Mathf.Max(1, width);
-            _height = Mathf.Max(1, height);
-            _backend.setViewport(_width, _height);
-        }
-
-        public void createPipelineState()
-        {
-            _backend.initializePartBackendResources();
-            _backend.initializeMaskBackend();
-            _pipelineStateCreated = true;
-        }
-        public void createRenderTargets(int width, int height)
-        {
-            releaseRenderTargets();
-            createDepthStencilTarget(width, height);
-            const int swapBuffers = 2;
-            for (var i = 0; i < swapBuffers; i++)
-            {
-                var handle = _backend.createTextureHandle();
-                _backend.uploadTextureData(handle, _width, _height, 4, new byte[_width * _height * 4]);
-                _swapChainTargets.Add(handle);
-                _resourceStates[handle] = 0;
-            }
-        }
-        public void createSrvResources()
-        {
-            _srvResourcesCreated = true;
-            _srvBindings.Clear();
-            _ = _backend.descriptorHeapCpuStart();
-            _ = _backend.descriptorHeapGpuStart();
-        }
-        public void createSwapChainAndTargets(IntPtr window, int width, int height)
-        {
-            _swapChainWindow = window;
-            _frameIndex = 0;
-            createDepthStencilTarget(width, height);
-            createRenderTargets(width, height);
-        }
-
-        public void ensureOffscreenDepthStencilTarget(int width, int height) => createDepthStencilTarget(width, height);
-        public void ensureTextureUploaded(ulong textureHandle)
-        {
-            if (textureHandle == 0)
-            {
-                return;
-            }
-            if (_backend.Textures.TryGet(textureHandle) == null)
-            {
-                _deviceResetRequested = true;
-                return;
-            }
-            if (!_resourceStates.ContainsKey(textureHandle))
-            {
-                _resourceStates[textureHandle] = 0;
-            }
-        }
-        public void ensureUploadBuffer(ulong byteSize)
-        {
-            if (byteSize == 0)
-            {
-                _stagingUpload = Array.Empty<byte>();
-                return;
-            }
-            var required = byteSize > int.MaxValue ? int.MaxValue : (int)byteSize;
-            if (_stagingUpload.Length < required)
-            {
-                Array.Resize(ref _stagingUpload, required);
-            }
-            _uploadCapacity = (ulong)_stagingUpload.Length;
-        }
-        public void initialize()
-        {
-            if (_initialized)
-            {
-                return;
-            }
-            _backend.initializeRenderer();
-            if (!_pipelineStateCreated)
-            {
-                createPipelineState();
-            }
-            if (_swapChainTargets.Count == 0)
-            {
-                createRenderTargets(_width, _height);
-            }
-            _initialized = true;
-        }
-        public void invalidateGpuObjects() => _deviceResetRequested = true;
-        public void recoverFromDeviceLoss() => _deviceResetRequested = true;
-        public void releaseDxResource()
-        {
-            _resourceStates.Clear();
-            _srvBindings.Clear();
-            _stagingUpload = Array.Empty<byte>();
-            _uploadCapacity = 0;
-        }
-        public void releaseRenderTargets()
-        {
-            foreach (var handle in _swapChainTargets)
-            {
-                _backend.destroyTextureHandle(handle);
-            }
-            _swapChainTargets.Clear();
-            _resourceStates.Clear();
-        }
-        public void resizeSwapChain(int width, int height)
-        {
-            releaseRenderTargets();
-            createDepthStencilTarget(width, height);
-        }
-        public void transitionResource(ulong handle, int oldState, int newState)
-        {
-            if (handle == 0)
-            {
-                return;
-            }
-            if (_resourceStates.TryGetValue(handle, out var current) && current != oldState)
-            {
-                _deviceResetRequested = true;
-            }
-            _resourceStates[handle] = newState;
-        }
-        public void transitionTextureState(ulong handle, int oldState, int newState) => transitionResource(handle, oldState, newState);
-        public void updateHeapSrvTexture2D(int index, ulong textureHandle)
-        {
-            if (!_srvResourcesCreated)
-            {
-                createSrvResources();
-            }
-            _srvBindings[index] = textureHandle;
-            _resourceStates[textureHandle] = _resourceStates.TryGetValue(textureHandle, out var state) ? state : 0;
-        }
-        public void uploadData(IntPtr dst, byte[] src)
-        {
-            var len = (ulong)(src?.Length ?? 0);
-            ensureUploadBuffer(len);
-            if (src == null || src.Length == 0)
-            {
-                _stagingUpload = Array.Empty<byte>();
-                return;
-            }
-            _stagingUpload = (byte[])src.Clone();
-            if (dst != IntPtr.Zero)
-            {
-                Marshal.Copy(src, 0, dst, src.Length);
-            }
-        }
-        public void uploadGeometry(List<Vertex> vertices, List<ushort> indices)
-        {
-            if (indices == null || indices.Count == 0)
-            {
-                return;
-            }
-            var arr = new ushort[indices.Count];
-            indices.CopyTo(arr);
-            _backend.getOrCreateIbo(arr);
-            var vertexBytes = packVertices(vertices);
-            var indexBytes = new byte[arr.Length * sizeof(ushort)];
-            Buffer.BlockCopy(arr, 0, indexBytes, 0, indexBytes.Length);
-            var combined = new byte[vertexBytes.Length + indexBytes.Length];
-            Buffer.BlockCopy(vertexBytes, 0, combined, 0, vertexBytes.Length);
-            Buffer.BlockCopy(indexBytes, 0, combined, vertexBytes.Length, indexBytes.Length);
-            uploadData(IntPtr.Zero, combined);
-        }
-
-        public void waitForGpu()
-        {
-            System.Threading.Thread.MemoryBarrier();
-        }
-
-        public void beginFrame(int width, int height)
-        {
-            initialize();
-            _width = Mathf.Max(1, width);
-            _height = Mathf.Max(1, height);
-            if (_swapChainTargets.Count == 0)
-            {
-                createRenderTargets(_width, _height);
-            }
-            if (BackendRegistry.isDxTraceEnabled())
-            {
-                BackendRegistry.dxTrace("beginFrame");
-            }
-            if (!_hasPendingView)
-            {
-                shutdown();
-                initialize();
-            }
-        }
-
-        public void dispose()
-        {
-            invalidateGpuObjects();
-            shutdown();
-        }
-
-        public void shutdown()
-        {
-            _hasPendingView = false;
-            _pendingView = default;
-            _snapshot = default;
-            _srvBindings.Clear();
-            releaseRenderTargets();
-            _initialized = false;
-            _frameIndex = 0;
-        }
-
-        public void endFrame()
-        {
-            if (!_hasPendingView)
-            {
-                _frameIndex = (_frameIndex + 1) % Math.Max(1, _swapChainTargets.Count == 0 ? 1 : _swapChainTargets.Count);
-                return;
-            }
-            _backend.renderCommands(_snapshot, _pendingView, _width, _height);
-            _hasPendingView = false;
-            _frameIndex = (_frameIndex + 1) % Math.Max(1, _swapChainTargets.Count == 0 ? 1 : _swapChainTargets.Count);
-        }
-
-        public void setSharedSnapshot(NicxliveNative.SharedBufferSnapshot snapshot)
-        {
-            _snapshot = snapshot;
-            _backend.setSharedSnapshot(snapshot);
-        }
-
-        public void setPendingCommands(NicxliveNative.CommandQueueView view)
-        {
-            _pendingView = view;
-            _hasPendingView = true;
-        }
-
-        private static byte[] packVertices(List<Vertex> vertices)
-        {
-            if (vertices == null || vertices.Count == 0)
-            {
-                return Array.Empty<byte>();
-            }
-            var packed = new byte[vertices.Count * sizeof(float) * 4];
-            var offset = 0;
-            for (var i = 0; i < vertices.Count; i++)
-            {
-                writeFloat(packed, ref offset, vertices[i].X);
-                writeFloat(packed, ref offset, vertices[i].Y);
-                writeFloat(packed, ref offset, vertices[i].U);
-                writeFloat(packed, ref offset, vertices[i].V);
-            }
-            return packed;
-        }
-
-        private static void writeFloat(byte[] dst, ref int offset, float value)
-        {
-            var bytes = BitConverter.GetBytes(value);
-            Buffer.BlockCopy(bytes, 0, dst, offset, bytes.Length);
-            offset += bytes.Length;
-        }
-    }
 }
-
-
-
 namespace Nicxlive.UnityBackend.Managed
 {
     public sealed class NicxliveRenderer : IDisposable
@@ -3197,7 +1231,6 @@ namespace Nicxlive.UnityBackend.Managed
         private Material? _sceneDebugMaterial;
         private Material? _sceneDebugMaskMaterial;
         private Mesh? _presentMesh;
-        private Mesh? _debugOverlayMesh;
         private CommandBuffer? _sceneDebugReplayBuffer;
         private int _presentProgramHandle;
         private int _viewportW = 1280;
@@ -3343,7 +1376,6 @@ namespace Nicxlive.UnityBackend.Managed
         public string LastRootSceneDiag { get; private set; } = string.Empty;
         public ulong LastSceneDebugSignature { get; private set; }
         public bool EnableDiagnostics { get; set; }
-        public bool EnableRuntimeSceneDebugCapture { get; set; }
         public RenderTexture? RootSceneTexture => _rootSceneTexture;
 
         public CommandExecutor()
@@ -4145,10 +2177,11 @@ namespace Nicxlive.UnityBackend.Managed
                 camera.targetTexture == null;
 #if UNITY_EDITOR
             _queueSceneDebugDraws =
-                (!Application.isPlaying && UnityEditor.SceneView.lastActiveSceneView != null) ||
-                (Application.isPlaying && EnableRuntimeSceneDebugCapture && camera.cameraType == CameraType.Game);
+                !Application.isPlaying &&
+                EnableDiagnostics &&
+                UnityEditor.SceneView.lastActiveSceneView != null;
 #else
-            _queueSceneDebugDraws = Application.isPlaying && EnableRuntimeSceneDebugCapture && camera.cameraType == CameraType.Game;
+            _queueSceneDebugDraws = false;
 #endif
             _sceneDebugSignature = 1469598103934665603UL;
             ClearSceneDebugDraws();
@@ -4248,10 +2281,6 @@ namespace Nicxlive.UnityBackend.Managed
             if (!skipPresentToBackbuffer)
             {
                 presentSceneToBackbuffer(buffer, camera.pixelWidth, camera.pixelHeight);
-            }
-            if (_disableStencilDebug && LastPartDrawIssuedCount > 0)
-            {
-                drawDebugOverlay(buffer, partMaterial, propertyConfig);
             }
             _renderTargetStack.Clear();
             _renderTargetStack.Push(_backbufferTarget);
@@ -4604,111 +2633,6 @@ namespace Nicxlive.UnityBackend.Managed
             mesh.SetIndices(new[] { 0, 1, 2 }, MeshTopology.Triangles, 0, false);
             return mesh;
         }
-
-        private Mesh buildDebugOverlayMesh()
-        {
-            var mesh = new Mesh
-            {
-                name = "nicxlive_debug_overlay_triangle"
-            };
-            mesh.SetVertices(new[]
-            {
-                new Vector3(-1.0f, 1.0f, 0f),
-                new Vector3(-0.75f, 1.0f, 0f),
-                new Vector3(-1.0f, 0.75f, 0f),
-            });
-            mesh.SetUVs(0, new[]
-            {
-                new Vector2(0f, 0f),
-                new Vector2(1f, 0f),
-                new Vector2(0f, 1f),
-            });
-            mesh.SetIndices(new[] { 0, 1, 2 }, MeshTopology.Triangles, 0, false);
-            return mesh;
-        }
-
-        private void drawDebugOverlay(CommandBuffer buffer, Material partMaterial, PropertyConfig cfg)
-        {
-            if (buffer == null || partMaterial == null)
-            {
-                return;
-            }
-
-            _debugOverlayMesh ??= buildDebugOverlayMesh();
-            _props.Clear();
-            _props.SetTexture(cfg.MainTex, Texture2D.whiteTexture);
-            _props.SetTexture("_BaseMap", Texture2D.whiteTexture);
-            _props.SetTexture(cfg.EmissiveTex, Texture2D.blackTexture);
-            _props.SetTexture(cfg.BumpTex, Texture2D.blackTexture);
-            _props.SetFloat(cfg.Opacity, 1.0f);
-            _props.SetFloat(cfg.EmissionStrength, 0.0f);
-            _props.SetFloat(cfg.MaskThreshold, 0.0f);
-            _props.SetFloat(cfg.BlendMode, 0.0f);
-            _props.SetVector(cfg.MultColor, new Vector4(1f, 0f, 0f, 1f));
-            _props.SetVector(cfg.ScreenColor, Vector4.zero);
-            _props.SetFloat(cfg.StencilRef, 1.0f);
-            _props.SetFloat(cfg.StencilComp, (float)CompareFunction.Always);
-            _props.SetFloat(cfg.StencilPass, (float)StencilOp.Keep);
-            _props.SetFloat(cfg.ColorMask, 15.0f);
-            _props.SetFloat(cfg.IsMaskPass, 0.0f);
-            _props.SetFloat(cfg.LegacyBlendOnly, 1.0f);
-            _props.SetFloat(cfg.AdvancedBlend, 0.0f);
-            _props.SetFloat("_DebugForceOpaque", 1.0f);
-            buffer.DrawMesh(_debugOverlayMesh, Matrix4x4.identity, partMaterial, 0, 0, _props);
-        }
-
-        private void drawRuntimeDebugOverlay(CommandBuffer buffer)
-        {
-            if (buffer == null || _sceneDebugDraws.Count == 0)
-            {
-                return;
-            }
-
-            EnsureSceneDebugMaterial();
-            if (_sceneDebugMaterial == null)
-            {
-                return;
-            }
-
-            void drawTo(RenderTargetIdentifier target)
-            {
-                buffer.SetRenderTarget(target);
-                for (var i = 0; i < _sceneDebugDraws.Count; i++)
-                {
-                    var draw = _sceneDebugDraws[i];
-                    var clipMesh = draw.ClipMesh;
-                    if (clipMesh == null || clipMesh.vertexCount == 0)
-                    {
-                        continue;
-                    }
-
-                    _props.Clear();
-                    _props.SetTexture("_MainTex", draw.MainTexture != null ? draw.MainTexture : _whiteTexture);
-                    _props.SetTexture("_BaseMap", draw.MainTexture != null ? draw.MainTexture : _whiteTexture);
-                    _props.SetTexture("_EmissionTex", draw.EmissionTexture != null ? draw.EmissionTexture : Texture2D.blackTexture);
-                    _props.SetFloat("_Opacity", Mathf.Clamp01(draw.Opacity));
-                    _props.SetFloat("_EmissionStrength", Mathf.Max(0f, draw.EmissionStrength));
-                    _props.SetVector("_MultColor", draw.MultColor);
-                    _props.SetVector("_ScreenColor", draw.ScreenColor);
-                    _props.SetFloat("_StencilRef", 1.0f);
-                    _props.SetFloat("_StencilComp", (float)CompareFunction.Always);
-                    _props.SetFloat("_StencilPass", (float)StencilOp.Keep);
-                    _props.SetFloat("_ColorMask", 15.0f);
-                    _props.SetFloat("_DebugForceOpaque", 0.0f);
-                    _props.SetFloat("_DebugFlipY", 1.0f);
-                    _props.SetFloat("_DebugFlipV", 0.0f);
-                    _props.SetFloat("_DebugShowAlbedo", 1.0f);
-                    buffer.DrawMesh(clipMesh, Matrix4x4.identity, _sceneDebugMaterial, 0, 0, _props);
-                }
-            }
-
-            drawTo(_backbufferTarget);
-            if (_mirrorPresentToCurrentActive)
-            {
-                drawTo(new RenderTargetIdentifier(BuiltinRenderTextureType.CurrentActive));
-            }
-        }
-
         private void QueueSceneDebugDraw(
             Mesh mesh,
             Material partMaterial,
@@ -6156,8 +4080,8 @@ namespace Nicxlive.UnityBackend.Managed
 
         private void applyCompositeTransform(ref float x, ref float y)
         {
-            // GL/DX backends rely on matrix data emitted in the command stream.
-            // Applying dynamic composite transform again here shrinks/offsets output.
+            // Matrix data is already emitted in the command stream.
+            // Reapplying the dynamic composite transform here shrinks/offsets output.
             _ = x;
             _ = y;
             return;
@@ -6179,7 +4103,6 @@ namespace Nicxlive.UnityBackend.Managed
         public Vector2 ModelOffsetPixels = Vector2.zero;
         public bool DrawInEditMode = true;
         public bool EnableManagedDebugDiagnostics;
-        public bool ShowRuntimeDebugOverlayComparison;
         public Camera? TargetCamera;
         public Material? PartMaterial;
         public Material? MaskMaterial;
@@ -6240,7 +4163,6 @@ namespace Nicxlive.UnityBackend.Managed
 #endif
         private Vector2 _desiredPuppetTranslation = Vector2.zero;
         private Vector2 _desiredPuppetScale = Vector2.one;
-        private RenderTexture? _runtimeGameOverlayTexture;
         private RenderTexture? _sceneViewOverlayTexture;
 
         public IReadOnlyList<PuppetParameterState> ParameterStates => _parameterStates;
@@ -6252,8 +4174,8 @@ namespace Nicxlive.UnityBackend.Managed
             UnityEditor.SceneView.duringSceneGui -= OnSceneViewDuringGui;
             UnityEditor.SceneView.duringSceneGui += OnSceneViewDuringGui;
 #endif
-            RenderPipelineManager.endCameraRendering -= OnEndCameraRenderingRuntimeOverlay;
-            RenderPipelineManager.endCameraRendering += OnEndCameraRenderingRuntimeOverlay;
+            RenderPipelineManager.endCameraRendering -= OnEndCameraRenderingDiagnostics;
+            RenderPipelineManager.endCameraRendering += OnEndCameraRenderingDiagnostics;
             TryEnsureRuntime();
             TryReloadPuppet(false);
         }
@@ -6292,7 +4214,7 @@ namespace Nicxlive.UnityBackend.Managed
             }
             LastResolvedCameraName = camera.name;
             EnsureAttachedCamera(camera);
-            EnsureRuntimeOverlayAfterRouter();
+            EnsureDiagnosticsHook();
 
             TryReloadPuppet(false);
             if (_renderer.HasPuppet)
@@ -6330,7 +4252,6 @@ namespace Nicxlive.UnityBackend.Managed
                 _emptyCommandLogCooldown = 0;
             }
             _executor.EnableDiagnostics = EnableManagedDebugDiagnostics;
-            _executor.EnableRuntimeSceneDebugCapture = ShowRuntimeDebugOverlayComparison;
             _executor.ConfigureInjectedPuppetTransform(
                 decoded,
                 shared,
@@ -6384,7 +4305,7 @@ namespace Nicxlive.UnityBackend.Managed
             if (EnableManagedDebugDiagnostics)
             {
                 LastRenderPathDiag =
-                    $"{LastRenderPathDiag}, GameGuiOverlay={(_runtimeGameOverlayTexture != null ? 1 : 0)}, GameGuiOverlayEnabled={(ShowRuntimeDebugOverlayComparison ? 1 : 0)}, RootSceneTexture={((_executor?.RootSceneTexture) != null ? 1 : 0)}";
+                    $"{LastRenderPathDiag}, RootSceneTexture={((_executor?.RootSceneTexture) != null ? 1 : 0)}";
                 UpdateVisibilityDiagnostics(camera);
                 LastFrameDiag = $"Obj={name}#{GetInstanceID()} Frame={Time.frameCount} Cmds={decoded.Count} PartDraws={LastPartDrawIssuedCount} MaskDraws={LastMaskDrawIssuedCount}";
             }
@@ -6753,56 +4674,6 @@ namespace Nicxlive.UnityBackend.Managed
             return null;
         }
 
-        private void EnsureRuntimeGameOverlayTexture(int width, int height)
-        {
-            width = Mathf.Max(1, width);
-            height = Mathf.Max(1, height);
-            if (_runtimeGameOverlayTexture != null &&
-                _runtimeGameOverlayTexture.width == width &&
-                _runtimeGameOverlayTexture.height == height)
-            {
-                if (!_runtimeGameOverlayTexture.IsCreated())
-                {
-                    _runtimeGameOverlayTexture.Create();
-                }
-                return;
-            }
-
-            ReleaseRuntimeGameOverlayTexture();
-            var desc = new RenderTextureDescriptor(width, height, RenderTextureFormat.ARGB32, 0)
-            {
-                msaaSamples = 1,
-                useMipMap = false,
-                autoGenerateMips = false,
-                sRGB = false
-            };
-            _runtimeGameOverlayTexture = new RenderTexture(desc)
-            {
-                name = "nicxlive_game_overlay_rt",
-                useMipMap = false,
-                autoGenerateMips = false,
-                filterMode = FilterMode.Bilinear,
-                wrapMode = TextureWrapMode.Clamp,
-                hideFlags = HideFlags.HideAndDontSave
-            };
-            _runtimeGameOverlayTexture.Create();
-        }
-
-        private void ReleaseRuntimeGameOverlayTexture()
-        {
-            if (_runtimeGameOverlayTexture == null)
-            {
-                return;
-            }
-
-            if (_runtimeGameOverlayTexture.IsCreated())
-            {
-                _runtimeGameOverlayTexture.Release();
-            }
-            UnityObjectUtil.DestroyObject(_runtimeGameOverlayTexture);
-            _runtimeGameOverlayTexture = null;
-        }
-
         private void EnsureSceneViewOverlayTexture(int width, int height)
         {
             width = Mathf.Max(1, width);
@@ -6853,7 +4724,7 @@ namespace Nicxlive.UnityBackend.Managed
             _sceneViewOverlayTexture = null;
         }
 
-        private void OnEndCameraRenderingRuntimeOverlay(ScriptableRenderContext context, Camera camera)
+        private void OnEndCameraRenderingDiagnostics(ScriptableRenderContext context, Camera camera)
         {
             _ = context;
             if (!Application.isPlaying || _executor == null || camera == null || camera.cameraType != CameraType.Game)
@@ -6879,46 +4750,6 @@ namespace Nicxlive.UnityBackend.Managed
             _executor.UpdateRootSceneDiag(LastPartClipBounds, HasPartClipBounds);
             LastRootSceneDiag = _executor.LastRootSceneDiag;
             LastRootFallbackApplied = false;
-        }
-
-        private void OnGUI()
-        {
-            if (!Application.isPlaying ||
-                Event.current == null ||
-                Event.current.type != EventType.Repaint)
-            {
-                return;
-            }
-
-            var camera = ResolveCamera();
-            if (ShowRuntimeDebugOverlayComparison && camera != null)
-            {
-                EnsureRuntimeGameOverlayTexture(camera.pixelWidth, camera.pixelHeight);
-            }
-            else
-            {
-                ReleaseRuntimeGameOverlayTexture();
-            }
-
-            if (ShowRuntimeDebugOverlayComparison && _runtimeGameOverlayTexture != null && _executor != null)
-            {
-                _executor.RenderSceneDebugToTarget(_runtimeGameOverlayTexture);
-            }
-
-            Texture? overlayTexture = ShowRuntimeDebugOverlayComparison ? _runtimeGameOverlayTexture : null;
-
-            if (overlayTexture == null)
-            {
-                return;
-            }
-            var insetWidth = Mathf.Max(256f, Screen.width * 0.28f);
-            var insetHeight = Mathf.Max(144f, Screen.height * 0.28f);
-            var insetRect = new Rect(
-                Screen.width - insetWidth - 16f,
-                16f,
-                insetWidth,
-                insetHeight);
-            GUI.DrawTexture(insetRect, overlayTexture, ScaleMode.ScaleToFit, true);
         }
 
 #if UNITY_EDITOR
@@ -7028,7 +4859,6 @@ namespace Nicxlive.UnityBackend.Managed
             var decoded = CommandStream.Decode(view);
 
             _executor.EnableDiagnostics = EnableManagedDebugDiagnostics;
-            _executor.EnableRuntimeSceneDebugCapture = false;
             _executor.ConfigureInjectedPuppetTransform(
                 decoded,
                 shared,
@@ -7055,28 +4885,6 @@ namespace Nicxlive.UnityBackend.Managed
             return _executor.RootSceneTexture != null && _executor.RootSceneTexture.IsCreated();
         }
 #endif
-
-        private void OnRenderObject()
-        {
-            if (!Application.isPlaying || _executor == null || !ShowRuntimeDebugOverlayComparison)
-            {
-                return;
-            }
-
-            var current = Camera.current;
-            if (current == null || current.cameraType != CameraType.Game)
-            {
-                return;
-            }
-
-            var resolved = ResolveCamera();
-            if (resolved == null || current != resolved)
-            {
-                return;
-            }
-
-            _executor.RenderSceneDebug(current);
-        }
 
         private void EnsureAttachedCamera(Camera? camera)
         {
@@ -7106,10 +4914,10 @@ namespace Nicxlive.UnityBackend.Managed
             _attachedCamera = camera;
         }
 
-        private void EnsureRuntimeOverlayAfterRouter()
+        private void EnsureDiagnosticsHook()
         {
-            RenderPipelineManager.endCameraRendering -= OnEndCameraRenderingRuntimeOverlay;
-            RenderPipelineManager.endCameraRendering += OnEndCameraRenderingRuntimeOverlay;
+            RenderPipelineManager.endCameraRendering -= OnEndCameraRenderingDiagnostics;
+            RenderPipelineManager.endCameraRendering += OnEndCameraRenderingDiagnostics;
         }
 
         private void ResetRuntimeForPuppetReload()
@@ -7134,7 +4942,6 @@ namespace Nicxlive.UnityBackend.Managed
             _textureRegistry?.Dispose();
             _textureRegistry = null;
 
-            ReleaseRuntimeGameOverlayTexture();
             ReleaseSceneViewOverlayTexture();
 
             _loadedPuppetPath = string.Empty;
@@ -7383,10 +5190,7 @@ namespace Nicxlive.UnityBackend.Managed
 
             if (Application.isPlaying)
             {
-                _executor.CommitSceneDebugDraws(
-                    ShowRuntimeDebugOverlayComparison &&
-                    decodedCount > 0 &&
-                    LastPartDrawIssuedCount > 0);
+                _executor.CommitSceneDebugDraws(false);
                 return;
             }
 
@@ -7413,7 +5217,7 @@ namespace Nicxlive.UnityBackend.Managed
 #if UNITY_EDITOR
             UnityEditor.SceneView.duringSceneGui -= OnSceneViewDuringGui;
 #endif
-            RenderPipelineManager.endCameraRendering -= OnEndCameraRenderingRuntimeOverlay;
+            RenderPipelineManager.endCameraRendering -= OnEndCameraRenderingDiagnostics;
             if (_attachedCamera != null && _commandBuffer != null)
             {
                 Nicxlive.UnityBackend.Compat.UrpCommandBufferRouter.Detach(_attachedCamera, _commandBuffer);
@@ -7431,7 +5235,6 @@ namespace Nicxlive.UnityBackend.Managed
             _executor = null;
             _textureRegistry?.Dispose();
             _textureRegistry = null;
-            ReleaseRuntimeGameOverlayTexture();
             ReleaseSceneViewOverlayTexture();
             _loadedPuppetPath = string.Empty;
             if (_autoPartMaterial != null)
@@ -7484,13 +5287,14 @@ namespace Nicxlive.UnityBackend.Managed
             _desiredPuppetScale = Vector2.one;
             LastRenderPathDiag = string.Empty;
             LastRouterDiag = string.Empty;
-            ReleaseRuntimeGameOverlayTexture();
 #if UNITY_EDITOR
             _lastEditorFrameTime = -1.0;
 #endif
         }
     }
 }
+
+
 
 
 

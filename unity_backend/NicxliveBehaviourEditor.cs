@@ -17,7 +17,6 @@ namespace Nicxlive.UnityBackend.Editor
         private SerializedProperty? _modelOffsetPixels;
         private SerializedProperty? _drawInEditMode;
         private SerializedProperty? _enableManagedDebugDiagnostics;
-        private SerializedProperty? _showRuntimeDebugOverlayComparison;
         private SerializedProperty? _targetCamera;
         private SerializedProperty? _partMaterial;
         private SerializedProperty? _maskMaterial;
@@ -31,7 +30,6 @@ namespace Nicxlive.UnityBackend.Editor
             _modelOffsetPixels = serializedObject.FindProperty(nameof(NicxliveBehaviour.ModelOffsetPixels));
             _drawInEditMode = serializedObject.FindProperty(nameof(NicxliveBehaviour.DrawInEditMode));
             _enableManagedDebugDiagnostics = serializedObject.FindProperty(nameof(NicxliveBehaviour.EnableManagedDebugDiagnostics));
-            _showRuntimeDebugOverlayComparison = serializedObject.FindProperty(nameof(NicxliveBehaviour.ShowRuntimeDebugOverlayComparison));
             _targetCamera = serializedObject.FindProperty(nameof(NicxliveBehaviour.TargetCamera));
             _partMaterial = serializedObject.FindProperty(nameof(NicxliveBehaviour.PartMaterial));
             _maskMaterial = serializedObject.FindProperty(nameof(NicxliveBehaviour.MaskMaterial));
@@ -102,10 +100,6 @@ namespace Nicxlive.UnityBackend.Editor
             {
                 EditorGUILayout.PropertyField(_targetCamera);
             }
-            if (_showRuntimeDebugOverlayComparison != null)
-            {
-                EditorGUILayout.PropertyField(_showRuntimeDebugOverlayComparison);
-            }
             if (_partMaterial != null)
             {
                 EditorGUILayout.PropertyField(_partMaterial);
@@ -122,77 +116,80 @@ namespace Nicxlive.UnityBackend.Editor
             serializedObject.ApplyModifiedProperties();
 
             var behaviour = (NicxliveBehaviour)target;
-            EditorGUILayout.Space();
-            EditorGUILayout.LabelField("Runtime Controls", EditorStyles.boldLabel);
-            if (!string.IsNullOrWhiteSpace(behaviour.LastRouterDiag))
+            if (behaviour.EnableManagedDebugDiagnostics)
             {
-                EditorGUILayout.HelpBox(behaviour.LastRouterDiag, MessageType.None);
-            }
-            if (!string.IsNullOrWhiteSpace(behaviour.LastRootSceneDiag))
-            {
-                EditorGUILayout.HelpBox(behaviour.LastRootSceneDiag, MessageType.None);
-            }
-            EditorGUILayout.LabelField("Has Loaded Puppet", behaviour.HasLoadedPuppet ? "Yes" : "No");
-            EditorGUILayout.LabelField("Decoded Commands", behaviour.LastDecodedCommandCount.ToString());
-            EditorGUILayout.LabelField("Shared Vertices", behaviour.LastSharedVertexCount.ToString());
-            EditorGUILayout.LabelField("Part Packets", behaviour.LastPartPacketCount.ToString());
-            EditorGUILayout.LabelField("Part Draw Issued", behaviour.LastPartDrawIssuedCount.ToString());
-            EditorGUILayout.LabelField("Part Skip NoTexture", behaviour.LastPartSkippedNoTextureCount.ToString());
-            EditorGUILayout.LabelField("Part Skip MeshBuild", behaviour.LastPartSkippedMeshBuildCount.ToString());
-            EditorGUILayout.LabelField("Part Opacity Min/Max", $"{behaviour.LastPartOpacityMin:F3} / {behaviour.LastPartOpacityMax:F3}");
-            EditorGUILayout.LabelField("Part Opacity Zero/NonZero", $"{behaviour.LastPartOpacityZeroCount} / {behaviour.LastPartOpacityNonZeroCount}");
-            EditorGUILayout.LabelField("Part Tex0 Missing", behaviour.LastPartTextureMissingCount.ToString());
-            EditorGUILayout.LabelField("Mask Packets", behaviour.LastMaskPacketCount.ToString());
-            EditorGUILayout.LabelField("Mask Draw Issued", behaviour.LastMaskDrawIssuedCount.ToString());
-            EditorGUILayout.LabelField("Mask Skip MeshBuild", behaviour.LastMaskSkippedMeshBuildCount.ToString());
-            EditorGUILayout.LabelField(
-                "Part Clip Bounds",
-                behaviour.HasPartClipBounds ? FormatBounds(behaviour.LastPartClipBounds) : "N/A");
-            EditorGUILayout.LabelField(
-                "Mask Clip Bounds",
-                behaviour.HasMaskClipBounds ? FormatBounds(behaviour.LastMaskClipBounds) : "N/A");
-            EditorGUILayout.LabelField("Resolved Camera", string.IsNullOrWhiteSpace(behaviour.LastResolvedCameraName) ? "N/A" : behaviour.LastResolvedCameraName);
-            EditorGUILayout.LabelField("Translation Mode", string.IsNullOrWhiteSpace(behaviour.LastTranslationMode) ? "N/A" : behaviour.LastTranslationMode);
-            EditorGUILayout.LabelField(
-                "Screen Point",
-                $"({behaviour.LastScreenPoint.x:F1}, {behaviour.LastScreenPoint.y:F1}, {behaviour.LastScreenPoint.z:F1})");
-            EditorGUILayout.LabelField(
-                "Applied Translation",
-                $"({behaviour.LastAppliedTranslation.x:F1}, {behaviour.LastAppliedTranslation.y:F1})");
-            EditorGUILayout.LabelField(
-                "Applied Scale",
-                $"({behaviour.LastAppliedScale.x:F3}, {behaviour.LastAppliedScale.y:F3})");
-            if (!string.IsNullOrWhiteSpace(behaviour.LastVisibilityDiag))
-            {
-                EditorGUILayout.HelpBox(behaviour.LastVisibilityDiag, MessageType.None);
-            }
-            if (!string.IsNullOrWhiteSpace(behaviour.LastPartBuildDiag))
-            {
-                EditorGUILayout.HelpBox(behaviour.LastPartBuildDiag, MessageType.Warning);
-            }
-            if (!string.IsNullOrWhiteSpace(behaviour.LastFrameDiag))
-            {
-                EditorGUILayout.HelpBox(behaviour.LastFrameDiag, MessageType.None);
-            }
-            if (!string.IsNullOrWhiteSpace(behaviour.LastClipFitDiag))
-            {
-                EditorGUILayout.HelpBox(behaviour.LastClipFitDiag, MessageType.None);
-            }
-            if (!string.IsNullOrWhiteSpace(behaviour.LastRenderPathDiag))
-            {
-                EditorGUILayout.HelpBox(behaviour.LastRenderPathDiag, MessageType.None);
-            }
-            if (GUILayout.Button("Reload Puppet"))
-            {
-                behaviour.ReloadPuppetFromCurrentSelection();
-            }
-            if (GUILayout.Button("Refresh Parameters"))
-            {
-                behaviour.RefreshParameters();
-            }
-            if (GUILayout.Button("Apply Transform To Puppet"))
-            {
-                behaviour.ApplyTransformNow();
+                EditorGUILayout.Space();
+                EditorGUILayout.LabelField("Runtime Controls", EditorStyles.boldLabel);
+                if (!string.IsNullOrWhiteSpace(behaviour.LastRouterDiag))
+                {
+                    EditorGUILayout.HelpBox(behaviour.LastRouterDiag, MessageType.None);
+                }
+                if (!string.IsNullOrWhiteSpace(behaviour.LastRootSceneDiag))
+                {
+                    EditorGUILayout.HelpBox(behaviour.LastRootSceneDiag, MessageType.None);
+                }
+                EditorGUILayout.LabelField("Has Loaded Puppet", behaviour.HasLoadedPuppet ? "Yes" : "No");
+                EditorGUILayout.LabelField("Decoded Commands", behaviour.LastDecodedCommandCount.ToString());
+                EditorGUILayout.LabelField("Shared Vertices", behaviour.LastSharedVertexCount.ToString());
+                EditorGUILayout.LabelField("Part Packets", behaviour.LastPartPacketCount.ToString());
+                EditorGUILayout.LabelField("Part Draw Issued", behaviour.LastPartDrawIssuedCount.ToString());
+                EditorGUILayout.LabelField("Part Skip NoTexture", behaviour.LastPartSkippedNoTextureCount.ToString());
+                EditorGUILayout.LabelField("Part Skip MeshBuild", behaviour.LastPartSkippedMeshBuildCount.ToString());
+                EditorGUILayout.LabelField("Part Opacity Min/Max", $"{behaviour.LastPartOpacityMin:F3} / {behaviour.LastPartOpacityMax:F3}");
+                EditorGUILayout.LabelField("Part Opacity Zero/NonZero", $"{behaviour.LastPartOpacityZeroCount} / {behaviour.LastPartOpacityNonZeroCount}");
+                EditorGUILayout.LabelField("Part Tex0 Missing", behaviour.LastPartTextureMissingCount.ToString());
+                EditorGUILayout.LabelField("Mask Packets", behaviour.LastMaskPacketCount.ToString());
+                EditorGUILayout.LabelField("Mask Draw Issued", behaviour.LastMaskDrawIssuedCount.ToString());
+                EditorGUILayout.LabelField("Mask Skip MeshBuild", behaviour.LastMaskSkippedMeshBuildCount.ToString());
+                EditorGUILayout.LabelField(
+                    "Part Clip Bounds",
+                    behaviour.HasPartClipBounds ? FormatBounds(behaviour.LastPartClipBounds) : "N/A");
+                EditorGUILayout.LabelField(
+                    "Mask Clip Bounds",
+                    behaviour.HasMaskClipBounds ? FormatBounds(behaviour.LastMaskClipBounds) : "N/A");
+                EditorGUILayout.LabelField("Resolved Camera", string.IsNullOrWhiteSpace(behaviour.LastResolvedCameraName) ? "N/A" : behaviour.LastResolvedCameraName);
+                EditorGUILayout.LabelField("Translation Mode", string.IsNullOrWhiteSpace(behaviour.LastTranslationMode) ? "N/A" : behaviour.LastTranslationMode);
+                EditorGUILayout.LabelField(
+                    "Screen Point",
+                    $"({behaviour.LastScreenPoint.x:F1}, {behaviour.LastScreenPoint.y:F1}, {behaviour.LastScreenPoint.z:F1})");
+                EditorGUILayout.LabelField(
+                    "Applied Translation",
+                    $"({behaviour.LastAppliedTranslation.x:F1}, {behaviour.LastAppliedTranslation.y:F1})");
+                EditorGUILayout.LabelField(
+                    "Applied Scale",
+                    $"({behaviour.LastAppliedScale.x:F3}, {behaviour.LastAppliedScale.y:F3})");
+                if (!string.IsNullOrWhiteSpace(behaviour.LastVisibilityDiag))
+                {
+                    EditorGUILayout.HelpBox(behaviour.LastVisibilityDiag, MessageType.None);
+                }
+                if (!string.IsNullOrWhiteSpace(behaviour.LastPartBuildDiag))
+                {
+                    EditorGUILayout.HelpBox(behaviour.LastPartBuildDiag, MessageType.Warning);
+                }
+                if (!string.IsNullOrWhiteSpace(behaviour.LastFrameDiag))
+                {
+                    EditorGUILayout.HelpBox(behaviour.LastFrameDiag, MessageType.None);
+                }
+                if (!string.IsNullOrWhiteSpace(behaviour.LastClipFitDiag))
+                {
+                    EditorGUILayout.HelpBox(behaviour.LastClipFitDiag, MessageType.None);
+                }
+                if (!string.IsNullOrWhiteSpace(behaviour.LastRenderPathDiag))
+                {
+                    EditorGUILayout.HelpBox(behaviour.LastRenderPathDiag, MessageType.None);
+                }
+                if (GUILayout.Button("Reload Puppet"))
+                {
+                    behaviour.ReloadPuppetFromCurrentSelection();
+                }
+                if (GUILayout.Button("Refresh Parameters"))
+                {
+                    behaviour.RefreshParameters();
+                }
+                if (GUILayout.Button("Apply Transform To Puppet"))
+                {
+                    behaviour.ApplyTransformNow();
+                }
             }
 
             DrawParameterControls(behaviour);
