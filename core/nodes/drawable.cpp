@@ -431,8 +431,15 @@ std::tuple<Vec2Array, Mat4*, bool> Drawable::nodeAttachProcessor(const std::shar
                                                                                const Vec2Array& origVertices,
                                                                                Vec2Array origDeformation,
                                                                                const Mat4* origTransform) {
-    bool changed = false;
-    if (!node || mesh->indices.size() < 3) return {Vec2Array{}, nullptr, false};
+    (void)origVertices;
+    (void)origDeformation;
+    (void)origTransform;
+    bool changed = updateAttachedNodeTransform(node);
+    return {Vec2Array{}, nullptr, changed};
+}
+
+bool Drawable::updateAttachedNodeTransform(const std::shared_ptr<Node>& node) {
+    if (!node || mesh->indices.size() < 3) return false;
     Mat4 inv = Mat4::inverse(transform().toMat4());
     Vec3 localNode = inv.transformPoint(Vec3{node->transform().translation.x, node->transform().translation.y, 0});
     Vec2 nodeOrigin{localNode.x, localNode.y};
@@ -441,7 +448,7 @@ std::tuple<Vec2Array, Mat4*, bool> Drawable::nodeAttachProcessor(const std::shar
     std::array<std::size_t, 3> tri{};
     if (triIt == attachedIndex.end()) {
         auto triFound = findSurroundingTriangle(nodeOrigin, static_cast<const MeshData&>(*mesh));
-        if (!triFound) return {Vec2Array{}, nullptr, false};
+        if (!triFound) return false;
         tri = *triFound;
         attachedIndex[node->uuid] = tri;
     } else {
@@ -451,15 +458,14 @@ std::tuple<Vec2Array, Mat4*, bool> Drawable::nodeAttachProcessor(const std::shar
     Vec2 targetPrime{};
     float rotVert = 0.0f, rotHorz = 0.0f;
     if (!calculateTransformInTriangle(*mesh, tri, deformation, nodeOrigin, targetPrime, rotVert, rotHorz)) {
-        return {Vec2Array{}, nullptr, false};
+        return false;
     }
     Vec2 delta{targetPrime.x - nodeOrigin.x, targetPrime.y - nodeOrigin.y};
     node->setValue("transform.t.x", delta.x);
     node->setValue("transform.t.y", delta.y);
     node->setValue("transform.r.z", (rotVert + rotHorz) / 2.0f);
     transformChanged();
-    changed = true;
-    return {Vec2Array{}, nullptr, changed};
+    return true;
 }
 
 void Drawable::updateVertices() {
@@ -506,17 +512,17 @@ bool Drawable::isWeldedBy(NodeId target) const {
     return std::any_of(weldedLinks.begin(), weldedLinks.end(), [&](const WeldingLink& l) { return l.targetUUID == target; });
 }
 
-std::tuple<Vec2Array, Mat4*, bool> Drawable::weldingProcessor(const std::shared_ptr<Node>& target,
-                                                                            const Vec2Array& origVertices,
-                                                                            Vec2Array origDeformation,
-                                                                            const Mat4* origTransform) {
+Node::DeformFilterResult Drawable::weldingProcessor(const std::shared_ptr<Node>& target,
+                                                    const Vec2Array& origVertices,
+                                                    Vec2Array& origDeformation,
+                                                    const Mat4* origTransform) {
     auto targetDrawable = std::dynamic_pointer_cast<Drawable>(target);
-    if (!targetDrawable) return {origDeformation, nullptr, false};
+    if (!targetDrawable) return {};
     auto it = std::find_if(weldedLinks.begin(), weldedLinks.end(), [&](const WeldingLink& l) { return l.targetUUID == targetDrawable->uuid; });
-    if (it == weldedLinks.end()) return {origDeformation, nullptr, false};
-    if (postProcessed < 2) return {Vec2Array{}, nullptr, false};
+    if (it == weldedLinks.end()) return {};
+    if (postProcessed < 2) return {};
     if (weldingApplied.count(targetDrawable->uuid) || targetDrawable->weldingApplied.count(uuid)) {
-        return {Vec2Array{}, nullptr, false};
+        return {};
     }
     weldingApplied.insert(targetDrawable->uuid);
     targetDrawable->weldingApplied.insert(uuid);
@@ -524,7 +530,7 @@ std::tuple<Vec2Array, Mat4*, bool> Drawable::weldingProcessor(const std::shared_
     const auto& link = *it;
     bool changed = false;
     auto pairCount = std::min<std::size_t>(link.indices.size(), vertices.size());
-    if (pairCount == 0) return {origDeformation, nullptr, false};
+    if (pairCount == 0) return {};
 
     std::vector<std::size_t> selfIndices;
     std::vector<std::size_t> targetIndices;
@@ -538,7 +544,10 @@ std::tuple<Vec2Array, Mat4*, bool> Drawable::weldingProcessor(const std::shared_
         selfIndices.push_back(i);
         targetIndices.push_back(tIdx);
     }
-    if (selfIndices.empty()) return {origDeformation, nullptr, false};
+    if (selfIndices.empty()) return {};
+    if (origDeformation.size() < origVertices.size()) {
+        origDeformation.resize(origVertices.size());
+    }
 
     Vec2Array selfLocal = gatherVec2(vertices, selfIndices);
     Vec2Array selfDelta = gatherVec2(deformation, selfIndices);
@@ -579,10 +588,11 @@ std::tuple<Vec2Array, Mat4*, bool> Drawable::weldingProcessor(const std::shared_
     transformAdd(localTarget, deltaTarget, targetInv);
 
     scatterAddVec2(localSelf, selfIndices, deformation, changed);
-    Vec2Array targetDeformOut = origDeformation;
-    scatterAddVec2(localTarget, targetIndices, targetDeformOut, changed);
+    scatterAddVec2(localTarget, targetIndices, origDeformation, changed);
     sharedDeformMarkDirty();
-    return {targetDeformOut, nullptr, changed};
+    Node::DeformFilterResult result;
+    result.changed = changed;
+    return result;
 }
 
 void Drawable::addWeldedTarget(const std::shared_ptr<Drawable>& target,
@@ -748,11 +758,34 @@ void Drawable::setupChildDrawable() {
     for (auto& child : children) {
         if (!child) continue;
         if (!child->pinToMesh) continue;
+        std::weak_ptr<Drawable> weakSelf = std::dynamic_pointer_cast<Drawable>(shared_from_this());
+        if (auto deformableChild = std::dynamic_pointer_cast<Deformable>(child)) {
+            child->preProcessFilters.erase(std::remove_if(child->preProcessFilters.begin(), child->preProcessFilters.end(), [](const FilterHook& h) {
+                return h.stage == 0 && h.tag == kNodeAttachFilterTag;
+            }), child->preProcessFilters.end());
+            if (!deformableChild->hasDeformPreProcessFilter(0, kNodeAttachFilterTag)) {
+                Node::DeformFilterHook hook;
+                hook.stage = 0;
+                hook.tag = kNodeAttachFilterTag;
+                hook.func = [weakSelf](std::shared_ptr<Node> self, const Vec2Array& verts, Vec2Array& deform, const Mat4* mat)
+                    -> Node::DeformFilterResult {
+                    (void)verts;
+                    (void)deform;
+                    (void)mat;
+                    auto owner = weakSelf.lock();
+                    Node::DeformFilterResult result;
+                    if (!owner) return result;
+                    result.changed = owner->updateAttachedNodeTransform(self);
+                    return result;
+                };
+                deformableChild->upsertDeformPreProcessFilter(std::move(hook));
+            }
+            continue;
+        }
         bool exists = std::any_of(child->preProcessFilters.begin(), child->preProcessFilters.end(), [](const FilterHook& h) {
             return h.stage == 0 && h.tag == kNodeAttachFilterTag;
         });
         if (exists) continue;
-        std::weak_ptr<Drawable> weakSelf = std::dynamic_pointer_cast<Drawable>(shared_from_this());
         FilterHook hook;
         hook.stage = 0;
         hook.tag = kNodeAttachFilterTag;
@@ -769,6 +802,9 @@ void Drawable::setupChildDrawable() {
 void Drawable::releaseChildDrawable() {
     for (auto& child : children) {
         if (!child) continue;
+        if (auto deformableChild = std::dynamic_pointer_cast<Deformable>(child)) {
+            deformableChild->removeDeformPreProcessFilter(0, kNodeAttachFilterTag);
+        }
         child->preProcessFilters.erase(std::remove_if(child->preProcessFilters.begin(), child->preProcessFilters.end(), [](const FilterHook& h) {
             return h.stage == 0 && h.tag == kNodeAttachFilterTag;
         }), child->preProcessFilters.end());
@@ -826,41 +862,38 @@ void Drawable::fillDrawPacket(const Node& header, PartDrawPacket& packet, bool /
     packet.deformAtlasStride = sharedDeformBufferData().size();
     packet.vertexCount = static_cast<uint32_t>(mesh->vertices.size());
     packet.indexCount = static_cast<uint32_t>(mesh->indices.size());
+    packet.indexBuffer = ibo;
     for (std::size_t i = 0; i < textures.size() && i < 3; ++i) {
         if (textures[i]) {
             uint32_t texId = textures[i]->getRuntimeUUID();
             if (texId == 0) texId = textures[i]->backendId();
             packet.textureUUIDs[i] = texId;
+            packet.textureBackendIds[i] = textures[i]->backendId();
         } else {
             packet.textureUUIDs[i] = 0;
+            packet.textureBackendIds[i] = 0;
         }
     }
-    packet.vertices = mesh->vertices;
-    packet.uvs = mesh->uvs;
-    packet.indices = mesh->indices;
-    packet.deformation = deformation;
     packet.node.reset();
 }
 
 void Drawable::registerWeldFilter(const std::shared_ptr<Drawable>& target) {
     if (!target) return;
     const auto tag = kWeldFilterTagBase | static_cast<std::uintptr_t>(target->uuid);
-    // D parity: welding filter registration is upsert, not append.
-    auto exists = std::any_of(postProcessFilters.begin(), postProcessFilters.end(), [&](const FilterHook& h) {
+    postProcessFilters.erase(std::remove_if(postProcessFilters.begin(), postProcessFilters.end(), [&](const FilterHook& h) {
         return h.stage == 2 && h.tag == tag;
-    });
-    if (exists) return;
-    FilterHook hook;
+    }), postProcessFilters.end());
+    Node::DeformFilterHook hook;
     hook.stage = 2;
     hook.tag = tag;
     std::weak_ptr<Drawable> weakTarget = target;
-    hook.func = [weakTarget](std::shared_ptr<Node> self, const Vec2Array& verts, Vec2Array deform, const Mat4* mat)
-        -> std::tuple<Vec2Array, Mat4*, bool> {
+    hook.func = [weakTarget](std::shared_ptr<Node> self, const Vec2Array& verts, Vec2Array& deform, const Mat4* mat)
+        -> Node::DeformFilterResult {
         auto tgt = weakTarget.lock();
-        if (!tgt) return std::make_tuple(Vec2Array{}, static_cast<Mat4*>(nullptr), false);
+        if (!tgt) return {};
         return tgt->weldingProcessor(self, verts, deform, mat);
     };
-    postProcessFilters.push_back(std::move(hook));
+    upsertDeformPostProcessFilter(std::move(hook));
 }
 
 void Drawable::unregisterWeldFilter(const std::shared_ptr<Drawable>& target) {
@@ -869,6 +902,7 @@ void Drawable::unregisterWeldFilter(const std::shared_ptr<Drawable>& target) {
     postProcessFilters.erase(std::remove_if(postProcessFilters.begin(), postProcessFilters.end(), [&](const FilterHook& h) {
         return h.stage == 2 && h.tag == tag;
     }), postProcessFilters.end());
+    removeDeformPostProcessFilter(2, tag);
 }
 
 void Drawable::serializeSelfImpl(::nicxlive::core::serde::InochiSerializer& serializer, bool recursive, SerializeNodeFlags flags) const {

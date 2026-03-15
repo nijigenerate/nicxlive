@@ -95,10 +95,10 @@ private:
     void precalculate();
     void setupChildNoRecurse(const std::shared_ptr<Node>& node, bool prepend = false);
     void releaseChildNoRecurse(const std::shared_ptr<Node>& node);
-    std::tuple<Vec2Array, Mat4*, bool> filterChildren(const std::shared_ptr<Node>& target,
-                                                      const Vec2Array& origVertices,
-                                                      Vec2Array origDeformation,
-                                                      const Mat4* origTransform);
+    Node::DeformFilterResult filterChildren(const std::shared_ptr<Node>& target,
+                                            const Vec2Array& origVertices,
+                                            Vec2Array& origDeformation,
+                                            const Mat4* origTransform);
     static bool pointInTriangle(const Vec2& p, const Vec2& a, const Vec2& b, const Vec2& c);
 };
 

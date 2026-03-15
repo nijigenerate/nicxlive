@@ -620,15 +620,12 @@ void Part::fillDrawPacket(const Node& header, PartDrawPacket& packet, bool isMas
             uint32_t texId = tex->getRuntimeUUID();
             if (texId == 0) texId = tex->backendId();
             packet.textureUUIDs[i] = texId;
+            packet.textureBackendIds[i] = tex->backendId();
         } else {
             packet.textureUUIDs[i] = 0;
+            packet.textureBackendIds[i] = 0;
         }
-        packet.textures[i] = tex;
     }
-    packet.vertices = mesh->vertices;
-    packet.uvs = mesh->uvs;
-    packet.indices = mesh->indices;
-    packet.deformation = deformation;
     if (tracePartListEnabled()) {
         float maxAbs = 0.0f;
         for (std::size_t i = 0; i < deformation.size(); ++i) {
@@ -678,14 +675,14 @@ void Part::fillDrawPacket(const Node& header, PartDrawPacket& packet, bool isMas
     }
     // Keep queue backend IBO map in sync with packet handles.
     // Some load paths can leave ibo assigned while index data is not registered yet.
-    if (packet.indexBuffer != 0 && !packet.indices.empty()) {
+    if (packet.indexBuffer != 0 && !mesh->indices.empty()) {
         if (auto qb = std::dynamic_pointer_cast<core::render::QueueRenderBackend>(core::getCurrentRenderBackend())) {
             if (!qb->hasDrawableIndices(packet.indexBuffer)) {
-                qb->uploadDrawableIndices(packet.indexBuffer, packet.indices);
+                qb->uploadDrawableIndices(packet.indexBuffer, mesh->indices);
             }
         }
     }
-    packet.node = std::dynamic_pointer_cast<Part>(const_cast<Part*>(this)->shared_from_this());
+    packet.node = std::static_pointer_cast<Part>(const_cast<Part*>(this)->shared_from_this());
 }
 
 Mat4 Part::immediateModelMatrix() const {

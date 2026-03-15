@@ -6,10 +6,25 @@
 #include <string>
 #include <vector>
 #include <algorithm>
+#include <cstdlib>
+#include <cstring>
+#include <cstdio>
 
 namespace nicxlive::core::render {
 
 namespace {
+bool profileEnabled() {
+    static int enabled = -1;
+    if (enabled >= 0) return enabled != 0;
+    const char* v = std::getenv("NJCX_PROFILE");
+    if (!v) {
+        enabled = 0;
+        return false;
+    }
+    enabled = (std::strcmp(v, "1") == 0 || std::strcmp(v, "true") == 0 || std::strcmp(v, "TRUE") == 0) ? 1 : 0;
+    return enabled != 0;
+}
+
 struct RenderProfiler {
     std::map<std::string, long long> accumUsec{};
     std::map<std::string, std::size_t> callCounts{};
@@ -40,11 +55,13 @@ struct RenderProfiler {
 
 private:
     void report(std::chrono::steady_clock::duration interval) {
-#ifdef NJCX_ENABLE_DEBUG_LOG
+        if (!profileEnabled()) {
+            return;
+        }
         double secondsElapsed = std::chrono::duration_cast<std::chrono::microseconds>(interval).count() / 1'000'000.0;
-        NJCX_DBG_LOG("[RenderProfiler] %.3fs window (%zu frames)\n", secondsElapsed, frameCount);
+        std::fprintf(stderr, "[RenderProfiler] %.3fs window (%zu frames)\n", secondsElapsed, frameCount);
         if (accumUsec.empty()) {
-            NJCX_DBG_LOG("  (no instrumented passes recorded)\n");
+            std::fprintf(stderr, "  (no instrumented passes recorded)\n");
             return;
         }
         std::vector<std::pair<std::string, long long>> entries(accumUsec.begin(), accumUsec.end());
@@ -54,15 +71,13 @@ private:
             auto countIt = callCounts.find(entry.first);
             std::size_t count = countIt == callCounts.end() ? 0 : countIt->second;
             double avgMs = count ? totalMs / static_cast<double>(count) : totalMs;
-            NJCX_DBG_LOG("  %-18s total=%8.3f ms  avg=%6.3f ms  calls=%6zu\n",
+            std::fprintf(stderr,
+                         "  %-28s total=%8.3f ms  avg=%6.3f ms  calls=%6zu\n",
                          entry.first.c_str(),
                          totalMs,
                          avgMs,
                          count);
         }
-#else
-        (void)interval;
-#endif
     }
 };
 
@@ -73,7 +88,7 @@ RenderProfiler& profiler() {
 } // namespace
 
 RenderProfileScope::RenderProfileScope(const std::string& label)
-    : label_(label), active_(true), start_(std::chrono::steady_clock::now()) {}
+    : label_(label), active_(profileEnabled()), start_(std::chrono::steady_clock::now()) {}
 
 RenderProfileScope::RenderProfileScope(RenderProfileScope&& other) noexcept
     : label_(std::move(other.label_)), active_(other.active_), start_(other.start_) {

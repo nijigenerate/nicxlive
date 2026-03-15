@@ -91,6 +91,17 @@ public:
             std::shared_ptr<Node>, const Vec2Array&, Vec2Array, const Mat4*)>;
         Func func{};
     };
+    struct DeformFilterResult {
+        std::optional<Mat4> transform{};
+        bool changed{false};
+    };
+    struct DeformFilterHook {
+        int stage{0};
+        std::uintptr_t tag{0};
+        using Func = std::function<DeformFilterResult(
+            std::shared_ptr<Node>, const Vec2Array&, Vec2Array&, const Mat4*)>;
+        Func func{};
+    };
 
     uint32_t uuid{0};
     std::string name{"Unnamed Node"};

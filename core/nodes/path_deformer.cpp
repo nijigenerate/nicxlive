@@ -6,6 +6,7 @@
 #include "../serde.hpp"
 #include "../param/parameter.hpp"
 #include "../debug_log.hpp"
+#include "../render/profiler.hpp"
 #include "curve.hpp"
 #include "deformer/drivers/phys.hpp"
 #include "drawable.hpp"
@@ -411,10 +412,10 @@ void PathDeformer::cacheClosestPoints(const std::shared_ptr<Node>& node, int nSa
 }
 
 void PathDeformer::recordInvalid(const std::string& ctx, std::size_t idx, const Vec2& value) {
-    ensureDiagnosticCapacity(idx + 1);
     invalidThisFrame = true;
     diagnostics.invalidThisFrame = true;
-    if (!diagnosticsEnabled) return;
+    if (!diagnosticsEnabled && !preserveInvalidLog) return;
+    ensureDiagnosticCapacity(idx + 1);
     invalidIndexThisFrame[idx] = true;
     if (invalidStreakStartFrame[idx] == 0) invalidStreakStartFrame[idx] = frameCounter;
     invalidPerIndex[idx]++;
@@ -583,6 +584,12 @@ bool PathDeformer::beginDiagnosticFrame() {
     diagnosticsFrameActive = true;
     diagnostics.diagnosticsFrameActive = true;
     ++frameCounter;
+    if (!diagnosticsEnabled && !preserveInvalidLog) {
+        invalidThisFrame = false;
+        matrixInvalidThisFrame = false;
+        diagnostics.invalidThisFrame = false;
+        return true;
+    }
     ensureDiagnosticCapacity(deformation.size());
     clearInvalidFlags();
     diagnostics.invalidThisFrame = false;
@@ -596,6 +603,14 @@ void PathDeformer::endDiagnosticFrame() {
         ++consecutiveInvalidFrames;
     } else {
         consecutiveInvalidFrames = 0;
+    }
+    if (!diagnosticsEnabled && !preserveInvalidLog) {
+        diagnosticsFrameActive = false;
+        diagnostics.invalidFrameCount = invalidFrameCount;
+        diagnostics.totalInvalidCount = totalInvalidCount;
+        diagnostics.invalidThisFrame = invalidThisFrame;
+        diagnostics.diagnosticsFrameActive = false;
+        return;
     }
     for (std::size_t i = 0; i < invalidConsecutive.size(); ++i) {
         bool flagged = i < invalidIndexThisFrame.size() ? invalidIndexThisFrame[i] : false;
@@ -778,16 +793,12 @@ void PathDeformer::logInvalidIndex(const std::string& context, std::size_t index
 
 DeformResult PathDeformer::deformChildren(const std::shared_ptr<Node>& target,
                                           const Vec2Array& origVertices,
-                                          Vec2Array origDeformation,
+                                          Vec2Array& origDeformation,
                                           const Mat4* origTransform) {
+    auto scope = core::render::profileScope("PathDeformer.deformChildren");
     static std::unordered_map<uint32_t, uint64_t> sChangedCount;
     static uint64_t sSummaryTick = 0;
     DeformResult res;
-    // D parity: unchanged path filter returns empty deformation payload.
-    // Returning original vertices/deformation here causes caller-side overwrite.
-    res.vertices.clear();
-    res.transform = nullptr;
-    res.changed = false;
 
     bool diagStarted = beginDiagnosticFrame();
 
@@ -810,21 +821,43 @@ DeformResult PathDeformer::deformChildren(const std::shared_ptr<Node>& target,
         return res;
     }
 
-    Vec2Array verts = origVertices.dup();
-    Vec2Array deformInput = origDeformation.dup();
-    sanitizeOffsets(deformInput);
-
-    Vec2Array sample;
-    transformAssign(sample, verts, center);
-    if (!deformInput.empty()) {
-        transformAdd(sample, deformInput, center, std::min(sample.size(), deformInput.size()));
-    }
-
-    int invalidCenter = firstNonFiniteIndex(sample);
-    if (invalidCenter >= 0) {
-        markInvalidOffset("cVertexNaN", static_cast<std::size_t>(invalidCenter), Vec2{});
-        if (diagStarted) endDiagnosticFrame();
-        return res;
+    Vec2Array& sample = sampleScratch_;
+    {
+        auto transformScope = core::render::profileScope("PathDeformer.sampleTransform");
+        sample.resize(origVertices.size());
+        const float c00 = center[0][0];
+        const float c01 = center[0][1];
+        const float c03 = center[0][3];
+        const float c10 = center[1][0];
+        const float c11 = center[1][1];
+        const float c13 = center[1][3];
+        const std::size_t overlap = std::min(sample.size(), origDeformation.size());
+        for (std::size_t i = 0; i < sample.size(); ++i) {
+            const float vertexX = origVertices.xAt(i);
+            const float vertexY = origVertices.yAt(i);
+            float sampleX = vertexX * c00 + vertexY * c01 + c03;
+            float sampleY = vertexX * c10 + vertexY * c11 + c13;
+            if (i < overlap) {
+                float deformX = origDeformation.xAt(i);
+                float deformY = origDeformation.yAt(i);
+                if (!std::isfinite(deformX) || !std::isfinite(deformY)) {
+                    deformX = 0.0f;
+                    deformY = 0.0f;
+                    origDeformation.xAt(i) = 0.0f;
+                    origDeformation.yAt(i) = 0.0f;
+                    recordInvalid("sanitize", i, Vec2{0, 0});
+                }
+                sampleX += deformX * c00 + deformY * c01;
+                sampleY += deformX * c10 + deformY * c11;
+            }
+            sample.xAt(i) = sampleX;
+            sample.yAt(i) = sampleY;
+            if (!std::isfinite(sampleX) || !std::isfinite(sampleY)) {
+                markInvalidOffset("cVertexNaN", i, Vec2{});
+                if (diagStarted) endDiagnosticFrame();
+                return res;
+            }
+        }
     }
 
     // D parity: only reuse cached t-samples when entry already exists and has enough vertices.
@@ -841,58 +874,81 @@ DeformResult PathDeformer::deformChildren(const std::shared_ptr<Node>& target,
         return res;
     }
     auto& cache = it->second;
-    std::vector<float> tSamples(sample.size());
-    std::copy_n(cache.begin(), sample.size(), tSamples.begin());
+    const std::vector<float>* tSamples = &cache;
+    if (cache.size() != sample.size()) {
+        tSamplesScratch_.assign(cache.begin(), cache.begin() + static_cast<std::ptrdiff_t>(sample.size()));
+        tSamples = &tSamplesScratch_;
+    }
 
     Curve* baseCurve = prevCurve ? prevCurve.get() : originalCurve.get();
-    Vec2Array closestOrig;
-    Vec2Array closestDef;
-    Vec2Array tangentOrigRaw;
-    Vec2Array tangentDefRaw;
-    if (baseCurve) baseCurve->evaluatePoints(tSamples, closestOrig);
-    deformedCurve->evaluatePoints(tSamples, closestDef);
-    if (baseCurve) baseCurve->evaluateDerivatives(tSamples, tangentOrigRaw);
-    deformedCurve->evaluateDerivatives(tSamples, tangentDefRaw);
-
-    int invalidDef = firstNonFiniteIndex(closestDef);
-    if (invalidDef >= 0) {
-        markInvalidOffset("closestPointDeformedNaN", static_cast<std::size_t>(invalidDef), Vec2{});
-        if (diagStarted) endDiagnosticFrame();
-        return res;
+    Vec2Array& closestOrig = closestOrigScratch_;
+    Vec2Array& closestDef = closestDefScratch_;
+    Vec2Array& tangentOrig = tangentOrigScratch_;
+    Vec2Array& tangentDef = tangentDefScratch_;
+    {
+        auto curveScope = core::render::profileScope("PathDeformer.curveEvaluate");
+        if (baseCurve) baseCurve->evaluatePoints(*tSamples, closestOrig);
+        deformedCurve->evaluatePoints(*tSamples, closestDef);
+        if (baseCurve) baseCurve->evaluateDerivatives(*tSamples, tangentOrig);
+        deformedCurve->evaluateDerivatives(*tSamples, tangentDef);
     }
-
-    Vec2Array tangentOrig = tangentOrigRaw;
-    normalizeVec2Array(tangentOrig, 1e-8f, Vec2{1.0f, 0.0f});
-    Vec2Array tangentDef = tangentDefRaw;
-    normalizeVec2Array(tangentDef, 1e-8f, tangentOrig);
-
-    Vec2Array normalOrig;
-    Vec2Array normalDef;
-    rotateTangentsToNormals(normalOrig, tangentOrig);
-    rotateTangentsToNormals(normalDef, tangentDef);
-
-    std::vector<float> normalDistances;
-    std::vector<float> tangentialDistances;
-    projectVec2OntoAxes(sample, closestOrig, normalOrig, tangentOrig, normalDistances, tangentialDistances);
-
-    Vec2Array deformedVertices;
-    composeVec2FromAxes(deformedVertices, closestDef, normalDistances, normalDef, tangentialDistances, tangentDef);
-
-    Vec2Array offsetLocal = deformedVertices;
-    offsetLocal -= sample;
 
     float sumOffset = 0.0f;
-    for (std::size_t i = 0; i < offsetLocal.size(); ++i) {
-        if (!std::isfinite(offsetLocal.xAt(i)) || !std::isfinite(offsetLocal.yAt(i))) {
-            offsetLocal.xAt(i) = 0;
-            offsetLocal.yAt(i) = 0;
-            recordInvalid("offsetNaN", i, Vec2{0, 0});
+    {
+        auto composeScope = core::render::profileScope("PathDeformer.composeOffsets");
+        for (std::size_t i = 0; i < sample.size(); ++i) {
+            const float sampleX = sample.xAt(i);
+            const float sampleY = sample.yAt(i);
+            const float closestOrigX = closestOrig.xAt(i);
+            const float closestOrigY = closestOrig.yAt(i);
+            const float closestDefX = closestDef.xAt(i);
+            const float closestDefY = closestDef.yAt(i);
+            if (!std::isfinite(closestDefX) || !std::isfinite(closestDefY)) {
+                markInvalidOffset("closestPointDeformedNaN", i, Vec2{});
+                if (diagStarted) endDiagnosticFrame();
+                return res;
+            }
+            float tangentOrigX = tangentOrig.xAt(i);
+            float tangentOrigY = tangentOrig.yAt(i);
+            const float tangentOrigLenSq = tangentOrigX * tangentOrigX + tangentOrigY * tangentOrigY;
+            if (tangentOrigLenSq > 1e-8f) {
+                const float invOrigLen = 1.0f / std::sqrt(tangentOrigLenSq);
+                tangentOrigX *= invOrigLen;
+                tangentOrigY *= invOrigLen;
+            } else {
+                tangentOrigX = 1.0f;
+                tangentOrigY = 0.0f;
+            }
+            float tangentDefX = tangentDef.xAt(i);
+            float tangentDefY = tangentDef.yAt(i);
+            const float tangentDefLenSq = tangentDefX * tangentDefX + tangentDefY * tangentDefY;
+            if (tangentDefLenSq > 1e-8f) {
+                const float invDefLen = 1.0f / std::sqrt(tangentDefLenSq);
+                tangentDefX *= invDefLen;
+                tangentDefY *= invDefLen;
+            } else {
+                tangentDefX = tangentOrigX;
+                tangentDefY = tangentOrigY;
+            }
+            const float relativeX = sampleX - closestOrigX;
+            const float relativeY = sampleY - closestOrigY;
+            const float normalDistance = relativeX * (-tangentOrigY) + relativeY * tangentOrigX;
+            const float tangentialDistance = relativeX * tangentOrigX + relativeY * tangentOrigY;
+            float offsetX = closestDefX + (-tangentDefY) * normalDistance + tangentDefX * tangentialDistance - sampleX;
+            float offsetY = closestDefY + tangentDefX * normalDistance + tangentDefY * tangentialDistance - sampleY;
+            if (!std::isfinite(offsetX) || !std::isfinite(offsetY)) {
+                offsetX = 0.0f;
+                offsetY = 0.0f;
+                recordInvalid("offsetNaN", i, Vec2{0, 0});
+            }
+            sample.xAt(i) = offsetX;
+            sample.yAt(i) = offsetY;
+            float mag = std::sqrt(offsetX * offsetX + offsetY * offsetY);
+            sumOffset += mag;
+            lastMaxOffset = std::max(lastMaxOffset, mag);
         }
-        float mag = std::sqrt(offsetLocal.xAt(i) * offsetLocal.xAt(i) + offsetLocal.yAt(i) * offsetLocal.yAt(i));
-        sumOffset += mag;
-        lastMaxOffset = std::max(lastMaxOffset, mag);
     }
-    if (offsetLocal.size() > 0) lastAvgOffset = sumOffset / static_cast<float>(offsetLocal.size());
+    if (sample.size() > 0) lastAvgOffset = sumOffset / static_cast<float>(sample.size());
 
     Mat4 inv = Mat4::inverse(center);
     if (!isFiniteMatrix(inv)) {
@@ -902,25 +958,35 @@ DeformResult PathDeformer::deformChildren(const std::shared_ptr<Node>& target,
         return res;
     }
     inv[0][3] = inv[1][3] = inv[2][3] = 0.0f;
-    Vec2Array deformOut;
-    deformOut.resize(std::max<std::size_t>(deformInput.size(), offsetLocal.size()));
-    for (std::size_t i = 0; i < deformInput.size() && i < deformOut.size(); ++i) {
-        deformOut.xAt(i) = deformInput.xAt(i);
-        deformOut.yAt(i) = deformInput.yAt(i);
-    }
-    transformAdd(deformOut, offsetLocal, inv, offsetLocal.size());
-
-    res.vertices.resize(deformOut.size());
     float maxAbs = 0.0f;
-    for (std::size_t i = 0; i < deformOut.size(); ++i) {
-        res.vertices.xAt(i) = deformOut.xAt(i);
-        res.vertices.yAt(i) = deformOut.yAt(i);
-        if (!std::isfinite(res.vertices.xAt(i)) || !std::isfinite(res.vertices.yAt(i))) {
-            recordInvalid("resultNaN", i, Vec2{res.vertices.xAt(i), res.vertices.yAt(i)});
-            res.vertices.xAt(i) = 0.0f;
-            res.vertices.yAt(i) = 0.0f;
+    {
+        auto writebackScope = core::render::profileScope("PathDeformer.writebackOffsets");
+        if (origDeformation.size() < sample.size()) {
+            origDeformation.resize(sample.size());
         }
-        maxAbs = std::max(maxAbs, std::max(std::fabs(res.vertices.xAt(i)), std::fabs(res.vertices.yAt(i))));
+        const float i00 = inv[0][0];
+        const float i01 = inv[0][1];
+        const float i10 = inv[1][0];
+        const float i11 = inv[1][1];
+        for (std::size_t i = 0; i < sample.size(); ++i) {
+            float baseX = origDeformation.xAt(i);
+            float baseY = origDeformation.yAt(i);
+            if (!std::isfinite(baseX) || !std::isfinite(baseY)) {
+                recordInvalid("resultNaN", i, Vec2{baseX, baseY});
+                baseX = 0.0f;
+                baseY = 0.0f;
+            }
+            float outX = baseX + sample.xAt(i) * i00 + sample.yAt(i) * i01;
+            float outY = baseY + sample.xAt(i) * i10 + sample.yAt(i) * i11;
+            if (!std::isfinite(outX) || !std::isfinite(outY)) {
+                recordInvalid("resultNaN", i, Vec2{outX, outY});
+                outX = 0.0f;
+                outY = 0.0f;
+            }
+            origDeformation.xAt(i) = outX;
+            origDeformation.yAt(i) = outY;
+            maxAbs = std::max(maxAbs, std::max(std::fabs(outX), std::fabs(outY)));
+        }
     }
     res.changed = true;
     if (maxAbs > 10.0f) {
@@ -928,11 +994,8 @@ DeformResult PathDeformer::deformChildren(const std::shared_ptr<Node>& target,
                 " target=", (target ? target->name : std::string("<null>")),
                 " targetUuid=", (target ? target->uuid : 0u),
                 " maxAbs=", maxAbs,
-                " first=(", (res.vertices.empty() ? 0.0f : res.vertices.xAt(0)),
-                ",", (res.vertices.empty() ? 0.0f : res.vertices.yAt(0)), ")");
-    }
-    if (driver && target) {
-        target->notifyChange(target);
+                " first=(", (origDeformation.empty() ? 0.0f : origDeformation.xAt(0)),
+                ",", (origDeformation.empty() ? 0.0f : origDeformation.yAt(0)), ")");
     }
     if (invalidThisFrame) {
         ++invalidFrameCount;
@@ -961,6 +1024,7 @@ DeformResult PathDeformer::deformChildren(const std::shared_ptr<Node>& target,
 }
 
 void PathDeformer::runPreProcessTask(core::RenderContext& ctx) {
+    auto scope = core::render::profileScope("PathDeformer.runPreProcessTask");
     bool diagStarted = beginDiagnosticFrame();
     auto currentTransform = transform();
     Mat4 currentMat = currentTransform.toMat4();
@@ -983,6 +1047,7 @@ void PathDeformer::runPreProcessTask(core::RenderContext& ctx) {
 }
 
 void PathDeformer::applyPathDeform(const Vec2Array& origDeform) {
+    auto scope = core::render::profileScope("PathDeformer.applyPathDeform");
     transform();
     refreshInverseMatrix("applyPathDeform:pre");
     sanitizeOffsets(deformation);
@@ -1022,7 +1087,6 @@ void PathDeformer::applyPathDeform(const Vec2Array& origDeform) {
             auto prevCandidate = vertices;
             prevCandidate += diffDeform;
             prevCurve = createCurve(prevCandidate, curveType == CurveType::Bezier);
-            clearCache();
             logCurveHealth("applyPathDeform:driverPrev", originalCurve, prevCurve, deformation);
             if (enableDriverStep) {
                 driver->updateDefaultShape();
@@ -1166,29 +1230,36 @@ bool PathDeformer::setupChildNoRecurse(const std::shared_ptr<Node>& node, bool p
     auto grid = std::dynamic_pointer_cast<GridDeformer>(node);
     bool supportsDeform = static_cast<bool>(drawable) || static_cast<bool>(grid);
 
-    Node::FilterHook hook;
-    hook.stage = kPathFilterStage;
-    hook.tag = reinterpret_cast<std::uintptr_t>(this);
-    hook.func = [this](std::shared_ptr<Node> t,
-                       const Vec2Array& v,
-                       Vec2Array d,
-                       const Mat4* mat) {
-        auto res = deformChildren(t, v, d, mat);
-        return std::make_tuple(res.vertices, res.transform, res.changed);
-    };
-
     auto& pre = node->preProcessFilters;
     auto& post = node->postProcessFilters;
     const auto tag = reinterpret_cast<std::uintptr_t>(this);
     pre.erase(std::remove_if(pre.begin(), pre.end(), [&](const auto& h) { return h.stage == kPathFilterStage && h.tag == tag; }), pre.end());
     post.erase(std::remove_if(post.begin(), post.end(), [&](const auto& h) { return h.stage == kPathFilterStage && h.tag == tag; }), post.end());
+    if (auto deformable = std::dynamic_pointer_cast<Deformable>(node)) {
+        deformable->removeDeformPreProcessFilter(kPathFilterStage, tag);
+        deformable->removeDeformPostProcessFilter(kPathFilterStage, tag);
+    }
 
     if (supportsDeform) {
         cacheClosestPoints(node);
+        auto deformable = std::dynamic_pointer_cast<Deformable>(node);
+        if (!deformable) {
+            meshCaches.erase(node.get());
+            return true;
+        }
+        Node::DeformFilterHook hook;
+        hook.stage = kPathFilterStage;
+        hook.tag = tag;
+        hook.func = [this](std::shared_ptr<Node> t,
+                           const Vec2Array& v,
+                           Vec2Array& d,
+                           const Mat4* mat) {
+            return deformChildren(t, v, d, mat);
+        };
         if (dynamicDeformation) {
-            if (prepend) post.insert(post.begin(), hook); else post.push_back(hook);
+            deformable->upsertDeformPostProcessFilter(std::move(hook), prepend);
         } else {
-            if (prepend) pre.insert(pre.begin(), hook); else pre.push_back(hook);
+            deformable->upsertDeformPreProcessFilter(std::move(hook), prepend);
         }
     } else {
         meshCaches.erase(node.get());
@@ -1204,6 +1275,10 @@ bool PathDeformer::releaseChildNoRecurse(const std::shared_ptr<Node>& node) {
     const auto tag = reinterpret_cast<std::uintptr_t>(this);
     pre.erase(std::remove_if(pre.begin(), pre.end(), [&](const auto& h) { return h.stage == kPathFilterStage && h.tag == tag; }), pre.end());
     post.erase(std::remove_if(post.begin(), post.end(), [&](const auto& h) { return h.stage == kPathFilterStage && h.tag == tag; }), post.end());
+    if (auto deformable = std::dynamic_pointer_cast<Deformable>(node)) {
+        deformable->removeDeformPreProcessFilter(kPathFilterStage, tag);
+        deformable->removeDeformPostProcessFilter(kPathFilterStage, tag);
+    }
     return true;
 }
 
@@ -1230,9 +1305,8 @@ void PathDeformer::applyDeformToChildren(const std::vector<std::shared_ptr<core:
 
     applyDeformToChildrenInternal(
         std::dynamic_pointer_cast<Node>(shared_from_this()),
-        [this](std::shared_ptr<Node> target, const Vec2Array& verticesIn, Vec2Array deformationIn, const Mat4* transformIn) {
-            auto res = deformChildren(target, verticesIn, deformationIn, transformIn);
-            return std::make_tuple(res.vertices, res.transform, res.changed);
+        [this](std::shared_ptr<Node> target, const Vec2Array& verticesIn, Vec2Array& deformationIn, const Mat4* transformIn) {
+            return deformChildren(target, verticesIn, deformationIn, transformIn);
         },
         update,
         []() { return false; },

@@ -2,6 +2,7 @@
 
 #include "../puppet.hpp"
 #include "../render.hpp"
+#include "../render/profiler.hpp"
 #include "../serde.hpp"
 #include "../param/parameter.hpp"
 #include "../debug_log.hpp"
@@ -129,7 +130,7 @@ void MeshGroup::applyDeformToChildren(const std::vector<std::shared_ptr<core::pa
 
     applyDeformToChildrenInternal(
         std::dynamic_pointer_cast<Node>(shared_from_this()),
-        [this](std::shared_ptr<Node> target, const Vec2Array& verticesIn, Vec2Array deformationIn, const Mat4* transformIn) {
+        [this](std::shared_ptr<Node> target, const Vec2Array& verticesIn, Vec2Array& deformationIn, const Mat4* transformIn) {
             return filterChildren(target, verticesIn, deformationIn, transformIn);
         },
         update,
@@ -165,6 +166,7 @@ void MeshGroup::preProcess() { Drawable::preProcess(); }
 void MeshGroup::postProcess(int id) { Drawable::postProcess(id); }
 
 void MeshGroup::runPreProcessTask(core::RenderContext& ctx) {
+    auto scope = core::render::profileScope("MeshGroup.runPreProcessTask");
     Drawable::runPreProcessTask(ctx);
     if (traceMeshGroupChainEnabled()) {
         gMeshGroupFilterCallCount[this] = 0;
@@ -283,20 +285,21 @@ void MeshGroup::setTranslateChildren(bool value) {
     }
 }
 
-std::tuple<Vec2Array, Mat4*, bool> MeshGroup::filterChildren(const std::shared_ptr<Node>& target,
-                                                             const Vec2Array& origVertices,
-                                                             Vec2Array origDeformation,
-                                                             const Mat4* origTransform) {
+Node::DeformFilterResult MeshGroup::filterChildren(const std::shared_ptr<Node>& target,
+                                                   const Vec2Array& origVertices,
+                                                   Vec2Array& origDeformation,
+                                                   const Mat4* origTransform) {
+    auto scope = core::render::profileScope("MeshGroup.filterChildren");
     if (traceMeshGroupChainEnabled()) {
         ++gMeshGroupFilterCallCount[this];
     }
-    if (!precalculated || !origTransform) return {Vec2Array{}, nullptr, false};
+    if (!precalculated || !origTransform) return {};
     if (auto deformer = std::dynamic_pointer_cast<Deformer>(target)) {
         if (std::dynamic_pointer_cast<PathDeformer>(deformer)) {
             auto pd = std::dynamic_pointer_cast<PathDeformer>(deformer);
-            if (pd && !pd->physicsEnabled()) return {Vec2Array{}, nullptr, false};
+            if (pd && !pd->physicsEnabled()) return {};
         } else if (!std::dynamic_pointer_cast<GridDeformer>(deformer)) {
-            return {Vec2Array{}, nullptr, false};
+            return {};
         }
     }
 
@@ -379,7 +382,7 @@ std::tuple<Vec2Array, Mat4*, bool> MeshGroup::filterChildren(const std::shared_p
                          centered.xAt(0), centered.yAt(0), mapped.xAt(0), mapped.yAt(0));
         }
     }
-    if (!anyChanged) return {origDeformation, nullptr, false};
+    if (!anyChanged) return {};
     Vec2Array offsetLocal = mapped.dup();
     offsetLocal -= centered;
     Mat4 inv = centerMatrix.inverse();
@@ -398,7 +401,9 @@ std::tuple<Vec2Array, Mat4*, bool> MeshGroup::filterChildren(const std::shared_p
                      origDeformation.size() ? origDeformation.xAt(0) : 0.0f,
                      origDeformation.size() ? origDeformation.yAt(0) : 0.0f);
     }
-    return {origDeformation, nullptr, true};
+    Node::DeformFilterResult result;
+    result.changed = true;
+    return result;
 }
 
 void MeshGroup::precalculate() {
@@ -652,47 +657,50 @@ void MeshGroup::setupChildNoRecurse(const std::shared_ptr<Node>& node, bool prep
     }
     auto deformable = std::dynamic_pointer_cast<Deformable>(node);
     bool isDeformable = static_cast<bool>(deformable);
-    Node::FilterHook hook{};
-    hook.stage = kMeshGroupFilterStage;
-    hook.tag = reinterpret_cast<std::uintptr_t>(this);
-    hook.func = [this](std::shared_ptr<Node> t,
-                       const Vec2Array& verts,
-                       Vec2Array def,
-                       const Mat4* mat) {
-        return filterChildren(t, verts, def, mat);
-    };
+    const auto tag = reinterpret_cast<std::uintptr_t>(this);
     auto& pre = node->preProcessFilters;
     auto& post = node->postProcessFilters;
-    const auto tag = reinterpret_cast<std::uintptr_t>(this);
-    auto removeTagged = [&](std::vector<Node::FilterHook>& dst) {
-        dst.erase(std::remove_if(dst.begin(), dst.end(), [&](const auto& h) {
-            return h.stage == kMeshGroupFilterStage && h.tag == tag;
-        }), dst.end());
-    };
-    auto upsertTagged = [&](std::vector<Node::FilterHook>& dst) {
-        const bool exists = std::any_of(dst.begin(), dst.end(), [&](const auto& h) {
-            return h.stage == kMeshGroupFilterStage && h.tag == tag;
-        });
-        if (!exists) {
-            if (prepend) {
-                dst.insert(dst.begin(), hook);
+    pre.erase(std::remove_if(pre.begin(), pre.end(), [&](const auto& h) {
+        return h.stage == kMeshGroupFilterStage && h.tag == tag;
+    }), pre.end());
+    post.erase(std::remove_if(post.begin(), post.end(), [&](const auto& h) {
+        return h.stage == kMeshGroupFilterStage && h.tag == tag;
+    }), post.end());
+    if (deformable) {
+        deformable->removeDeformPreProcessFilter(kMeshGroupFilterStage, tag);
+        deformable->removeDeformPostProcessFilter(kMeshGroupFilterStage, tag);
+        if (translateChildren || isDeformable) {
+            Node::DeformFilterHook hook{};
+            hook.stage = kMeshGroupFilterStage;
+            hook.tag = tag;
+            hook.func = [this](std::shared_ptr<Node> t,
+                               const Vec2Array& verts,
+                               Vec2Array& def,
+                               const Mat4* mat) {
+                return filterChildren(t, verts, def, mat);
+            };
+            if (dynamic) {
+                deformable->upsertDeformPostProcessFilter(std::move(hook), prepend);
             } else {
-                dst.push_back(hook);
+                deformable->upsertDeformPreProcessFilter(std::move(hook), prepend);
             }
         }
-    };
-
-    if (translateChildren || isDeformable) {
-        if (isDeformable && dynamic) {
-            removeTagged(pre);
-            upsertTagged(post);
+    } else if (translateChildren) {
+        Node::FilterHook hook{};
+        hook.stage = kMeshGroupFilterStage;
+        hook.tag = tag;
+        hook.func = [this](std::shared_ptr<Node> t,
+                           const Vec2Array& verts,
+                           Vec2Array def,
+                           const Mat4* mat) {
+            auto result = filterChildren(t, verts, def, mat);
+            return std::make_tuple(result.changed ? def : Vec2Array{}, static_cast<Mat4*>(nullptr), result.changed);
+        };
+        if (prepend) {
+            pre.insert(pre.begin(), hook);
         } else {
-            upsertTagged(pre);
-            removeTagged(post);
+            pre.push_back(hook);
         }
-    } else {
-        removeTagged(pre);
-        removeTagged(post);
     }
 
     if (traceMeshGroupChainEnabled()) {
@@ -725,6 +733,10 @@ void MeshGroup::releaseChildNoRecurse(const std::shared_ptr<Node>& node) {
     const auto tag = reinterpret_cast<std::uintptr_t>(this);
     pre.erase(std::remove_if(pre.begin(), pre.end(), [&](const auto& h) { return h.stage == kMeshGroupFilterStage && h.tag == tag; }), pre.end());
     post.erase(std::remove_if(post.begin(), post.end(), [&](const auto& h) { return h.stage == kMeshGroupFilterStage && h.tag == tag; }), post.end());
+    if (auto deformable = std::dynamic_pointer_cast<Deformable>(node)) {
+        deformable->removeDeformPreProcessFilter(kMeshGroupFilterStage, tag);
+        deformable->removeDeformPostProcessFilter(kMeshGroupFilterStage, tag);
+    }
 }
 
 bool MeshGroup::pointInTriangle(const Vec2& p, const Vec2& a, const Vec2& b, const Vec2& c) {

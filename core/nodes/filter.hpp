@@ -21,7 +21,7 @@ public:
 protected:
     void applyDeformToChildrenInternal(
         const std::shared_ptr<Node>& self,
-        const Node::FilterHook::Func& filterChildren,
+        const Node::DeformFilterHook::Func& filterChildren,
         const std::function<void(const Vec2Array&)>& update,
         const std::function<bool()>& transferCondition,
         const std::vector<std::shared_ptr<Parameter>>& params,

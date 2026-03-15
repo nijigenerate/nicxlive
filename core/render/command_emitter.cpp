@@ -1,5 +1,6 @@
 ﻿#include "command_emitter.hpp"
 #include "backend_queue.hpp"
+#include "shared_deform_buffer.hpp"
 #include "../runtime_state.hpp"
 #include "../debug_log.hpp"
 #include <cstdio>
@@ -170,9 +171,10 @@ void QueueCommandEmitter::drawPartPacket(const nodes::PartDrawPacket& packet) {
             const unsigned nodeUuid = node ? node->uuid : 0u;
             float d0x = 0.0f;
             float d0y = 0.0f;
-            if (packet.deformation.size() > 0) {
-                d0x = packet.deformation.xAt(0);
-                d0y = packet.deformation.yAt(0);
+            auto& deform = sharedDeformBufferData();
+            if (packet.deformOffset < deform.size()) {
+                d0x = deform.xAt(packet.deformOffset);
+                d0y = deform.yAt(packet.deformOffset);
             }
             NJCX_DBG_LOG(
                 "[nicxlive][drawmap] cmd=%zu node=%s(%u) tex0=%u vo=%u uo=%u do=%u vtx=%u idx=%u d0=(%g,%g)\n",

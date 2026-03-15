@@ -3,6 +3,7 @@
 #include "render/graph_builder.hpp"
 #include "render/scheduler.hpp"
 #include "render/command_emitter.hpp"
+#include "render/profiler.hpp"
 #include "debug_log.hpp"
 #include "nodes/projectable.hpp"
 #include "nodes/mesh_group.hpp"
@@ -11,7 +12,10 @@
 
 #include <algorithm>
 #include <cmath>
+#include <chrono>
 #include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <limits>
 #include <map>
 
@@ -31,6 +35,65 @@ public:
     explicit SimpleRenderCommandEmitter(const std::shared_ptr<render::QueueRenderBackend>& backend)
         : render::QueueCommandEmitter(backend) {}
 };
+
+bool perfEnabled() {
+    static int enabled = -1;
+    if (enabled >= 0) return enabled != 0;
+    const char* v = std::getenv("NJCX_PROFILE");
+    if (!v) {
+        enabled = 0;
+        return false;
+    }
+    enabled = (std::strcmp(v, "1") == 0 || std::strcmp(v, "true") == 0 || std::strcmp(v, "TRUE") == 0) ? 1 : 0;
+    return enabled != 0;
+}
+
+struct PuppetPerfWindow {
+    std::chrono::steady_clock::time_point lastReport{};
+    std::size_t frames{0};
+    double totalMs{0.0};
+    double automationMs{0.0};
+    double initParamMs{0.0};
+    double preFinalMs{0.0};
+    double rebuildMs{0.0};
+
+    void add(double total, double automation, double initParam, double preFinal, double rebuild) {
+        if (!perfEnabled()) return;
+        frames++;
+        totalMs += total;
+        automationMs += automation;
+        initParamMs += initParam;
+        preFinalMs += preFinal;
+        rebuildMs += rebuild;
+        auto now = std::chrono::steady_clock::now();
+        if (lastReport.time_since_epoch().count() == 0) {
+            lastReport = now;
+            return;
+        }
+        if ((now - lastReport) < std::chrono::seconds(1)) return;
+        const double frameDiv = frames ? static_cast<double>(frames) : 1.0;
+        std::fprintf(stderr,
+                     "[nicxlive][perf/update] frames=%zu total=%.3fms automation=%.3fms init=%.3fms prefinal=%.3fms rebuild=%.3fms\n",
+                     frames,
+                     totalMs / frameDiv,
+                     automationMs / frameDiv,
+                     initParamMs / frameDiv,
+                     preFinalMs / frameDiv,
+                     rebuildMs / frameDiv);
+        frames = 0;
+        totalMs = 0.0;
+        automationMs = 0.0;
+        initParamMs = 0.0;
+        preFinalMs = 0.0;
+        rebuildMs = 0.0;
+        lastReport = now;
+    }
+};
+
+PuppetPerfWindow& puppetPerfWindow() {
+    static PuppetPerfWindow window;
+    return window;
+}
 } // namespace
 
 Puppet::Puppet() {
@@ -193,11 +256,19 @@ std::shared_ptr<Node> Puppet::findNode(const std::shared_ptr<Node>& n, uint32_t 
 }
 
 void Puppet::update() {
+    auto updateProfile = render::profileScope("Puppet.update.total");
+    const auto totalStart = std::chrono::steady_clock::now();
+    double automationMs = 0.0;
+    double initParamMs = 0.0;
+    double preFinalMs = 0.0;
+    double rebuildMs = 0.0;
     transform.update();
 
+    const auto automationStart = std::chrono::steady_clock::now();
     for (auto& auto_ : automation) {
         if (auto_) auto_->update();
     }
+    automationMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - automationStart).count();
 
     auto rootNode = actualRoot();
     if (!rootNode) return;
@@ -213,18 +284,26 @@ void Puppet::update() {
                  forceFullRebuild ? 1 : 0,
                  schedulerCacheValid ? 1 : 0);
     if (forceFullRebuild || !schedulerCacheValid || pendingStructure) {
+        const auto rebuildStart = std::chrono::steady_clock::now();
         rebuildRenderTasks(rootNode);
+        rebuildMs += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - rebuildStart).count();
     }
 
+    const auto initParamStart = std::chrono::steady_clock::now();
     renderScheduler.executeRange(renderContext, TaskOrder::Init, TaskOrder::Parameters);
+    initParamMs += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - initParamStart).count();
 
     auto frameChanges = consumeFrameChanges();
     NJCX_DBG_LOG("[nicxlive] frameChange consumed1 structure=%d attr=%d\n",
                  frameChanges.structureDirty ? 1 : 0,
                  frameChanges.attributeDirty ? 1 : 0);
     if (frameChanges.structureDirty) {
+        const auto rebuildStart = std::chrono::steady_clock::now();
         rebuildRenderTasks(rootNode);
+        rebuildMs += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - rebuildStart).count();
+        const auto initParamRetryStart = std::chrono::steady_clock::now();
         renderScheduler.executeRange(renderContext, TaskOrder::Init, TaskOrder::Parameters);
+        initParamMs += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - initParamRetryStart).count();
         auto additional = consumeFrameChanges();
         NJCX_DBG_LOG("[nicxlive] frameChange consumed2 structure=%d attr=%d\n",
                      additional.structureDirty ? 1 : 0,
@@ -239,11 +318,16 @@ void Puppet::update() {
                  renderScheduler.taskCount(TaskOrder::Render),
                  renderScheduler.taskCount(TaskOrder::RenderEnd));
     renderGraph.beginFrame();
+    const auto preFinalStart = std::chrono::steady_clock::now();
     renderScheduler.executeRange(renderContext, TaskOrder::PreProcess, TaskOrder::Final);
+    preFinalMs += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - preFinalStart).count();
     NJCX_DBG_LOG("[nicxlive] puppet.update graph depth=%zu rootItems=%zu empty=%d\n",
                  renderGraph.passDepth(),
                  renderGraph.rootItemCount(),
                  renderGraph.empty() ? 1 : 0);
+    render::renderProfilerFrameCompleted();
+    const double totalMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - totalStart).count();
+    puppetPerfWindow().add(totalMs, automationMs, initParamMs, preFinalMs, rebuildMs);
 }
 
 void Puppet::resetDrivers() {
@@ -277,6 +361,7 @@ std::shared_ptr<nodes::Node> Puppet::actualRoot() {
 }
 
 void Puppet::draw() {
+    auto drawProfile = render::profileScope("Puppet.draw.total");
     if (!commandEmitterOwned || !renderBackend) {
         NJCX_DBG_LOG("[nicxlive] puppet.draw fallback reason=no_emitter_or_backend\n");
         drawImmediateFallback();

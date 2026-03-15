@@ -5,6 +5,7 @@
 #include "../nodes/common.hpp"
 #include "../timing.hpp"
 #include "../debug_log.hpp"
+#include "../render/profiler.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -459,6 +460,7 @@ void SimplePhysicsDriver::runBeginTask(core::RenderContext& ctx) {
 }
 
 void SimplePhysicsDriver::runPreProcessTask(core::RenderContext& ctx) {
+    auto scope = core::render::profileScope("SimplePhysicsDriver.runPreProcessTask");
     Vec3 prevPos = (localOnly ? Vec3{transformLocal().translation.x, transformLocal().translation.y, 0.0f}
                               : transform().toMat4().transformPoint(Vec3{0, 0, 0}));
     Driver::runPreProcessTask(ctx);

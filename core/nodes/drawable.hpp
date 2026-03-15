@@ -105,10 +105,10 @@ public:
                                                                     Vec2Array origDeformation,
                                                                     const Mat4* origTransform);
 
-    virtual std::tuple<Vec2Array, Mat4*, bool> weldingProcessor(const std::shared_ptr<Node>& target,
-                                                                const Vec2Array& origVertices,
-                                                                Vec2Array origDeformation,
-                                                                const Mat4* origTransform);
+    virtual Node::DeformFilterResult weldingProcessor(const std::shared_ptr<Node>& target,
+                                                      const Vec2Array& origVertices,
+                                                      Vec2Array& origDeformation,
+                                                      const Mat4* origTransform);
 
     virtual void rebufferMesh(const MeshData& data);
 
@@ -153,6 +153,7 @@ public:
     void runPostTaskImpl(std::size_t priority, core::RenderContext& ctx) override;
 
 private:
+    bool updateAttachedNodeTransform(const std::shared_ptr<Node>& node);
     void registerWeldFilter(const std::shared_ptr<Drawable>& target);
     void unregisterWeldFilter(const std::shared_ptr<Drawable>& target);
 };

@@ -6,7 +6,9 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <algorithm>
+#include <chrono>
 #include <cstddef>
+#include <cstdlib>
 #include <exception>
 #include <string>
 #if defined(_WIN32)
@@ -21,11 +23,13 @@
 #include <cstring>
 #include "runtime_state.hpp"
 #include "timing.hpp"
+#include "render/profiler.hpp"
 #include "debug_log.hpp"
 #include "render/shared_deform_buffer.hpp"
 
 using namespace nicxlive::core;
 using namespace nicxlive::core::render;
+namespace nodes = ::nicxlive::core::nodes;
 
 namespace {
 struct RendererCtx {
@@ -76,6 +80,79 @@ NjgLogFn gLogCallback{nullptr};
 void* gLogUserData{nullptr};
 bool gRuntimeInitialized{false};
 double gUnityTimeTicker{0.0};
+
+bool perfEnabled() {
+    static int enabled = -1;
+    if (enabled >= 0) return enabled != 0;
+    const char* v = std::getenv("NJCX_PROFILE");
+    if (!v) {
+        enabled = 0;
+        return false;
+    }
+    enabled = (std::strcmp(v, "1") == 0 || std::strcmp(v, "true") == 0 || std::strcmp(v, "TRUE") == 0) ? 1 : 0;
+    return enabled != 0;
+}
+
+struct UnityPerfWindow {
+    std::chrono::steady_clock::time_point lastReport{};
+    std::size_t tickFrames{0};
+    double tickMs{0.0};
+    double emitMs{0.0};
+    double sharedMs{0.0};
+    double packMs{0.0};
+    double textureCmdMs{0.0};
+
+    void addTick(double ms) {
+        if (!perfEnabled()) return;
+        tickFrames++;
+        tickMs += ms;
+        maybeReport();
+    }
+
+    void addEmit(double emit, double pack, double textureCmd) {
+        if (!perfEnabled()) return;
+        emitMs += emit;
+        packMs += pack;
+        textureCmdMs += textureCmd;
+        maybeReport();
+    }
+
+    void addShared(double ms) {
+        if (!perfEnabled()) return;
+        sharedMs += ms;
+        maybeReport();
+    }
+
+    void maybeReport() {
+        auto now = std::chrono::steady_clock::now();
+        if (lastReport.time_since_epoch().count() == 0) {
+            lastReport = now;
+            return;
+        }
+        if ((now - lastReport) < std::chrono::seconds(1)) return;
+        const double frameDiv = tickFrames ? static_cast<double>(tickFrames) : 1.0;
+        std::fprintf(stderr,
+                     "[nicxlive][perf/unity] frames=%zu tick=%.3fms emit=%.3fms shared=%.3fms pack=%.3fms texcmd=%.3fms\n",
+                     tickFrames,
+                     tickMs / frameDiv,
+                     emitMs / frameDiv,
+                     sharedMs / frameDiv,
+                     packMs / frameDiv,
+                     textureCmdMs / frameDiv);
+        tickFrames = 0;
+        tickMs = 0.0;
+        emitMs = 0.0;
+        sharedMs = 0.0;
+        packMs = 0.0;
+        textureCmdMs = 0.0;
+        lastReport = now;
+    }
+};
+
+UnityPerfWindow& unityPerfWindow() {
+    static UnityPerfWindow window;
+    return window;
+}
 
 void unityLog(const std::string& message) {
     if (gLogCallback) {
@@ -254,7 +331,116 @@ static void packVec2Array(const ::nicxlive::core::nodes::Vec2Array& src, std::ve
     }
 }
 
+static const std::vector<uint16_t>* resolvePacketIndices(const RendererCtx& ctx, const nodes::PartDrawPacket& packet) {
+    if (auto idxBuf = ctx.backend->getDrawableIndices(packet.indexBuffer); idxBuf && !idxBuf->empty()) {
+        return idxBuf;
+    }
+    auto node = packet.node.lock();
+    if (!node || node->mesh->indices.empty()) {
+        return nullptr;
+    }
+    return &node->mesh->indices;
+}
+
+static size_t resolvePacketTextureHandle(const RendererCtx& ctx, const nodes::PartDrawPacket& packet, std::size_t textureIndex) {
+    if (textureIndex >= 3) {
+        return 0;
+    }
+
+    const auto runtimeOrTextureId = packet.textureUUIDs[textureIndex];
+    if (runtimeOrTextureId != 0) {
+        auto runtimeHit = ctx.runtimeTextureHandles.find(runtimeOrTextureId);
+        if (runtimeHit != ctx.runtimeTextureHandles.end()) {
+            return runtimeHit->second;
+        }
+        auto backendHit = ctx.backendTextureHandles.find(runtimeOrTextureId);
+        if (backendHit != ctx.backendTextureHandles.end()) {
+            return backendHit->second;
+        }
+    }
+
+    const auto backendId = packet.textureBackendIds[textureIndex];
+    if (backendId != 0) {
+        auto backendHit = ctx.backendTextureHandles.find(backendId);
+        if (backendHit != ctx.backendTextureHandles.end()) {
+            return backendHit->second;
+        }
+    }
+
+    auto node = packet.node.lock();
+    if (!node || textureIndex >= node->textures.size()) {
+        return 0;
+    }
+    const auto& texture = node->textures[textureIndex];
+    if (!texture) {
+        return 0;
+    }
+
+    const auto runtimeId = texture->getRuntimeUUID();
+    if (runtimeId != 0) {
+        auto runtimeHit = ctx.runtimeTextureHandles.find(runtimeId);
+        if (runtimeHit != ctx.runtimeTextureHandles.end()) {
+            return runtimeHit->second;
+        }
+    }
+
+    const auto textureBackendId = texture->backendId();
+    if (textureBackendId != 0) {
+        auto backendHit = ctx.backendTextureHandles.find(textureBackendId);
+        if (backendHit != ctx.backendTextureHandles.end()) {
+            return backendHit->second;
+        }
+    }
+
+    return 0;
+}
+
+static void packPartPacket(RendererCtx& ctx, const nodes::PartDrawPacket& src, NjgPartDrawPacket& dst, std::size_t textureCount) {
+    dst.isMask = src.isMask;
+    dst.renderable = src.renderable;
+    dst.modelMatrix = src.modelMatrix;
+    dst.renderMatrix = src.renderMatrix;
+    dst.renderRotation = src.renderRotation;
+    dst.clampedTint = src.clampedTint;
+    dst.clampedScreen = src.clampedScreen;
+    dst.opacity = src.opacity;
+    dst.emissionStrength = src.emissionStrength;
+    dst.maskThreshold = src.maskThreshold;
+    dst.blendingMode = static_cast<int>(src.blendMode);
+    dst.useMultistageBlend = src.useMultistageBlend;
+    dst.hasEmissionOrBumpmap = src.hasEmissionOrBumpmap;
+    dst.origin = src.origin;
+    dst.vertexOffset = src.vertexOffset;
+    dst.vertexAtlasStride = src.vertexAtlasStride;
+    dst.uvOffset = src.uvOffset;
+    dst.uvAtlasStride = src.uvAtlasStride;
+    dst.deformOffset = src.deformOffset;
+    dst.deformAtlasStride = src.deformAtlasStride;
+    dst.indexHandle = src.indexBuffer;
+
+    if (const auto* indices = resolvePacketIndices(ctx, src); indices && !indices->empty()) {
+        dst.indexCount = (std::min<std::size_t>)(src.indexCount, indices->size());
+        dst.indices = indices->data();
+    } else {
+        dst.indexCount = 0;
+        dst.indices = nullptr;
+    }
+    dst.vertexCount = src.vertexCount;
+
+    if (textureCount > 3) {
+        textureCount = 3;
+    }
+    for (std::size_t i = 0; i < textureCount; ++i) {
+        dst.textureHandles[i] = resolvePacketTextureHandle(ctx, src, i);
+    }
+    for (std::size_t i = textureCount; i < 3; ++i) {
+        dst.textureHandles[i] = 0;
+    }
+    dst.textureCount = textureCount;
+}
+
 static void packQueuedCommands(RendererCtx& ctx) {
+    auto profile = render::profileScope("Unity.packQueuedCommands");
     ctx.queued.clear();
     for (const auto& qc : ctx.backend->queue) {
         NjgQueuedCommand out{};
@@ -270,58 +456,7 @@ static void packQueuedCommands(RendererCtx& ctx) {
         }
         // Part packet
         const auto& pp = qc.partPacket;
-        out.partPacket.isMask = pp.isMask;
-        out.partPacket.renderable = pp.renderable;
-        out.partPacket.modelMatrix = pp.modelMatrix;
-        out.partPacket.renderMatrix = pp.renderMatrix;
-        out.partPacket.renderRotation = pp.renderRotation;
-        out.partPacket.clampedTint = pp.clampedTint;
-        out.partPacket.clampedScreen = pp.clampedScreen;
-        out.partPacket.opacity = pp.opacity;
-        out.partPacket.emissionStrength = pp.emissionStrength;
-        out.partPacket.maskThreshold = pp.maskThreshold;
-        out.partPacket.blendingMode = static_cast<int>(pp.blendMode);
-        out.partPacket.useMultistageBlend = pp.useMultistageBlend;
-        out.partPacket.hasEmissionOrBumpmap = pp.hasEmissionOrBumpmap;
-        out.partPacket.origin = pp.origin;
-        out.partPacket.vertexOffset = pp.vertexOffset;
-        out.partPacket.vertexAtlasStride = pp.vertexAtlasStride;
-        out.partPacket.uvOffset = pp.uvOffset;
-        out.partPacket.uvAtlasStride = pp.uvAtlasStride;
-        out.partPacket.deformOffset = pp.deformOffset;
-        out.partPacket.deformAtlasStride = pp.deformAtlasStride;
-        out.partPacket.indexHandle = pp.indexBuffer;
-        auto idxBuf = ctx.backend->getDrawableIndices(pp.indexBuffer);
-        if (idxBuf && !idxBuf->empty()) {
-            out.partPacket.indexCount = std::min<std::size_t>(pp.indexCount, idxBuf->size());
-            out.partPacket.indices = idxBuf->data();
-            out.partPacket.vertexCount = pp.vertexCount;
-        } else {
-            // Queue backend map may miss some late-built quads (e.g. composite self draw).
-            // Fall back to packet-local indices in that case.
-            out.partPacket.indexCount = pp.indexCount;
-            out.partPacket.vertexCount = pp.vertexCount;
-            out.partPacket.indices = pp.indices.empty() ? nullptr : pp.indices.data();
-        }
-        const size_t texCount = (qc.kind == RenderCommandKind::DrawPart) ? 3 : 0;
-        for (size_t ti = 0; ti < texCount; ++ti) {
-            const auto t = pp.textureUUIDs[ti];
-            auto tex = pp.textures[ti];
-            size_t h = 0;
-            if (t != 0) {
-                auto hit = ctx.runtimeTextureHandles.find(t);
-                if (hit != ctx.runtimeTextureHandles.end()) h = hit->second;
-            }
-            if (tex) {
-                const uint32_t bid = tex->backendId();
-                if (h == 0 && bid != 0) {
-                    auto bit = ctx.backendTextureHandles.find(bid);
-                    if (bit != ctx.backendTextureHandles.end()) h = bit->second;
-                }
-            }
-            out.partPacket.textureHandles[ti] = h;
-        }
-        out.partPacket.textureCount = texCount;
+        packPartPacket(ctx, pp, out.partPacket, (qc.kind == RenderCommandKind::DrawPart) ? 3 : 0);
         // Mask apply
         switch (qc.maskApplyPacket.kind) {
         case nicxlive::core::RenderBackend::MaskDrawableKind::Part:
@@ -339,55 +474,7 @@ static void packQueuedCommands(RendererCtx& ctx) {
         // D parity: ApplyMask serializes its own part packet, not the current DrawPart packet.
         const auto& applyPart = qc.maskApplyPacket.partPacket;
         auto& maskPart = out.maskApplyPacket.partPacket;
-        maskPart.isMask = applyPart.isMask;
-        maskPart.renderable = applyPart.renderable;
-        maskPart.modelMatrix = applyPart.modelMatrix;
-        maskPart.renderMatrix = applyPart.renderMatrix;
-        maskPart.renderRotation = applyPart.renderRotation;
-        maskPart.clampedTint = applyPart.clampedTint;
-        maskPart.clampedScreen = applyPart.clampedScreen;
-        maskPart.opacity = applyPart.opacity;
-        maskPart.emissionStrength = applyPart.emissionStrength;
-        maskPart.maskThreshold = applyPart.maskThreshold;
-        maskPart.blendingMode = static_cast<int>(applyPart.blendMode);
-        maskPart.useMultistageBlend = applyPart.useMultistageBlend;
-        maskPart.hasEmissionOrBumpmap = applyPart.hasEmissionOrBumpmap;
-        maskPart.origin = applyPart.origin;
-        maskPart.vertexOffset = applyPart.vertexOffset;
-        maskPart.vertexAtlasStride = applyPart.vertexAtlasStride;
-        maskPart.uvOffset = applyPart.uvOffset;
-        maskPart.uvAtlasStride = applyPart.uvAtlasStride;
-        maskPart.deformOffset = applyPart.deformOffset;
-        maskPart.deformAtlasStride = applyPart.deformAtlasStride;
-        maskPart.indexHandle = applyPart.indexBuffer;
-        for (size_t ti = 0; ti < 3; ++ti) {
-            const auto t = applyPart.textureUUIDs[ti];
-            auto tex = applyPart.textures[ti];
-            size_t h = 0;
-            if (t != 0) {
-                auto hit = ctx.runtimeTextureHandles.find(t);
-                if (hit != ctx.runtimeTextureHandles.end()) h = hit->second;
-            }
-            if (tex) {
-                const uint32_t bid = tex->backendId();
-                if (h == 0 && bid != 0) {
-                    auto bit = ctx.backendTextureHandles.find(bid);
-                    if (bit != ctx.backendTextureHandles.end()) h = bit->second;
-                }
-            }
-            maskPart.textureHandles[ti] = h;
-        }
-        maskPart.textureCount = 3;
-        auto applyIdx = ctx.backend->getDrawableIndices(applyPart.indexBuffer);
-        if (applyIdx && !applyIdx->empty()) {
-            maskPart.indexCount = std::min<std::size_t>(applyPart.indexCount, applyIdx->size());
-            maskPart.indices = applyIdx->data();
-            maskPart.vertexCount = applyPart.vertexCount;
-        } else {
-            maskPart.indexCount = applyPart.indexCount;
-            maskPart.vertexCount = applyPart.vertexCount;
-            maskPart.indices = applyPart.indices.empty() ? nullptr : applyPart.indices.data();
-        }
+        packPartPacket(ctx, applyPart, maskPart, 3);
         // mask packet from qc.maskApplyPacket.maskPacket
         const auto& mp = qc.maskApplyPacket.maskPacket;
         out.maskApplyPacket.maskPacket.modelMatrix = mp.modelMatrix;
@@ -853,6 +940,8 @@ NjgResult njgBeginFrame(void* renderer, const FrameConfig* cfg) {
 }
 
 NjgResult njgTickPuppet(void* puppet, double deltaSeconds) {
+    auto profile = render::profileScope("Unity.njgTickPuppet");
+    const auto start = std::chrono::steady_clock::now();
     std::lock_guard<std::mutex> lock(gMutex);
     auto it = gPuppets.find(puppet);
     if (it == gPuppets.end()) return NjgResult::InvalidArgument;
@@ -875,10 +964,13 @@ NjgResult njgTickPuppet(void* puppet, double deltaSeconds) {
         it->second->puppet->update();
         NJCX_DBG_LOG("[nicxlive] tick update end graphEmpty=%d rootParts=%zu\n", it->second->puppet->isRenderGraphEmpty() ? 1 : 0, it->second->puppet->rootPartCount());
     }
+    unityPerfWindow().addTick(std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count());
     return NjgResult::Ok;
 }
 NjgResult njgEmitCommands(void* renderer, CommandQueueView* outView) {
     if (!renderer || !outView) return NjgResult::InvalidArgument;
+    auto profile = render::profileScope("Unity.njgEmitCommands");
+    const auto start = std::chrono::steady_clock::now();
     std::lock_guard<std::mutex> lock(gMutex);
     auto it = gRenderers.find(renderer);
     if (it == gRenderers.end()) return NjgResult::InvalidArgument;
@@ -899,19 +991,33 @@ NjgResult njgEmitCommands(void* renderer, CommandQueueView* outView) {
             NJCX_DBG_LOG("[nicxlive] emit puppet state graphEmpty=%d rootParts=%zu\n", pit->second->puppet->isRenderGraphEmpty() ? 1 : 0, pit->second->puppet->rootPartCount());
     }
     // Apply deferred texture create/update/dispose callbacks.
-    applyTextureCommands(ctx);
+    double textureCmdMs = 0.0;
+    {
+        auto applyTextureProfile = render::profileScope("Unity.applyTextureCommands");
+        const auto textureStart = std::chrono::steady_clock::now();
+        applyTextureCommands(ctx);
+        textureCmdMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - textureStart).count();
+    }
 
+    const auto packStart = std::chrono::steady_clock::now();
     packQueuedCommands(ctx);
+    const double packMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - packStart).count();
     NJCX_DBG_CODE(unityLog(std::string("[nicxlive] emit packed queue=") + std::to_string(ctx.backend->queue.size())););
     outView->commands = ctx.queued.empty() ? nullptr : ctx.queued.data();
     NJCX_DBG_LOG("[nicxlive] emit packed queue=%zu out=%zu\n", ctx.backend->queue.size(), outView->count);
     outView->count = ctx.queued.size();
     NJCX_DBG_CODE(unityLog(std::string("[nicxlive] emit out count=") + std::to_string(outView->count)););
+    unityPerfWindow().addEmit(
+        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count(),
+        packMs,
+        textureCmdMs);
     return NjgResult::Ok;
 }
 
 NjgResult njgGetSharedBuffers(void* renderer, SharedBufferSnapshot* snapshot) {
     if (!renderer || !snapshot) return NjgResult::InvalidArgument;
+    auto profile = render::profileScope("Unity.njgGetSharedBuffers");
+    const auto start = std::chrono::steady_clock::now();
     std::lock_guard<std::mutex> lock(gMutex);
     auto it = gRenderers.find(renderer);
     if (it == gRenderers.end()) return NjgResult::InvalidArgument;
@@ -924,6 +1030,7 @@ NjgResult njgGetSharedBuffers(void* renderer, SharedBufferSnapshot* snapshot) {
     snapshot->vertexCount = ::nicxlive::core::render::sharedVertexBufferData().size();
     snapshot->uvCount = ::nicxlive::core::render::sharedUvBufferData().size();
     snapshot->deformCount = ::nicxlive::core::render::sharedDeformBufferData().size();
+    unityPerfWindow().addShared(std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count());
     return NjgResult::Ok;
 }
 

@@ -147,18 +147,24 @@ void BezierCurve::evaluatePoints(const std::vector<float>& tSamples, Vec2Array& 
     auto n = static_cast<int>(controlPoints_.size());
     if (tSamples.empty() || n == 0) return;
     int order = n - 1;
+    std::vector<float> binomials(order + 1, 0.0f);
+    std::vector<float> tPow(order + 1, 1.0f);
+    std::vector<float> onePow(order + 1, 1.0f);
+    for (int i = 0; i <= order; ++i) {
+        binomials[i] = binomial(order, i);
+    }
     for (std::size_t idx = 0; idx < tSamples.size(); ++idx) {
         float t = std::clamp(tSamples[idx], 0.0f, 1.0f);
         float oneMinus = 1.0f - t;
         float resX = 0.0f, resY = 0.0f;
-        std::vector<float> tPow(order + 1, 1.0f);
-        std::vector<float> onePow(order + 1, 1.0f);
+        tPow[0] = 1.0f;
+        onePow[0] = 1.0f;
         for (int i = 1; i <= order; ++i) {
             tPow[i] = tPow[i - 1] * t;
             onePow[i] = onePow[i - 1] * oneMinus;
         }
         for (int i = 0; i <= order; ++i) {
-            float coeff = binomial(order, i) * onePow[order - i] * tPow[i];
+            float coeff = binomials[i] * onePow[order - i] * tPow[i];
             resX += coeff * controlPoints_.xAt(i);
             resY += coeff * controlPoints_.yAt(i);
         }
@@ -172,18 +178,24 @@ void BezierCurve::evaluateDerivatives(const std::vector<float>& tSamples, Vec2Ar
     auto n = static_cast<int>(derivatives_.size());
     if (tSamples.empty() || n == 0) return;
     int order = n - 1;
+    std::vector<float> binomials(order + 1, 0.0f);
+    std::vector<float> tPow(order + 1, 1.0f);
+    std::vector<float> onePow(order + 1, 1.0f);
+    for (int i = 0; i <= order; ++i) {
+        binomials[i] = binomial(order, i);
+    }
     for (std::size_t idx = 0; idx < tSamples.size(); ++idx) {
         float t = std::clamp(tSamples[idx], 0.0f, 1.0f);
         float oneMinus = 1.0f - t;
         float resX = 0.0f, resY = 0.0f;
-        std::vector<float> tPow(order + 1, 1.0f);
-        std::vector<float> onePow(order + 1, 1.0f);
+        tPow[0] = 1.0f;
+        onePow[0] = 1.0f;
         for (int i = 1; i <= order; ++i) {
             tPow[i] = tPow[i - 1] * t;
             onePow[i] = onePow[i - 1] * oneMinus;
         }
         for (int i = 0; i <= order; ++i) {
-            float coeff = binomial(order, i) * onePow[order - i] * tPow[i];
+            float coeff = binomials[i] * onePow[order - i] * tPow[i];
             resX += coeff * derivatives_.xAt(i);
             resY += coeff * derivatives_.yAt(i);
         }

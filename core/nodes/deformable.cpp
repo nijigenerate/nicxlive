@@ -1,6 +1,7 @@
 #include "deformable.hpp"
 #include "../puppet.hpp"
 #include "../debug_log.hpp"
+#include "../render/profiler.hpp"
 #include <cstdio>
 #include <cmath>
 
@@ -22,6 +23,32 @@ float maxAbsVec2Array(const Vec2Array& arr) {
         maxAbs = std::max(maxAbs, std::max(std::fabs(arr.xAt(i)), std::fabs(arr.yAt(i))));
     }
     return maxAbs;
+}
+
+template <typename HookVector>
+bool hasDeformHook(const HookVector& hooks, int stage, std::uintptr_t tag) {
+    return std::any_of(hooks.begin(), hooks.end(), [&](const auto& hook) {
+        return hook.stage == stage && hook.tag == tag;
+    });
+}
+
+template <typename HookVector>
+void upsertDeformHook(HookVector& hooks, const Node::DeformFilterHook& hook, bool prepend) {
+    hooks.erase(std::remove_if(hooks.begin(), hooks.end(), [&](const auto& existing) {
+        return existing.stage == hook.stage && existing.tag == hook.tag;
+    }), hooks.end());
+    if (prepend) {
+        hooks.insert(hooks.begin(), hook);
+    } else {
+        hooks.push_back(hook);
+    }
+}
+
+template <typename HookVector>
+void eraseDeformHook(HookVector& hooks, int stage, std::uintptr_t tag) {
+    hooks.erase(std::remove_if(hooks.begin(), hooks.end(), [&](const auto& hook) {
+        return hook.stage == stage && hook.tag == tag;
+    }), hooks.end());
 }
 } // namespace
 
@@ -152,19 +179,18 @@ void Deformable::remapDeformationBindings(const std::vector<std::size_t>& remap,
 }
 
 void Deformable::preProcess() {
+    auto scope = core::render::profileScope("Deformable.preProcess");
     if (preProcessed) return;
-    preProcessed = true;
+    Node::preProcess();
     const char* traceTarget = traceDeformChainTarget();
     const bool traceThisNode = traceTarget && name.find(traceTarget) != std::string::npos;
-    for (const auto& hook : preProcessFilters) {
+    bool anyNotify = false;
+    for (const auto& hook : deformPreProcessFilters) {
         const float beforeAbs = traceThisNode ? maxAbsVec2Array(deformation) : 0.0f;
         Mat4 matrix = overrideTransformMatrix ? *overrideTransformMatrix : transform().toMat4();
         auto result = hook.func(shared_from_this(), vertices, deformation, &matrix);
-        const auto& newDeform = std::get<0>(result);
-        const auto& newMat = std::get<1>(result);
-        bool notify = std::get<2>(result);
         if (traceThisNode) {
-            const float resultAbs = maxAbsVec2Array(newDeform);
+            const float resultAbs = maxAbsVec2Array(deformation);
             NJCX_DBG_LOG("[nicxlive][DeformChain][Pre] node=%s uuid=%u tag=%zu stage=%d before=%.6f result=%.6f resultSize=%zu notify=%d\n",
                          name.c_str(),
                          uuid,
@@ -172,17 +198,14 @@ void Deformable::preProcess() {
                          hook.stage,
                          beforeAbs,
                          resultAbs,
-                         newDeform.size(),
-                         notify ? 1 : 0);
+                         deformation.size(),
+                         result.changed ? 1 : 0);
         }
-        if (!newDeform.empty()) {
-            deformation = newDeform;
+        if (result.transform.has_value()) {
+            overrideTransformMatrix = *result.transform;
         }
-        if (newMat != nullptr) {
-            overrideTransformMatrix = *newMat;
-        }
-        if (notify) {
-            notifyChange(shared_from_this());
+        if (result.changed) {
+            anyNotify = true;
         }
         if (traceThisNode) {
             const float afterAbs = maxAbsVec2Array(deformation);
@@ -193,27 +216,36 @@ void Deformable::preProcess() {
                          deformation.size());
         }
     }
+    if (anyNotify) {
+        notifyChange(shared_from_this());
+    }
 }
 
 void Deformable::postProcess(int id) {
     if (postProcessed >= id) return;
-    postProcessed = id;
-    for (const auto& hook : postProcessFilters) {
+    Node::postProcess(id);
+    bool anyNotify = false;
+    for (const auto& hook : deformPostProcessFilters) {
         if (hook.stage != id) continue;
         Mat4 matrix = overrideTransformMatrix ? *overrideTransformMatrix : transform().toMat4();
         auto result = hook.func(shared_from_this(), vertices, deformation, &matrix);
-        const auto& newDeform = std::get<0>(result);
-        const auto& newMat = std::get<1>(result);
-        bool notify = std::get<2>(result);
-        if (!newDeform.empty()) {
-            deformation = newDeform;
+        if (result.transform.has_value()) {
+            overrideTransformMatrix = *result.transform;
         }
-        if (newMat != nullptr) {
-            overrideTransformMatrix = *newMat;
+        if (result.changed) {
+            anyNotify = true;
         }
-        if (notify) {
-            notifyChange(shared_from_this());
-        }
+    }
+    if (anyNotify) {
+        notifyChange(shared_from_this());
+    }
+}
+
+void Deformable::copyFrom(const Node& src, bool clone, bool deepCopy) {
+    Node::copyFrom(src, clone, deepCopy);
+    if (auto deformable = dynamic_cast<const Deformable*>(&src)) {
+        deformPreProcessFilters = deformable->deformPreProcessFilters;
+        deformPostProcessFilters = deformable->deformPostProcessFilters;
     }
 }
 
@@ -224,6 +256,7 @@ void Deformable::runBeginTask(core::RenderContext& ctx) {
 }
 
 void Deformable::runPreProcessTask(core::RenderContext& ctx) {
+    auto scope = core::render::profileScope("Deformable.runPreProcessTask");
     Node::runPreProcessTask(ctx);
     deformStack.update();
 }
@@ -234,6 +267,32 @@ void Deformable::runPostTaskImpl(std::size_t priority, core::RenderContext& ctx)
 }
 
 void Deformable::notifyDeformPushed(const Vec2Array& deform) { onDeformPushed(deform); }
+
+bool Deformable::hasDeformPreProcessFilter(int stage, std::uintptr_t tag) const {
+    return hasDeformHook(deformPreProcessFilters, stage, tag);
+}
+
+bool Deformable::hasDeformPostProcessFilter(int stage, std::uintptr_t tag) const {
+    return hasDeformHook(deformPostProcessFilters, stage, tag);
+}
+
+void Deformable::upsertDeformPreProcessFilter(Node::DeformFilterHook hook, bool prepend) {
+    requirePreProcessTask();
+    upsertDeformHook(deformPreProcessFilters, hook, prepend);
+}
+
+void Deformable::upsertDeformPostProcessFilter(Node::DeformFilterHook hook, bool prepend) {
+    requirePostTask(static_cast<std::size_t>(std::max(hook.stage, 0)));
+    upsertDeformHook(deformPostProcessFilters, hook, prepend);
+}
+
+void Deformable::removeDeformPreProcessFilter(int stage, std::uintptr_t tag) {
+    eraseDeformHook(deformPreProcessFilters, stage, tag);
+}
+
+void Deformable::removeDeformPostProcessFilter(int stage, std::uintptr_t tag) {
+    eraseDeformHook(deformPostProcessFilters, stage, tag);
+}
 
 bool areDeformationNodesCompatible(const std::shared_ptr<Node>& lhs, const std::shared_ptr<Node>& rhs) {
     auto dl = std::dynamic_pointer_cast<Deformable>(lhs);

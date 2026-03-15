@@ -14,7 +14,7 @@ void NodeFilter::applyDeformToChildren(const std::vector<std::shared_ptr<Paramet
 
 void NodeFilter::applyDeformToChildrenInternal(
     const std::shared_ptr<Node>& self,
-    const Node::FilterHook::Func& filterChildren,
+    const Node::DeformFilterHook::Func& filterChildren,
     const std::function<void(const Vec2Array&)>& update,
     const std::function<bool()>& transferCondition,
     const std::vector<std::shared_ptr<Parameter>>& params,
@@ -108,8 +108,8 @@ void NodeFilter::applyDeformToChildrenInternal(
                     Vec2Array nodeDeform = nodeBinding->valueAt(point).vertexOffsets.dup();
                     Mat4 matrix = node->transform().toMat4();
                     auto filterResult = filterChildren(node, deformable->vertices, nodeDeform, &matrix);
-                    if (!std::get<0>(filterResult).empty()) {
-                        nodeBinding->setRawOffsetsAt(point, std::get<0>(filterResult));
+                    if (filterResult.changed) {
+                        nodeBinding->setRawOffsetsAt(point, nodeDeform);
                     }
                 }
             } else if (transferCondition() && !isComposite) {
@@ -132,14 +132,13 @@ void NodeFilter::applyDeformToChildrenInternal(
                 nodeDeform.yAt(0) = node->offsetTransform.translation.y;
 
                 auto filterResult = filterChildren(node, vertices, nodeDeform, &matrix);
-                const auto& filtered = std::get<0>(filterResult);
-                if (!filtered.empty() && nodeBindingX && nodeBindingY) {
+                if (filterResult.changed && nodeBindingX && nodeBindingY) {
                     const core::param::Vec2u point{
                         static_cast<std::size_t>(x),
                         static_cast<std::size_t>(y),
                     };
-                    nodeBindingX->setRawValueAt(point, nodeBindingX->valueAt(point) + filtered.xAt(0));
-                    nodeBindingY->setRawValueAt(point, nodeBindingY->valueAt(point) + filtered.yAt(0));
+                    nodeBindingX->setRawValueAt(point, nodeBindingX->valueAt(point) + nodeDeform.xAt(0));
+                    nodeBindingY->setRawValueAt(point, nodeBindingY->valueAt(point) + nodeDeform.yAt(0));
                 }
             }
 

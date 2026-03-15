@@ -1,10 +1,9 @@
 #pragma once
 
 #include "../nodes/common.hpp"
-#include "../texture.hpp"
 #include <array>
 #include <cstdint>
-#include <vector>
+#include <memory>
 
 namespace nicxlive::core::nodes {
 
@@ -36,12 +35,8 @@ struct PartDrawPacket {
     uint32_t vertexCount{0};
     uint32_t indexCount{0};
     RenderResourceHandle indexBuffer{0};
-    std::array<std::shared_ptr<::nicxlive::core::Texture>, 3> textures{};
     uint32_t textureUUIDs[3]{};
-    std::vector<uint16_t> indices{};
-    std::vector<Vec2> vertices{};
-    std::vector<Vec2> uvs{};
-    ::nicxlive::core::common::Vec2Array deformation{};
+    uint32_t textureBackendIds[3]{};
     std::weak_ptr<class Part> node{};
 };
 

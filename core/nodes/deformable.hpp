@@ -6,6 +6,8 @@
 
 #include <array>
 #include <algorithm>
+#include <cstdint>
+#include <functional>
 #include <utility>
 #include <optional>
 
@@ -46,6 +48,8 @@ public:
     Vec2Array vertices{};
     Vec2Array deformation{};
     DeformationStack deformStack{this};
+    std::vector<Node::DeformFilterHook> deformPreProcessFilters{};
+    std::vector<Node::DeformFilterHook> deformPostProcessFilters{};
 
     Deformable();
     explicit Deformable(const std::shared_ptr<Node>& parent);
@@ -70,6 +74,7 @@ public:
 
     void preProcess() override;
     void postProcess(int id = 0) override;
+    void copyFrom(const Node& src, bool clone = false, bool deepCopy = true) override;
 
     void runBeginTask(core::RenderContext& ctx) override;
 
@@ -78,6 +83,12 @@ public:
     void runPostTaskImpl(std::size_t priority, core::RenderContext& ctx) override;
 
     void notifyDeformPushed(const Vec2Array& deform);
+    bool hasDeformPreProcessFilter(int stage, std::uintptr_t tag) const;
+    bool hasDeformPostProcessFilter(int stage, std::uintptr_t tag) const;
+    void upsertDeformPreProcessFilter(Node::DeformFilterHook hook, bool prepend = false);
+    void upsertDeformPostProcessFilter(Node::DeformFilterHook hook, bool prepend = false);
+    void removeDeformPreProcessFilter(int stage, std::uintptr_t tag);
+    void removeDeformPostProcessFilter(int stage, std::uintptr_t tag);
 
 protected:
     virtual void onDeformPushed(const Vec2Array&) {}

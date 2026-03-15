@@ -4,6 +4,7 @@
 #include "../param/parameter.hpp"
 #include "../puppet.hpp"
 #include "../render.hpp"
+#include "../render/profiler.hpp"
 #include "../serde.hpp"
 #include "path_deformer.hpp"
 #include "composite.hpp"
@@ -198,14 +199,10 @@ void GridDeformer::sampleGridPoints(Vec2Array& dst, const std::vector<GridCellCa
 
 DeformResult GridDeformer::deformChildren(const std::shared_ptr<Node>& target,
                                           const Vec2Array& origVertices,
-                                          Vec2Array origDeformation,
+                                          Vec2Array& origDeformation,
                                           const Mat4* origTransform) {
+    auto scope = core::render::profileScope("GridDeformer.deformChildren");
     DeformResult res;
-    // D parity: unchanged/invalid grid filter should not return vertex payload.
-    // Deformable::pre/postProcess applies any non-empty payload unconditionally.
-    res.vertices.clear();
-    res.transform = nullptr;
-    res.changed = false;
 
     if (!hasValidGrid() || !origTransform) return res;
     if (auto path = std::dynamic_pointer_cast<PathDeformer>(target)) {
@@ -250,25 +247,20 @@ DeformResult GridDeformer::deformChildren(const std::shared_ptr<Node>& target,
             anyChanged = true;
         }
     }
-    if (!anyChanged) {
-        res.vertices = origDeformation;
-        return res;
-    }
+    if (!anyChanged) return res;
 
     Mat4 inv = centerMatrix.inverse();
     inv[0][3] = inv[1][3] = inv[2][3] = 0.0f;
-    Vec2Array deformOut = origDeformation.dup();
-    if (deformOut.size() < offsetLocal.size()) {
-        deformOut.resize(offsetLocal.size());
+    if (origDeformation.size() < offsetLocal.size()) {
+        origDeformation.resize(offsetLocal.size());
     }
-    transformAdd(deformOut, offsetLocal, inv, offsetLocal.size());
-
-    res.vertices = deformOut;
+    transformAdd(origDeformation, offsetLocal, inv, offsetLocal.size());
     res.changed = true;
     return res;
 }
 
 void GridDeformer::runPreProcessTask(core::RenderContext& ctx) {
+    auto scope = core::render::profileScope("GridDeformer.runPreProcessTask");
     Deformable::runPreProcessTask(ctx);
     localTransform.update();
     transform();
@@ -330,28 +322,39 @@ void GridDeformer::setupChildNoRecurse(const std::shared_ptr<Node>& node, bool p
     }
     auto deformable = std::dynamic_pointer_cast<Deformable>(node);
     bool isDeformable = static_cast<bool>(deformable);
-    Node::FilterHook hook;
-    hook.stage = kGridFilterStage;
-    hook.tag = reinterpret_cast<std::uintptr_t>(this);
-    hook.func = [this](std::shared_ptr<Node> t,
-                       const Vec2Array& v,
-                       Vec2Array d,
-                       const Mat4* mat) {
-        auto res = deformChildren(t, v, d, mat);
-        return std::make_tuple(res.vertices, res.transform, res.changed);
-    };
     auto& pre = node->preProcessFilters;
     auto& post = node->postProcessFilters;
     const auto tag = reinterpret_cast<std::uintptr_t>(this);
     pre.erase(std::remove_if(pre.begin(), pre.end(), [&](const auto& h) { return h.stage == kGridFilterStage && h.tag == tag; }), pre.end());
     post.erase(std::remove_if(post.begin(), post.end(), [&](const auto& h) { return h.stage == kGridFilterStage && h.tag == tag; }), post.end());
-    if (isDeformable) {
+    if (deformable) {
+        deformable->removeDeformPreProcessFilter(kGridFilterStage, tag);
+        deformable->removeDeformPostProcessFilter(kGridFilterStage, tag);
+        Node::DeformFilterHook deformHook;
+        deformHook.stage = kGridFilterStage;
+        deformHook.tag = tag;
+        deformHook.func = [this](std::shared_ptr<Node> t,
+                                 const Vec2Array& v,
+                                 Vec2Array& d,
+                                 const Mat4* mat) {
+            return deformChildren(t, v, d, mat);
+        };
         if (dynamic) {
-            if (prepend) post.insert(post.begin(), hook); else post.push_back(hook);
+            deformable->upsertDeformPostProcessFilter(std::move(deformHook), prepend);
         } else {
-            if (prepend) pre.insert(pre.begin(), hook); else pre.push_back(hook);
+            deformable->upsertDeformPreProcessFilter(std::move(deformHook), prepend);
         }
     } else if (translateChildren) {
+        Node::FilterHook hook;
+        hook.stage = kGridFilterStage;
+        hook.tag = tag;
+        hook.func = [this](std::shared_ptr<Node> t,
+                           const Vec2Array& v,
+                           Vec2Array d,
+                           const Mat4* mat) {
+            auto result = deformChildren(t, v, d, mat);
+            return std::make_tuple(result.changed ? d : Vec2Array{}, static_cast<Mat4*>(nullptr), result.changed);
+        };
         if (prepend) pre.insert(pre.begin(), hook); else pre.push_back(hook);
     } else {
         releaseChildNoRecurse(node);
@@ -365,6 +368,10 @@ void GridDeformer::releaseChildNoRecurse(const std::shared_ptr<Node>& node) {
     const auto tag = reinterpret_cast<std::uintptr_t>(this);
     pre.erase(std::remove_if(pre.begin(), pre.end(), [&](const auto& h) { return h.stage == kGridFilterStage && h.tag == tag; }), pre.end());
     post.erase(std::remove_if(post.begin(), post.end(), [&](const auto& h) { return h.stage == kGridFilterStage && h.tag == tag; }), post.end());
+    if (auto deformable = std::dynamic_pointer_cast<Deformable>(node)) {
+        deformable->removeDeformPreProcessFilter(kGridFilterStage, tag);
+        deformable->removeDeformPostProcessFilter(kGridFilterStage, tag);
+    }
 }
 
 void GridDeformer::applyDeformToChildren(const std::vector<std::shared_ptr<core::param::Parameter>>& params, bool recursive) {
@@ -379,9 +386,8 @@ void GridDeformer::applyDeformToChildren(const std::vector<std::shared_ptr<core:
 
     applyDeformToChildrenInternal(
         std::dynamic_pointer_cast<Node>(shared_from_this()),
-        [this](std::shared_ptr<Node> target, const Vec2Array& verticesIn, Vec2Array deformationIn, const Mat4* transformIn) {
-            auto res = deformChildren(target, verticesIn, deformationIn, transformIn);
-            return std::make_tuple(res.vertices, res.transform, res.changed);
+        [this](std::shared_ptr<Node> target, const Vec2Array& verticesIn, Vec2Array& deformationIn, const Mat4* transformIn) {
+            return deformChildren(target, verticesIn, deformationIn, transformIn);
         },
         update,
         [this]() { return translateChildren; },

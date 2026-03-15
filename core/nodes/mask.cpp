@@ -21,7 +21,7 @@ void Mask::fillDrawPacket(const Node& header, PartDrawPacket& packet, bool isMas
     Part::fillDrawPacket(header, packet, isMask);
     packet.renderable = false;
     for (auto& t : packet.textureUUIDs) t = 0;
-    for (auto& t : packet.textures) t.reset();
+    for (auto& t : packet.textureBackendIds) t = 0;
 }
 
 void Mask::serializeSelfImpl(::nicxlive::core::serde::InochiSerializer& serializer, bool recursive, SerializeNodeFlags flags) const {

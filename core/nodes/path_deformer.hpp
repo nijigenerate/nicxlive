@@ -94,6 +94,12 @@ public:
     std::vector<float> curveDiagReferenceScale{};
     std::vector<bool> curveDiagHasNaN{};
     std::vector<bool> curveDiagCollapsed{};
+    Vec2Array sampleScratch_{};
+    Vec2Array closestOrigScratch_{};
+    Vec2Array closestDefScratch_{};
+    Vec2Array tangentOrigScratch_{};
+    Vec2Array tangentDefScratch_{};
+    std::vector<float> tSamplesScratch_{};
     struct DiagnosticsState {
         uint64_t invalidFrameCount{0};
         uint64_t totalInvalidCount{0};
@@ -138,7 +144,7 @@ public:
 
     DeformResult deformChildren(const std::shared_ptr<Node>& target,
                                 const Vec2Array& origVertices,
-                                Vec2Array origDeformation,
+                                Vec2Array& origDeformation,
                                 const Mat4* origTransform) override;
 
     // Node overrides
