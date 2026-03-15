@@ -36,6 +36,7 @@ struct SharedVecAtlas {
     std::vector<Binding> bindings{};
     std::unordered_map<Vec2Array*, std::size_t> lookup{};
     bool dirty{false};
+    std::size_t revision{0};
 
     void registerArray(Vec2Array& target, std::size_t* offsetSink) {
         auto ptr = &target;
@@ -90,10 +91,19 @@ struct SharedVecAtlas {
     std::size_t stride() const { return storage.size(); }
     Vec2Array& data() { return storage; }
     bool isDirty() const { return dirty; }
-    void markDirty() { dirty = true; }
+    void markDirty() {
+        if (!dirty) bumpRevision();
+        dirty = true;
+    }
     void markUploaded() { dirty = false; }
+    std::size_t currentRevision() const { return revision; }
 
 private:
+    void bumpRevision() {
+        ++revision;
+        if (revision == 0) revision = 1;
+    }
+
     void rebuild() {
         std::size_t total = 0;
         for (const auto& binding : bindings) total += binding.length;
@@ -138,6 +148,7 @@ private:
             }
             if (binding.offsetSink) *binding.offsetSink = binding.offset;
         }
+        if (!dirty) bumpRevision();
         dirty = true;
         if (traceSharedEnabled()) {
             std::size_t maxEnd = 0;
@@ -164,6 +175,7 @@ Vec2Array& sharedDeformBufferData() { return deformAtlas.data(); }
 bool sharedDeformBufferDirty() { return deformAtlas.isDirty(); }
 void sharedDeformMarkDirty() { deformAtlas.markDirty(); }
 void sharedDeformMarkUploaded() { deformAtlas.markUploaded(); }
+std::size_t sharedDeformBufferRevision() { return deformAtlas.currentRevision(); }
 
 void sharedVertexRegister(Vec2Array& target, std::size_t* offsetSink) { vertexAtlas.registerArray(target, offsetSink); }
 void sharedVertexUnregister(Vec2Array& target) { vertexAtlas.unregisterArray(target); }
@@ -173,6 +185,7 @@ Vec2Array& sharedVertexBufferData() { return vertexAtlas.data(); }
 bool sharedVertexBufferDirty() { return vertexAtlas.isDirty(); }
 void sharedVertexMarkDirty() { vertexAtlas.markDirty(); }
 void sharedVertexMarkUploaded() { vertexAtlas.markUploaded(); }
+std::size_t sharedVertexBufferRevision() { return vertexAtlas.currentRevision(); }
 
 void sharedUvRegister(Vec2Array& target, std::size_t* offsetSink) { uvAtlas.registerArray(target, offsetSink); }
 void sharedUvUnregister(Vec2Array& target) { uvAtlas.unregisterArray(target); }
@@ -182,5 +195,6 @@ Vec2Array& sharedUvBufferData() { return uvAtlas.data(); }
 bool sharedUvBufferDirty() { return uvAtlas.isDirty(); }
 void sharedUvMarkDirty() { uvAtlas.markDirty(); }
 void sharedUvMarkUploaded() { uvAtlas.markUploaded(); }
+std::size_t sharedUvBufferRevision() { return uvAtlas.currentRevision(); }
 
 } // namespace nicxlive::core::render

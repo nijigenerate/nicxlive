@@ -927,6 +927,17 @@ NjgResult njgGetSharedBuffers(void* renderer, SharedBufferSnapshot* snapshot) {
     return NjgResult::Ok;
 }
 
+NjgResult njgGetSharedBufferState(void* renderer, SharedBufferState* state) {
+    if (!renderer || !state) return NjgResult::InvalidArgument;
+    std::lock_guard<std::mutex> lock(gMutex);
+    auto it = gRenderers.find(renderer);
+    if (it == gRenderers.end()) return NjgResult::InvalidArgument;
+    state->vertexRevision = ::nicxlive::core::render::sharedVertexBufferRevision();
+    state->uvRevision = ::nicxlive::core::render::sharedUvBufferRevision();
+    state->deformRevision = ::nicxlive::core::render::sharedDeformBufferRevision();
+    return NjgResult::Ok;
+}
+
 NjgRenderTargets njgGetRenderTargets(void* renderer) {
     std::lock_guard<std::mutex> lock(gMutex);
     auto it = gRenderers.find(renderer);
