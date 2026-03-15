@@ -55,4 +55,3 @@ Shader "Nicxlive/URP Mask"
         }
     }
 }
-

@@ -233,4 +233,3 @@ Shader "Nicxlive/URP Part"
         }
     }
 }
-

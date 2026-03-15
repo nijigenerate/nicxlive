@@ -1149,6 +1149,55 @@ namespace Nicxlive.UnityBackend.Managed
 
 namespace Nicxlive.UnityBackend.Managed
 {
+    internal static class PlatformFlipUtil
+    {
+        public static bool IsOpenGLLike()
+        {
+            switch (SystemInfo.graphicsDeviceType)
+            {
+                case GraphicsDeviceType.OpenGLCore:
+                case GraphicsDeviceType.OpenGLES2:
+                case GraphicsDeviceType.OpenGLES3:
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        public static bool ShouldFlipGeometryY()
+        {
+            return !IsOpenGLLike();
+        }
+
+        public static float GetPlatformFlipY()
+        {
+            return ShouldFlipGeometryY() ? 1f : 0f;
+        }
+
+        public static float GetPlatformFlipV()
+        {
+            return 0f;
+        }
+
+        public static void ApplyPlatformFlipFlags(Material material)
+        {
+            if (material.HasProperty("_DebugFlipY"))
+            {
+                material.SetFloat("_DebugFlipY", GetPlatformFlipY());
+            }
+            if (material.HasProperty("_DebugFlipV"))
+            {
+                material.SetFloat("_DebugFlipV", GetPlatformFlipV());
+            }
+        }
+
+        public static void ApplyPlatformFlipFlags(MaterialPropertyBlock props)
+        {
+            props.SetFloat("_DebugFlipY", GetPlatformFlipY());
+            props.SetFloat("_DebugFlipV", GetPlatformFlipV());
+        }
+    }
+
     public sealed class CommandExecutor
     {
         private sealed class SceneDebugDraw
@@ -1575,8 +1624,7 @@ namespace Nicxlive.UnityBackend.Managed
                 _sceneDebugMaterial.SetFloat("_StencilPass", (float)StencilOp.Keep);
                 _sceneDebugMaterial.SetFloat("_ColorMask", 15.0f);
                 _sceneDebugMaterial.SetFloat("_DebugForceOpaque", 0.0f);
-                _sceneDebugMaterial.SetFloat("_DebugFlipY", 1.0f);
-                _sceneDebugMaterial.SetFloat("_DebugFlipV", 0.0f);
+                PlatformFlipUtil.ApplyPlatformFlipFlags(_sceneDebugMaterial);
                 _sceneDebugMaterial.SetFloat("_DebugShowAlbedo", 1.0f);
                 _sceneDebugMaterial.SetFloat("_WrapMainTex", 0.0f);
                 _sceneDebugMaterial.SetFloat("_WrapEmissionTex", 0.0f);
@@ -1714,8 +1762,7 @@ namespace Nicxlive.UnityBackend.Managed
                 material.SetVector("_MultColor", draw.MultColor);
                 material.SetVector("_ScreenColor", draw.ScreenColor);
                 material.SetFloat("_DebugForceOpaque", 0.0f);
-                material.SetFloat("_DebugFlipY", 1.0f);
-                material.SetFloat("_DebugFlipV", 0.0f);
+                PlatformFlipUtil.ApplyPlatformFlipFlags(material);
                 material.SetFloat("_DebugShowAlbedo", draw.ShowAlbedo ? 1.0f : 0.0f);
             }
 
@@ -1741,8 +1788,7 @@ namespace Nicxlive.UnityBackend.Managed
                 props.SetVector("_MultColor", draw.MultColor);
                 props.SetVector("_ScreenColor", draw.ScreenColor);
                 props.SetFloat("_DebugForceOpaque", 0.0f);
-                props.SetFloat("_DebugFlipY", 1.0f);
-                props.SetFloat("_DebugFlipV", 0.0f);
+                PlatformFlipUtil.ApplyPlatformFlipFlags(props);
                 props.SetFloat("_DebugShowAlbedo", draw.ShowAlbedo ? 1.0f : 0.0f);
             }
 
@@ -1798,15 +1844,30 @@ namespace Nicxlive.UnityBackend.Managed
 
         private static RenderTexture CreateRootDepthTexture(string name, int width, int height)
         {
-            var desc = new RenderTextureDescriptor(width, height)
+            RenderTextureDescriptor desc;
+            if (PlatformFlipUtil.IsOpenGLLike())
             {
-                msaaSamples = 1,
-                useMipMap = false,
-                autoGenerateMips = false,
-                graphicsFormat = UnityEngine.Experimental.Rendering.GraphicsFormat.None,
-                depthStencilFormat = UnityEngine.Experimental.Rendering.GraphicsFormat.D24_UNorm_S8_UInt,
-                sRGB = false
-            };
+                // OpenGLCore on Linux rejects depth/stencil GraphicsFormat descriptors here.
+                desc = new RenderTextureDescriptor(width, height, RenderTextureFormat.Depth, 24)
+                {
+                    msaaSamples = 1,
+                    useMipMap = false,
+                    autoGenerateMips = false,
+                    sRGB = false
+                };
+            }
+            else
+            {
+                desc = new RenderTextureDescriptor(width, height)
+                {
+                    msaaSamples = 1,
+                    useMipMap = false,
+                    autoGenerateMips = false,
+                    graphicsFormat = UnityEngine.Experimental.Rendering.GraphicsFormat.None,
+                    depthStencilFormat = UnityEngine.Experimental.Rendering.GraphicsFormat.D24_UNorm_S8_UInt,
+                    sRGB = false
+                };
+            }
 
             var texture = new RenderTexture(desc)
             {
@@ -3022,8 +3083,7 @@ namespace Nicxlive.UnityBackend.Managed
             _props.SetFloat(cfg.EmissiveWrap, (float)textures.GetWrapping((ulong)packet.TextureHandle1));
             _props.SetFloat(cfg.BumpWrap, (float)textures.GetWrapping((ulong)packet.TextureHandle2));
             _props.SetFloat("_DebugForceOpaque", 0.0f);
-            _props.SetFloat("_DebugFlipY", 1.0f);
-            _props.SetFloat("_DebugFlipV", 0.0f);
+            PlatformFlipUtil.ApplyPlatformFlipFlags(_props);
             _props.SetFloat("_DebugShowAlbedo", _forceRootSceneVisiblePass ? 1.0f : 0.0f);
             if (_forceRootSceneVisiblePass)
             {
@@ -4623,14 +4683,7 @@ namespace Nicxlive.UnityBackend.Managed
             {
                 material.SetFloat("_DebugForceOpaque", 0f);
             }
-            if (material.HasProperty("_DebugFlipY"))
-            {
-                material.SetFloat("_DebugFlipY", 1f);
-            }
-            if (material.HasProperty("_DebugFlipV"))
-            {
-                material.SetFloat("_DebugFlipV", 0f);
-            }
+            PlatformFlipUtil.ApplyPlatformFlipFlags(material);
             if (material.HasProperty("_DebugShowAlbedo"))
             {
                 material.SetFloat("_DebugShowAlbedo", 0f);
@@ -4815,7 +4868,9 @@ namespace Nicxlive.UnityBackend.Managed
             GUI.DrawTextureWithTexCoords(
                 drawRect,
                 _sceneViewOverlayTexture,
-                new Rect(0f, 1f, 1f, -1f),
+                PlatformFlipUtil.ShouldFlipGeometryY()
+                    ? new Rect(0f, 1f, 1f, -1f)
+                    : new Rect(0f, 0f, 1f, 1f),
                 true);
             UnityEditor.Handles.EndGUI();
             UnityEditor.EditorApplication.QueuePlayerLoopUpdate();
@@ -5291,13 +5346,8 @@ namespace Nicxlive.UnityBackend.Managed
             _lastEditorFrameTime = -1.0;
 #endif
         }
+
     }
 }
-
-
-
-
-
-
 
 

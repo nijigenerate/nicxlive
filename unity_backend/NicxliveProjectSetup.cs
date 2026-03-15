@@ -10,10 +10,61 @@ namespace Nicxlive.UnityBackend.EditorSetup
 {
     public static class NicxliveProjectSetup
     {
-        private const string PluginPath = "Assets/Plugins/x86_64/nicxlive.dll";
+        private enum PluginKind
+        {
+            Unknown,
+            Windows,
+            Linux,
+        }
+
+        private const string PluginDllPath = "Assets/Plugins/x86_64/nicxlive.dll";
+        private const string PluginSoPath = "Assets/Plugins/x86_64/libnicxlive.so";
         private const string SettingsDir = "Assets/Nicxlive/Settings";
         private const string UrpAssetPath = SettingsDir + "/Nicxlive_URP.asset";
         private const string RendererAssetPath = SettingsDir + "/Nicxlive_ForwardRenderer.asset";
+        private const string AutoSetupKey = "Nicxlive.ProjectSetup.AutoApplied";
+
+        [InitializeOnLoadMethod]
+        private static void ScheduleAutoApply()
+        {
+            if (Application.isPlaying)
+            {
+                return;
+            }
+            if (SessionState.GetBool(AutoSetupKey, false))
+            {
+                return;
+            }
+
+            EditorApplication.delayCall += AutoApplyOnce;
+        }
+
+        private static void AutoApplyOnce()
+        {
+            if (Application.isPlaying)
+            {
+                return;
+            }
+            if (SessionState.GetBool(AutoSetupKey, false))
+            {
+                return;
+            }
+
+            SessionState.SetBool(AutoSetupKey, true);
+            try
+            {
+                var changed = ApplyIfNeeded();
+                if (changed)
+                {
+                    AssetDatabase.SaveAssets();
+                    AssetDatabase.Refresh();
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning("[nicxlive] automatic project setup skipped: " + ex.Message);
+            }
+        }
 
         [MenuItem("Tools/Nicxlive/Apply Project Setup")]
         public static void ApplyFromMenu()
@@ -79,19 +130,26 @@ namespace Nicxlive.UnityBackend.EditorSetup
 
         private static bool EnsurePluginImporter()
         {
-            var importer = AssetImporter.GetAtPath(PluginPath) as PluginImporter;
+            var pluginPath = ResolvePluginPath(out var pluginKind);
+            if (pluginPath == null)
+            {
+                Debug.LogWarning("[nicxlive] PluginImporter not found at: " + PluginDllPath + " or " + PluginSoPath);
+                return false;
+            }
+
+            var importer = AssetImporter.GetAtPath(pluginPath) as PluginImporter;
             if (importer == null)
             {
-                Debug.LogWarning("[nicxlive] PluginImporter not found at: " + PluginPath);
+                Debug.LogWarning("[nicxlive] PluginImporter not found at: " + pluginPath);
                 return false;
             }
 
             var changed = false;
             changed |= SetIfDifferent(importer.GetCompatibleWithAnyPlatform(), false, () => importer.SetCompatibleWithAnyPlatform(false));
             changed |= SetIfDifferent(importer.GetCompatibleWithEditor(), true, () => importer.SetCompatibleWithEditor(true));
-            changed |= SetIfDifferent(importer.GetCompatibleWithPlatform(BuildTarget.StandaloneWindows64), true, () => importer.SetCompatibleWithPlatform(BuildTarget.StandaloneWindows64, true));
+            changed |= SetIfDifferent(importer.GetCompatibleWithPlatform(BuildTarget.StandaloneWindows64), pluginKind == PluginKind.Windows, () => importer.SetCompatibleWithPlatform(BuildTarget.StandaloneWindows64, pluginKind == PluginKind.Windows));
             changed |= SetIfDifferent(importer.GetCompatibleWithPlatform(BuildTarget.StandaloneWindows), false, () => importer.SetCompatibleWithPlatform(BuildTarget.StandaloneWindows, false));
-            changed |= SetIfDifferent(importer.GetCompatibleWithPlatform(BuildTarget.StandaloneLinux64), false, () => importer.SetCompatibleWithPlatform(BuildTarget.StandaloneLinux64, false));
+            changed |= SetIfDifferent(importer.GetCompatibleWithPlatform(BuildTarget.StandaloneLinux64), pluginKind == PluginKind.Linux, () => importer.SetCompatibleWithPlatform(BuildTarget.StandaloneLinux64, pluginKind == PluginKind.Linux));
             changed |= SetIfDifferent(importer.GetCompatibleWithPlatform(BuildTarget.StandaloneOSX), false, () => importer.SetCompatibleWithPlatform(BuildTarget.StandaloneOSX, false));
 
             if (changed)
@@ -105,6 +163,22 @@ namespace Nicxlive.UnityBackend.EditorSetup
             }
 
             return changed;
+        }
+
+        private static string? ResolvePluginPath(out PluginKind pluginKind)
+        {
+            if (AssetDatabase.LoadAssetAtPath<UnityEngine.Object>(PluginSoPath) != null)
+            {
+                pluginKind = PluginKind.Linux;
+                return PluginSoPath;
+            }
+            if (AssetDatabase.LoadAssetAtPath<UnityEngine.Object>(PluginDllPath) != null)
+            {
+                pluginKind = PluginKind.Windows;
+                return PluginDllPath;
+            }
+            pluginKind = PluginKind.Unknown;
+            return null;
         }
 
         private static bool EnsureUrpPipeline()
