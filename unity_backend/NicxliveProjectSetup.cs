@@ -10,10 +10,54 @@ namespace Nicxlive.UnityBackend.EditorSetup
 {
     public static class NicxliveProjectSetup
     {
-        private const string PluginPath = "Assets/Plugins/x86_64/nicxlive.dll";
+        private const string PluginDllPath = "Assets/Plugins/x86_64/nicxlive.dll";
+        private const string PluginSoPath = "Assets/Plugins/x86_64/libnicxlive.so";
         private const string SettingsDir = "Assets/Nicxlive/Settings";
         private const string UrpAssetPath = SettingsDir + "/Nicxlive_URP.asset";
         private const string RendererAssetPath = SettingsDir + "/Nicxlive_ForwardRenderer.asset";
+        private const string AutoSetupKey = "Nicxlive.ProjectSetup.AutoApplied";
+
+        [InitializeOnLoadMethod]
+        private static void ScheduleAutoApply()
+        {
+            if (Application.isPlaying)
+            {
+                return;
+            }
+            if (SessionState.GetBool(AutoSetupKey, false))
+            {
+                return;
+            }
+
+            EditorApplication.delayCall += AutoApplyOnce;
+        }
+
+        private static void AutoApplyOnce()
+        {
+            if (Application.isPlaying)
+            {
+                return;
+            }
+            if (SessionState.GetBool(AutoSetupKey, false))
+            {
+                return;
+            }
+
+            SessionState.SetBool(AutoSetupKey, true);
+            try
+            {
+                var changed = ApplyIfNeeded();
+                if (changed)
+                {
+                    AssetDatabase.SaveAssets();
+                    AssetDatabase.Refresh();
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning("[nicxlive] automatic project setup skipped: " + ex.Message);
+            }
+        }
 
         [MenuItem("Tools/Nicxlive/Apply Project Setup")]
         public static void ApplyFromMenu()
@@ -79,10 +123,17 @@ namespace Nicxlive.UnityBackend.EditorSetup
 
         private static bool EnsurePluginImporter()
         {
-            var importer = AssetImporter.GetAtPath(PluginPath) as PluginImporter;
+            var pluginPath = ResolvePluginPath();
+            if (pluginPath == null)
+            {
+                Debug.LogWarning("[nicxlive] PluginImporter not found at: " + PluginDllPath + " or " + PluginSoPath);
+                return false;
+            }
+
+            var importer = AssetImporter.GetAtPath(pluginPath) as PluginImporter;
             if (importer == null)
             {
-                Debug.LogWarning("[nicxlive] PluginImporter not found at: " + PluginPath);
+                Debug.LogWarning("[nicxlive] PluginImporter not found at: " + pluginPath);
                 return false;
             }
 
@@ -105,6 +156,19 @@ namespace Nicxlive.UnityBackend.EditorSetup
             }
 
             return changed;
+        }
+
+        private static string? ResolvePluginPath()
+        {
+            if (AssetDatabase.LoadAssetAtPath<UnityEngine.Object>(PluginSoPath) != null)
+            {
+                return PluginSoPath;
+            }
+            if (AssetDatabase.LoadAssetAtPath<UnityEngine.Object>(PluginDllPath) != null)
+            {
+                return PluginDllPath;
+            }
+            return null;
         }
 
         private static bool EnsureUrpPipeline()

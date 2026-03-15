@@ -57,16 +57,15 @@ Shader "Nicxlive/URP Part"
             #pragma vertex Vert
             #pragma fragment Frag
 
-            #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
+            Texture2D _MainTex;
+            SamplerState sampler_MainTex;
+            Texture2D _EmissionTex;
+            SamplerState sampler_EmissionTex;
+            Texture2D _BumpMap;
+            SamplerState sampler_BumpMap;
 
-            TEXTURE2D(_MainTex);
-            SAMPLER(sampler_MainTex);
-            TEXTURE2D(_EmissionTex);
-            SAMPLER(sampler_EmissionTex);
-            TEXTURE2D(_BumpMap);
-            SAMPLER(sampler_BumpMap);
-
-            CBUFFER_START(UnityPerMaterial)
+            cbuffer UnityPerMaterial
+            {
                 float4 _MainTex_ST;
                 float4 _MultColor;
                 float4 _ScreenColor;
@@ -91,7 +90,7 @@ Shader "Nicxlive/URP Part"
                 float _BlendOpAlpha;
                 float _EmissionStrength;
                 float _IsMaskPass;
-            CBUFFER_END
+            };
 
             struct Attributes
             {
@@ -121,7 +120,7 @@ Shader "Nicxlive/URP Part"
                         return half4(0.0h, 0.0h, 0.0h, 0.0h);
                     }
                 }
-                return SAMPLE_TEXTURE2D(_MainTex, sampler_MainTex, uv);
+                return _MainTex.Sample(sampler_MainTex, uv);
             }
 
             half4 SampleWrapEmission(float2 uv)
@@ -133,7 +132,7 @@ Shader "Nicxlive/URP Part"
                         return half4(0.0h, 0.0h, 0.0h, 0.0h);
                     }
                 }
-                return SAMPLE_TEXTURE2D(_EmissionTex, sampler_EmissionTex, uv);
+                return _EmissionTex.Sample(sampler_EmissionTex, uv);
             }
 
             half4 SampleWrapBump(float2 uv)
@@ -145,7 +144,7 @@ Shader "Nicxlive/URP Part"
                         return half4(0.0h, 0.0h, 0.0h, 0.0h);
                     }
                 }
-                return SAMPLE_TEXTURE2D(_BumpMap, sampler_BumpMap, uv);
+                return _BumpMap.Sample(sampler_BumpMap, uv);
             }
 
             half4 ScreenColorize(half3 texRgb, half alpha)
@@ -233,4 +232,3 @@ Shader "Nicxlive/URP Part"
         }
     }
 }
-
