@@ -20,6 +20,9 @@ endif()
 option(NICXLIVE_BUILD_SHARED "Build nicxlive as a shared library" ON)
 option(NICXLIVE_BUILD_TESTS "Build nicxlive tests" ON)
 option(NICXLIVE_ENABLE_DEBUG_LOG "Enable nicxlive debug log output (NJCX_ENABLE_DEBUG_LOG)" OFF)
+option(NICXLIVE_ENABLE_EXTRA_OPT_FLAGS "Enable extra runtime optimization flags for Release/RelWithDebInfo builds" ON)
+option(NICXLIVE_ENABLE_FAST_MATH "Enable fast-math style floating-point optimizations for Release/RelWithDebInfo" OFF)
+option(NICXLIVE_ENABLE_AVX2 "Enable AVX2 code generation for Release/RelWithDebInfo builds" OFF)
 
 # WASM (Emscripten) build toggle
 option(BUILD_WASM "Build nicxlive for WebAssembly via Emscripten" OFF)
@@ -57,6 +60,54 @@ if(BUILD_WASM)
   add_compile_options(-sALLOW_MEMORY_GROWTH=1 -sWASM=1 -fexceptions)
   add_link_options("SHELL:-sDISABLE_EXCEPTION_CATCHING=0")
 endif()
+
+function(nicxlive_apply_optimizations target_name)
+  if(NICXLIVE_ENABLE_EXTRA_OPT_FLAGS)
+    if(MSVC)
+      target_compile_options(${target_name} PRIVATE
+        $<$<CONFIG:Release>:/Ob2 /Oi /Ot /Gy /Gw /GL->
+        $<$<CONFIG:RelWithDebInfo>:/Ob2 /Oi /Ot /Gy /Gw /GL->
+      )
+      target_link_options(${target_name} PRIVATE
+        $<$<CONFIG:Release>:/OPT:REF /OPT:ICF /INCREMENTAL:NO /LTCG:OFF>
+        $<$<CONFIG:RelWithDebInfo>:/OPT:REF /OPT:ICF /INCREMENTAL:NO /LTCG:OFF>
+      )
+      if(NICXLIVE_ENABLE_FAST_MATH)
+        target_compile_options(${target_name} PRIVATE
+          $<$<CONFIG:Release>:/fp:fast>
+          $<$<CONFIG:RelWithDebInfo>:/fp:fast>
+        )
+      endif()
+      if(NICXLIVE_ENABLE_AVX2)
+        target_compile_options(${target_name} PRIVATE
+          $<$<CONFIG:Release>:/arch:AVX2>
+          $<$<CONFIG:RelWithDebInfo>:/arch:AVX2>
+        )
+      endif()
+    else()
+      target_compile_options(${target_name} PRIVATE
+        $<$<CONFIG:Release>:-O3 -fno-semantic-interposition -fno-lto>
+        $<$<CONFIG:RelWithDebInfo>:-O3 -fno-semantic-interposition -fno-lto>
+      )
+      target_link_options(${target_name} PRIVATE
+        $<$<CONFIG:Release>:-Wl,--gc-sections -fno-lto>
+        $<$<CONFIG:RelWithDebInfo>:-Wl,--gc-sections -fno-lto>
+      )
+      if(NICXLIVE_ENABLE_FAST_MATH)
+        target_compile_options(${target_name} PRIVATE
+          $<$<CONFIG:Release>:-ffast-math>
+          $<$<CONFIG:RelWithDebInfo>:-ffast-math>
+        )
+      endif()
+      if(NICXLIVE_ENABLE_AVX2)
+        target_compile_options(${target_name} PRIVATE
+          $<$<CONFIG:Release>:-mavx2 -mfma>
+          $<$<CONFIG:RelWithDebInfo>:-mavx2 -mfma>
+        )
+      endif()
+    endif()
+  endif()
+endfunction()
 
 set(NICXLIVE_SOURCES
     core/texture.cpp
@@ -119,6 +170,7 @@ target_compile_features(nicxlive PUBLIC cxx_std_20)
 if(NICXLIVE_ENABLE_DEBUG_LOG)
   target_compile_definitions(nicxlive PUBLIC NJCX_ENABLE_DEBUG_LOG=1)
 endif()
+nicxlive_apply_optimizations(nicxlive)
 
 if(NICXLIVE_BUILD_SHARED)
   add_library(nicxlive_shared SHARED ${NICXLIVE_SOURCES})
@@ -139,6 +191,7 @@ if(NICXLIVE_BUILD_SHARED)
   if(NICXLIVE_ENABLE_DEBUG_LOG)
     target_compile_definitions(nicxlive_shared PUBLIC NJCX_ENABLE_DEBUG_LOG=1)
   endif()
+  nicxlive_apply_optimizations(nicxlive_shared)
 endif()
 
 if(NICXLIVE_BUILD_TESTS)
@@ -159,5 +212,6 @@ if(NICXLIVE_BUILD_TESTS)
   endif()
   target_link_libraries(nicxlive_vec2array_test PRIVATE nicxlive::nicxlive)
   target_compile_features(nicxlive_vec2array_test PRIVATE cxx_std_20)
+  nicxlive_apply_optimizations(nicxlive_vec2array_test)
   add_test(NAME nicxlive_vec2array_test COMMAND nicxlive_vec2array_test)
 endif()
