@@ -20,8 +20,10 @@ Shader "Hidden/Nicxlive/Present"
             #pragma vertex Vert
             #pragma fragment Frag
 
-            Texture2D _MainTex;
-            SamplerState sampler_MainTex;
+            #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
+
+            TEXTURE2D(_MainTex);
+            SAMPLER(sampler_MainTex);
 
             struct Attributes
             {
@@ -60,7 +62,7 @@ Shader "Hidden/Nicxlive/Present"
 
             half4 Frag(Varyings input) : SV_Target
             {
-                half4 color = _MainTex.Sample(sampler_MainTex, input.uv);
+                half4 color = SAMPLE_TEXTURE2D(_MainTex, sampler_MainTex, input.uv);
 #ifndef UNITY_COLORSPACE_GAMMA
                 color.rgb = NicxSrgbToLinear(color.rgb);
 #endif

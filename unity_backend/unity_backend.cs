@@ -1151,17 +1151,22 @@ namespace Nicxlive.UnityBackend.Managed
 {
     internal static class PlatformFlipUtil
     {
-        public static bool ShouldFlipGeometryY()
+        public static bool IsOpenGLLike()
         {
             switch (SystemInfo.graphicsDeviceType)
             {
                 case GraphicsDeviceType.OpenGLCore:
                 case GraphicsDeviceType.OpenGLES2:
                 case GraphicsDeviceType.OpenGLES3:
-                    return false;
-                default:
                     return true;
+                default:
+                    return false;
             }
+        }
+
+        public static bool ShouldFlipGeometryY()
+        {
+            return !IsOpenGLLike();
         }
 
         public static float GetPlatformFlipY()
@@ -1839,13 +1844,30 @@ namespace Nicxlive.UnityBackend.Managed
 
         private static RenderTexture CreateRootDepthTexture(string name, int width, int height)
         {
-            var desc = new RenderTextureDescriptor(width, height, RenderTextureFormat.Depth, 24)
+            RenderTextureDescriptor desc;
+            if (PlatformFlipUtil.IsOpenGLLike())
             {
-                msaaSamples = 1,
-                useMipMap = false,
-                autoGenerateMips = false,
-                sRGB = false
-            };
+                // OpenGLCore on Linux rejects depth/stencil GraphicsFormat descriptors here.
+                desc = new RenderTextureDescriptor(width, height, RenderTextureFormat.Depth, 24)
+                {
+                    msaaSamples = 1,
+                    useMipMap = false,
+                    autoGenerateMips = false,
+                    sRGB = false
+                };
+            }
+            else
+            {
+                desc = new RenderTextureDescriptor(width, height)
+                {
+                    msaaSamples = 1,
+                    useMipMap = false,
+                    autoGenerateMips = false,
+                    graphicsFormat = UnityEngine.Experimental.Rendering.GraphicsFormat.None,
+                    depthStencilFormat = UnityEngine.Experimental.Rendering.GraphicsFormat.D24_UNorm_S8_UInt,
+                    sRGB = false
+                };
+            }
 
             var texture = new RenderTexture(desc)
             {
@@ -5327,6 +5349,5 @@ namespace Nicxlive.UnityBackend.Managed
 
     }
 }
-
 
 
