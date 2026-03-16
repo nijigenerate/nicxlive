@@ -1,30 +1,9 @@
 #include "deformable.hpp"
 #include "../puppet.hpp"
-#include "../debug_log.hpp"
 #include "../render/profiler.hpp"
-#include <cstdio>
-#include <cmath>
 
 namespace nicxlive::core::nodes {
 namespace {
-const char* traceDeformChainTarget() {
-    static const char* cached = nullptr;
-    static bool init = false;
-    if (!init) {
-        cached = std::getenv("NJCX_TRACE_DEFORM_CHAIN");
-        init = true;
-    }
-    return cached;
-}
-
-float maxAbsVec2Array(const Vec2Array& arr) {
-    float maxAbs = 0.0f;
-    for (std::size_t i = 0; i < arr.size(); ++i) {
-        maxAbs = std::max(maxAbs, std::max(std::fabs(arr.xAt(i)), std::fabs(arr.yAt(i))));
-    }
-    return maxAbs;
-}
-
 template <typename HookVector>
 bool hasDeformHook(const HookVector& hooks, int stage, std::uintptr_t tag) {
     return std::any_of(hooks.begin(), hooks.end(), [&](const auto& hook) {
@@ -182,38 +161,15 @@ void Deformable::preProcess() {
     auto scope = core::render::profileScope("Deformable.preProcess");
     if (preProcessed) return;
     Node::preProcess();
-    const char* traceTarget = traceDeformChainTarget();
-    const bool traceThisNode = traceTarget && name.find(traceTarget) != std::string::npos;
     bool anyNotify = false;
     for (const auto& hook : deformPreProcessFilters) {
-        const float beforeAbs = traceThisNode ? maxAbsVec2Array(deformation) : 0.0f;
         Mat4 matrix = overrideTransformMatrix ? *overrideTransformMatrix : transform().toMat4();
         auto result = hook.func(shared_from_this(), vertices, deformation, &matrix);
-        if (traceThisNode) {
-            const float resultAbs = maxAbsVec2Array(deformation);
-            NJCX_DBG_LOG("[nicxlive][DeformChain][Pre] node=%s uuid=%u tag=%zu stage=%d before=%.6f result=%.6f resultSize=%zu notify=%d\n",
-                         name.c_str(),
-                         uuid,
-                         static_cast<std::size_t>(hook.tag),
-                         hook.stage,
-                         beforeAbs,
-                         resultAbs,
-                         deformation.size(),
-                         result.changed ? 1 : 0);
-        }
         if (result.transform.has_value()) {
             overrideTransformMatrix = *result.transform;
         }
         if (result.changed) {
             anyNotify = true;
-        }
-        if (traceThisNode) {
-            const float afterAbs = maxAbsVec2Array(deformation);
-            NJCX_DBG_LOG("[nicxlive][DeformChain][PreAfter] node=%s uuid=%u after=%.6f size=%zu\n",
-                         name.c_str(),
-                         uuid,
-                         afterAbs,
-                         deformation.size());
         }
     }
     if (anyNotify) {

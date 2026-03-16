@@ -63,14 +63,15 @@ inline Vec2Array gatherVec2(const Vec2Array& data, const std::vector<std::size_t
 
 inline void scatterAddVec2(const Vec2Array& src, const std::vector<std::size_t>& indices, Vec2Array& dst, bool& changed) {
     auto count = std::min(src.size(), indices.size());
-    if (dst.size() < count) dst.resize(count);
     for (std::size_t i = 0; i < count; ++i) {
         auto idx = indices[i];
         if (idx >= dst.size()) continue;
         auto dv = dst.at(idx);
         auto sv = src.at(i);
         dst.set(idx, nodes::Vec2{dv.x + sv.x, dv.y + sv.y});
-        changed = true;
+        if (sv.x != 0.0f || sv.y != 0.0f) {
+            changed = true;
+        }
     }
 }
 
