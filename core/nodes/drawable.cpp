@@ -520,7 +520,9 @@ Node::DeformFilterResult Drawable::weldingProcessor(const std::shared_ptr<Node>&
     if (!targetDrawable) return {};
     auto it = std::find_if(weldedLinks.begin(), weldedLinks.end(), [&](const WeldingLink& l) { return l.targetUUID == targetDrawable->uuid; });
     if (it == weldedLinks.end()) return {};
-    if (postProcessed < 2) return {};
+    if (postProcessed < 2) {
+        return {};
+    }
     if (weldingApplied.count(targetDrawable->uuid) || targetDrawable->weldingApplied.count(uuid)) {
         return {};
     }

@@ -72,6 +72,7 @@ struct Vec2Array {
     explicit Vec2Array(const Vec2& v) { ensureLength(1); xPtr_[0] = v.x; yPtr_[0] = v.y; }
 
     void refreshPointers() {
+        if (!ownsStorage_) return;
         xPtr_ = x.empty() ? nullptr : x.data();
         yPtr_ = y.empty() ? nullptr : y.data();
     }
@@ -308,10 +309,13 @@ struct Vec2Array {
 
     Vec2Array dup() const {
         Vec2Array copy;
-        copy.x.assign(x.begin() + static_cast<std::ptrdiff_t>(laneBase_), x.begin() + static_cast<std::ptrdiff_t>(laneBase_ + logicalLength_));
-        copy.y.assign(y.begin() + static_cast<std::ptrdiff_t>(laneBase_), y.begin() + static_cast<std::ptrdiff_t>(laneBase_ + logicalLength_));
-        copy.xPtr_ = copy.x.data();
-        copy.yPtr_ = copy.y.data();
+        copy.ensureLength(logicalLength_);
+        const float* srcX = dataX();
+        const float* srcY = dataY();
+        if (logicalLength_ != 0 && srcX && srcY) {
+            std::copy_n(srcX, logicalLength_, copy.xPtr_);
+            std::copy_n(srcY, logicalLength_, copy.yPtr_);
+        }
         copy.logicalLength_ = logicalLength_;
         copy.laneStride_ = logicalLength_;
         copy.laneBase_ = 0;
@@ -359,14 +363,19 @@ struct Vec2Array {
 
     // bind external storage (view, non-owning)
     void bindExternalStorage(Vec2Array& storage, std::size_t offset, std::size_t length) {
+        ownsStorage_ = false;
         if (length == 0 || storage.size() == 0) {
-            clear();
+            xPtr_ = nullptr;
+            yPtr_ = nullptr;
+            laneStride_ = storage.logicalLength_;
+            laneBase_ = offset;
+            logicalLength_ = 0;
+            viewCapacity_ = 0;
             return;
         }
         assert(offset + length <= storage.logicalLength_);
-        ownsStorage_ = false;
-        xPtr_ = storage.x.data() + offset;
-        yPtr_ = storage.y.data() + offset;
+        xPtr_ = storage.dataXMutable() + offset;
+        yPtr_ = storage.dataYMutable() + offset;
         laneStride_ = storage.logicalLength_;
         laneBase_ = 0;
         logicalLength_ = length;
@@ -547,6 +556,7 @@ struct Vec3Array {
     Vec3Array(std::initializer_list<Vec3> init) { assign(std::vector<Vec3>(init)); }
 
     void refreshPointers() {
+        if (!ownsStorage_) return;
         xPtr_ = x.empty() ? nullptr : x.data();
         yPtr_ = y.empty() ? nullptr : y.data();
         zPtr_ = z.empty() ? nullptr : z.data();
@@ -692,10 +702,12 @@ struct Vec3Array {
 
     Vec3Array dup() const {
         Vec3Array copy;
-        copy.x.assign(x.begin() + static_cast<std::ptrdiff_t>(laneBase_), x.begin() + static_cast<std::ptrdiff_t>(laneBase_ + logicalLength_));
-        copy.y.assign(y.begin() + static_cast<std::ptrdiff_t>(laneBase_), y.begin() + static_cast<std::ptrdiff_t>(laneBase_ + logicalLength_));
-        copy.z.assign(z.begin() + static_cast<std::ptrdiff_t>(laneBase_), z.begin() + static_cast<std::ptrdiff_t>(laneBase_ + logicalLength_));
-        copy.refreshPointers();
+        copy.ensureLength(logicalLength_);
+        if (logicalLength_ != 0 && xPtr_ && yPtr_ && zPtr_) {
+            std::copy_n(xPtr_ + laneBase_, logicalLength_, copy.xPtr_);
+            std::copy_n(yPtr_ + laneBase_, logicalLength_, copy.yPtr_);
+            std::copy_n(zPtr_ + laneBase_, logicalLength_, copy.zPtr_);
+        }
         copy.logicalLength_ = logicalLength_;
         copy.laneStride_ = logicalLength_;
         copy.laneBase_ = 0;
@@ -704,15 +716,21 @@ struct Vec3Array {
     }
 
     void bindExternalStorage(Vec3Array& storage, std::size_t offset, std::size_t length) {
+        ownsStorage_ = false;
         if (length == 0 || storage.size() == 0) {
-            clear();
+            xPtr_ = nullptr;
+            yPtr_ = nullptr;
+            zPtr_ = nullptr;
+            laneStride_ = storage.logicalLength_;
+            laneBase_ = offset;
+            logicalLength_ = 0;
+            viewCapacity_ = 0;
             return;
         }
         assert(offset + length <= storage.logicalLength_);
-        ownsStorage_ = false;
-        xPtr_ = storage.x.data() + offset;
-        yPtr_ = storage.y.data() + offset;
-        zPtr_ = storage.z.data() + offset;
+        xPtr_ = storage.xPtr_ + storage.laneBase_ + offset;
+        yPtr_ = storage.yPtr_ + storage.laneBase_ + offset;
+        zPtr_ = storage.zPtr_ + storage.laneBase_ + offset;
         laneStride_ = storage.logicalLength_;
         laneBase_ = 0;
         logicalLength_ = length;
@@ -812,6 +830,7 @@ struct Vec4Array {
     Vec4Array(std::initializer_list<Vec4> init) { assign(std::vector<Vec4>(init)); }
 
     void refreshPointers() {
+        if (!ownsStorage_) return;
         xPtr_ = x.empty() ? nullptr : x.data();
         yPtr_ = y.empty() ? nullptr : y.data();
         zPtr_ = z.empty() ? nullptr : z.data();
@@ -967,11 +986,13 @@ struct Vec4Array {
 
     Vec4Array dup() const {
         Vec4Array copy;
-        copy.x.assign(x.begin() + static_cast<std::ptrdiff_t>(laneBase_), x.begin() + static_cast<std::ptrdiff_t>(laneBase_ + logicalLength_));
-        copy.y.assign(y.begin() + static_cast<std::ptrdiff_t>(laneBase_), y.begin() + static_cast<std::ptrdiff_t>(laneBase_ + logicalLength_));
-        copy.z.assign(z.begin() + static_cast<std::ptrdiff_t>(laneBase_), z.begin() + static_cast<std::ptrdiff_t>(laneBase_ + logicalLength_));
-        copy.w.assign(w.begin() + static_cast<std::ptrdiff_t>(laneBase_), w.begin() + static_cast<std::ptrdiff_t>(laneBase_ + logicalLength_));
-        copy.refreshPointers();
+        copy.ensureLength(logicalLength_);
+        if (logicalLength_ != 0 && xPtr_ && yPtr_ && zPtr_ && wPtr_) {
+            std::copy_n(xPtr_ + laneBase_, logicalLength_, copy.xPtr_);
+            std::copy_n(yPtr_ + laneBase_, logicalLength_, copy.yPtr_);
+            std::copy_n(zPtr_ + laneBase_, logicalLength_, copy.zPtr_);
+            std::copy_n(wPtr_ + laneBase_, logicalLength_, copy.wPtr_);
+        }
         copy.logicalLength_ = logicalLength_;
         copy.laneStride_ = logicalLength_;
         copy.laneBase_ = 0;
@@ -980,16 +1001,23 @@ struct Vec4Array {
     }
 
     void bindExternalStorage(Vec4Array& storage, std::size_t offset, std::size_t length) {
+        ownsStorage_ = false;
         if (length == 0 || storage.size() == 0) {
-            clear();
+            xPtr_ = nullptr;
+            yPtr_ = nullptr;
+            zPtr_ = nullptr;
+            wPtr_ = nullptr;
+            laneStride_ = storage.logicalLength_;
+            laneBase_ = offset;
+            logicalLength_ = 0;
+            viewCapacity_ = 0;
             return;
         }
         assert(offset + length <= storage.logicalLength_);
-        ownsStorage_ = false;
-        xPtr_ = storage.x.data() + offset;
-        yPtr_ = storage.y.data() + offset;
-        zPtr_ = storage.z.data() + offset;
-        wPtr_ = storage.w.data() + offset;
+        xPtr_ = storage.xPtr_ + storage.laneBase_ + offset;
+        yPtr_ = storage.yPtr_ + storage.laneBase_ + offset;
+        zPtr_ = storage.zPtr_ + storage.laneBase_ + offset;
+        wPtr_ = storage.wPtr_ + storage.laneBase_ + offset;
         laneStride_ = storage.logicalLength_;
         laneBase_ = 0;
         logicalLength_ = length;
