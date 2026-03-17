@@ -86,13 +86,24 @@ function(nicxlive_apply_optimizations target_name)
       endif()
     else()
       target_compile_options(${target_name} PRIVATE
-        $<$<CONFIG:Release>:-O3 -fno-semantic-interposition -fno-lto>
-        $<$<CONFIG:RelWithDebInfo>:-O3 -fno-semantic-interposition -fno-lto>
+        $<$<CONFIG:Release>:-O3 -fno-lto>
+        $<$<CONFIG:RelWithDebInfo>:-O3 -fno-lto>
       )
-      target_link_options(${target_name} PRIVATE
-        $<$<CONFIG:Release>:-Wl,--gc-sections -fno-lto>
-        $<$<CONFIG:RelWithDebInfo>:-Wl,--gc-sections -fno-lto>
-      )
+      if(APPLE)
+        target_link_options(${target_name} PRIVATE
+          $<$<CONFIG:Release>:-Wl,-dead_strip -fno-lto>
+          $<$<CONFIG:RelWithDebInfo>:-Wl,-dead_strip -fno-lto>
+        )
+      else()
+        target_compile_options(${target_name} PRIVATE
+          $<$<CONFIG:Release>:-fno-semantic-interposition>
+          $<$<CONFIG:RelWithDebInfo>:-fno-semantic-interposition>
+        )
+        target_link_options(${target_name} PRIVATE
+          $<$<CONFIG:Release>:-Wl,--gc-sections -fno-lto>
+          $<$<CONFIG:RelWithDebInfo>:-Wl,--gc-sections -fno-lto>
+        )
+      endif()
       if(NICXLIVE_ENABLE_FAST_MATH)
         target_compile_options(${target_name} PRIVATE
           $<$<CONFIG:Release>:-ffast-math>
@@ -100,10 +111,14 @@ function(nicxlive_apply_optimizations target_name)
         )
       endif()
       if(NICXLIVE_ENABLE_AVX2)
-        target_compile_options(${target_name} PRIVATE
-          $<$<CONFIG:Release>:-mavx2 -mfma>
-          $<$<CONFIG:RelWithDebInfo>:-mavx2 -mfma>
-        )
+        if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64|amd64|i[3-6]86)$")
+          target_compile_options(${target_name} PRIVATE
+            $<$<CONFIG:Release>:-mavx2 -mfma>
+            $<$<CONFIG:RelWithDebInfo>:-mavx2 -mfma>
+          )
+        else()
+          message(STATUS "NICXLIVE_ENABLE_AVX2 is ignored for non-x86 target: ${CMAKE_SYSTEM_PROCESSOR}")
+        endif()
       endif()
     endif()
   endif()
