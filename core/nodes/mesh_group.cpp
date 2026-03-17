@@ -655,8 +655,10 @@ void MeshGroup::setupChildNoRecurse(const std::shared_ptr<Node>& node, bool prep
             return;
         }
     }
+    auto projectable = std::dynamic_pointer_cast<Projectable>(node);
     auto deformable = std::dynamic_pointer_cast<Deformable>(node);
     bool isDeformable = static_cast<bool>(deformable);
+    bool useNodeFilter = static_cast<bool>(projectable) && projectable->autoResizedMesh;
     const auto tag = reinterpret_cast<std::uintptr_t>(this);
     auto& pre = node->preProcessFilters;
     auto& post = node->postProcessFilters;
@@ -669,6 +671,8 @@ void MeshGroup::setupChildNoRecurse(const std::shared_ptr<Node>& node, bool prep
     if (deformable) {
         deformable->removeDeformPreProcessFilter(kMeshGroupFilterStage, tag);
         deformable->removeDeformPostProcessFilter(kMeshGroupFilterStage, tag);
+    }
+    if (deformable && !useNodeFilter) {
         if (translateChildren || isDeformable) {
             Node::DeformFilterHook hook{};
             hook.stage = kMeshGroupFilterStage;
@@ -685,7 +689,7 @@ void MeshGroup::setupChildNoRecurse(const std::shared_ptr<Node>& node, bool prep
                 deformable->upsertDeformPreProcessFilter(std::move(hook), prepend);
             }
         }
-    } else if (translateChildren) {
+    } else if (translateChildren || isDeformable) {
         Node::FilterHook hook{};
         hook.stage = kMeshGroupFilterStage;
         hook.tag = tag;
