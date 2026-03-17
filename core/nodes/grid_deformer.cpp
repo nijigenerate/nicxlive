@@ -320,8 +320,10 @@ void GridDeformer::setupChildNoRecurse(const std::shared_ptr<Node>& node, bool p
             return;
         }
     }
+    auto projectable = std::dynamic_pointer_cast<Projectable>(node);
     auto deformable = std::dynamic_pointer_cast<Deformable>(node);
     bool isDeformable = static_cast<bool>(deformable);
+    bool useNodeFilter = static_cast<bool>(projectable) && projectable->autoResizedMesh;
     auto& pre = node->preProcessFilters;
     auto& post = node->postProcessFilters;
     const auto tag = reinterpret_cast<std::uintptr_t>(this);
@@ -330,6 +332,8 @@ void GridDeformer::setupChildNoRecurse(const std::shared_ptr<Node>& node, bool p
     if (deformable) {
         deformable->removeDeformPreProcessFilter(kGridFilterStage, tag);
         deformable->removeDeformPostProcessFilter(kGridFilterStage, tag);
+    }
+    if (deformable && !useNodeFilter) {
         Node::DeformFilterHook deformHook;
         deformHook.stage = kGridFilterStage;
         deformHook.tag = tag;
@@ -344,7 +348,7 @@ void GridDeformer::setupChildNoRecurse(const std::shared_ptr<Node>& node, bool p
         } else {
             deformable->upsertDeformPreProcessFilter(std::move(deformHook), prepend);
         }
-    } else if (translateChildren) {
+    } else if (translateChildren || isDeformable) {
         Node::FilterHook hook;
         hook.stage = kGridFilterStage;
         hook.tag = tag;

@@ -11,6 +11,7 @@
 #include "deformer/drivers/phys.hpp"
 #include "drawable.hpp"
 #include "grid_deformer.hpp"
+#include "projectable.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -1228,7 +1229,9 @@ bool PathDeformer::setupChildNoRecurse(const std::shared_ptr<Node>& node, bool p
     if (!node) return true;
     auto drawable = std::dynamic_pointer_cast<Drawable>(node);
     auto grid = std::dynamic_pointer_cast<GridDeformer>(node);
+    auto projectable = std::dynamic_pointer_cast<Projectable>(node);
     bool supportsDeform = static_cast<bool>(drawable) || static_cast<bool>(grid);
+    bool useNodeFilter = static_cast<bool>(projectable) && projectable->autoResizedMesh;
 
     auto& pre = node->preProcessFilters;
     auto& post = node->postProcessFilters;
@@ -1243,23 +1246,49 @@ bool PathDeformer::setupChildNoRecurse(const std::shared_ptr<Node>& node, bool p
     if (supportsDeform) {
         cacheClosestPoints(node);
         auto deformable = std::dynamic_pointer_cast<Deformable>(node);
-        if (!deformable) {
+        if (!deformable && !useNodeFilter) {
             meshCaches.erase(node.get());
             return true;
         }
-        Node::DeformFilterHook hook;
-        hook.stage = kPathFilterStage;
-        hook.tag = tag;
-        hook.func = [this](std::shared_ptr<Node> t,
-                           const Vec2Array& v,
-                           Vec2Array& d,
-                           const Mat4* mat) {
-            return deformChildren(t, v, d, mat);
-        };
-        if (dynamicDeformation) {
-            deformable->upsertDeformPostProcessFilter(std::move(hook), prepend);
+        if (deformable && !useNodeFilter) {
+            Node::DeformFilterHook hook;
+            hook.stage = kPathFilterStage;
+            hook.tag = tag;
+            hook.func = [this](std::shared_ptr<Node> t,
+                               const Vec2Array& v,
+                               Vec2Array& d,
+                               const Mat4* mat) {
+                return deformChildren(t, v, d, mat);
+            };
+            if (dynamicDeformation) {
+                deformable->upsertDeformPostProcessFilter(std::move(hook), prepend);
+            } else {
+                deformable->upsertDeformPreProcessFilter(std::move(hook), prepend);
+            }
         } else {
-            deformable->upsertDeformPreProcessFilter(std::move(hook), prepend);
+            Node::FilterHook hook;
+            hook.stage = kPathFilterStage;
+            hook.tag = tag;
+            hook.func = [this](std::shared_ptr<Node> t,
+                               const Vec2Array& v,
+                               Vec2Array d,
+                               const Mat4* mat) {
+                auto result = deformChildren(t, v, d, mat);
+                return std::make_tuple(result.changed ? d : Vec2Array{}, static_cast<Mat4*>(nullptr), result.changed);
+            };
+            if (dynamicDeformation) {
+                if (prepend) {
+                    post.insert(post.begin(), hook);
+                } else {
+                    post.push_back(hook);
+                }
+            } else {
+                if (prepend) {
+                    pre.insert(pre.begin(), hook);
+                } else {
+                    pre.push_back(hook);
+                }
+            }
         }
     } else {
         meshCaches.erase(node.get());
