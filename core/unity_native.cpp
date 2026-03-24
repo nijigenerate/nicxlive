@@ -347,15 +347,11 @@ static size_t resolvePacketTextureHandle(const RendererCtx& ctx, const nodes::Pa
         return 0;
     }
 
-    const auto runtimeOrTextureId = packet.textureUUIDs[textureIndex];
-    if (runtimeOrTextureId != 0) {
-        auto runtimeHit = ctx.runtimeTextureHandles.find(runtimeOrTextureId);
+    const auto packetRuntimeId = packet.textureUUIDs[textureIndex];
+    if (packetRuntimeId != 0) {
+        auto runtimeHit = ctx.runtimeTextureHandles.find(packetRuntimeId);
         if (runtimeHit != ctx.runtimeTextureHandles.end()) {
             return runtimeHit->second;
-        }
-        auto backendHit = ctx.backendTextureHandles.find(runtimeOrTextureId);
-        if (backendHit != ctx.backendTextureHandles.end()) {
-            return backendHit->second;
         }
     }
 

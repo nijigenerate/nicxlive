@@ -972,6 +972,19 @@ void Projectable::setupSelf() {
     lastAncestorTransformCheckFrame = static_cast<std::size_t>(-1);
 }
 
+void Projectable::build(bool force) {
+    Part::build(force);
+    if (autoResizedMesh) {
+        if (createSimpleMesh()) {
+            initialized = false;
+        }
+        boundsDirty = false;
+    }
+    if (force || !initialized) {
+        initTarget();
+    }
+}
+
 void Projectable::releaseSelf() {
     hasCachedAncestorTransform = false;
     lastAncestorTransformCheckFrame = static_cast<std::size_t>(-1);
@@ -999,18 +1012,6 @@ void Projectable::serializeSelfImpl(::nicxlive::core::serde::InochiSerializer& s
     if (has_flag(flags, SerializeNodeFlags::State)) {
         serializer.putKey("auto_resized");
         serializer.putValue(autoResizedMesh);
-        serializer.putKey("texture_offset_x");
-        serializer.putValue(textureOffset.x);
-        serializer.putKey("texture_offset_y");
-        serializer.putValue(textureOffset.y);
-        serializer.putKey("use_max_children_bounds");
-        serializer.putValue(useMaxChildrenBounds);
-        serializer.putKey("max_bounds_start_frame");
-        serializer.putValue(maxBoundsStartFrame);
-        serializer.putKey("deferred_changed");
-        serializer.putValue(deferredChanged);
-        serializer.putKey("ancestor_change_queued");
-        serializer.putValue(ancestorChangeQueued);
     }
     const_cast<Projectable*>(this)->textures = savedTextures;
     const_cast<Projectable*>(this)->stencil = savedStencil;
@@ -1019,6 +1020,12 @@ void Projectable::serializeSelfImpl(::nicxlive::core::serde::InochiSerializer& s
 ::nicxlive::core::serde::SerdeException Projectable::deserializeFromFghj(const ::nicxlive::core::serde::Fghj& data) {
     auto res = Part::deserializeFromFghj(data);
     textures = {};
+    textureOffset = Vec2{};
+    useMaxChildrenBounds = false;
+    maxBoundsStartFrame = 0;
+    deferredChanged = false;
+    ancestorChangeQueued = false;
+    pendingAncestorChangeFrame = static_cast<std::size_t>(-1);
     if (auto ar = data.get_optional<bool>("auto_resized")) {
         autoResizedMesh = *ar;
     } else if (!mesh->indices.empty()) {
@@ -1026,12 +1033,6 @@ void Projectable::serializeSelfImpl(::nicxlive::core::serde::InochiSerializer& s
     } else {
         autoResizedMesh = true;
     }
-    if (auto tx = data.get_optional<float>("texture_offset_x")) textureOffset.x = *tx;
-    if (auto ty = data.get_optional<float>("texture_offset_y")) textureOffset.y = *ty;
-    if (auto ub = data.get_optional<bool>("use_max_children_bounds")) useMaxChildrenBounds = *ub;
-    if (auto mb = data.get_optional<uint64_t>("max_bounds_start_frame")) maxBoundsStartFrame = *mb;
-    if (auto dc = data.get_optional<bool>("deferred_changed")) deferredChanged = *dc;
-    if (auto ac = data.get_optional<bool>("ancestor_change_queued")) ancestorChangeQueued = *ac;
     return res;
 }
 

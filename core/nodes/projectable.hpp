@@ -107,6 +107,7 @@ public:
     bool releaseChild(const std::shared_ptr<Node>& child) override;
     void setupSelf() override;
     void releaseSelf() override;
+    void build(bool force = false) override;
     void onAncestorChanged(const std::shared_ptr<Node>& target, NotifyReason reason);
     void registerDelegatedTasks(core::TaskScheduler& scheduler);
     void delegatedRunRenderBeginTask(core::RenderContext& ctx);
