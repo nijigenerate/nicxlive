@@ -353,6 +353,10 @@ static size_t resolvePacketTextureHandle(const RendererCtx& ctx, const nodes::Pa
         if (runtimeHit != ctx.runtimeTextureHandles.end()) {
             return runtimeHit->second;
         }
+        auto backendHit = ctx.backendTextureHandles.find(packetRuntimeId);
+        if (backendHit != ctx.backendTextureHandles.end()) {
+            return backendHit->second;
+        }
     }
 
     const auto backendId = packet.textureBackendIds[textureIndex];
