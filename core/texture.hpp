@@ -1,10 +1,13 @@
 #pragma once
 
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 
 namespace nicxlive::core {
+
+class RenderBackend;
 
 enum class Filtering {
     Linear,
@@ -38,7 +41,7 @@ public:
     Texture(int w, int h, int channels = 4, bool stencil = false, bool useMipmaps = true);
     Texture(const std::vector<uint8_t>& data, int width, int height, int inChannels = 4, int outChannels = 4, bool stencil = false, bool useMipmaps = true);
 
-    virtual ~Texture() = default;
+    virtual ~Texture();
 
     virtual void setFiltering(bool point);
     virtual void setFiltering(Filtering mode);
@@ -64,6 +67,7 @@ public:
 private:
     static uint32_t nextUUID();
     void initFromData(const std::vector<uint8_t>& data, int width, int height, int inChannels, int outChannels, bool stencil, bool useMipmaps);
+    void disposeDeferred();
 
     int width_{0};
     int height_{0};
@@ -79,6 +83,9 @@ private:
     std::vector<uint8_t> lockedData_{};
     uint32_t runtimeUUID_{0};
     uint32_t backendId_{0};
+    std::weak_ptr<RenderBackend> backend_{};
 };
+
+void inDrainPendingTextureDisposals();
 
 } // namespace nicxlive::core

@@ -8,12 +8,21 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <mutex>
 #include <string>
 #include <vector>
 
 namespace nicxlive::core {
 
 namespace {
+struct PendingTextureDisposal {
+    std::shared_ptr<RenderBackend> backend;
+    uint32_t backendId{0};
+};
+
+std::mutex gPendingTextureDisposalsMutex;
+std::vector<PendingTextureDisposal> gPendingTextureDisposals;
+
 std::vector<uint8_t> loadImage(const std::string& file, int& w, int& h, int& comp, int reqComp) {
     int width = 0, height = 0, components = 0;
     stbi_uc* data = stbi_load(file.c_str(), &width, &height, &components, reqComp);
@@ -109,6 +118,10 @@ Texture::Texture(const std::vector<uint8_t>& data, int width, int height, int in
     initFromData(data, width, height, inChannels, outChannels, stencil, useMipmaps);
 }
 
+Texture::~Texture() {
+    disposeDeferred();
+}
+
 void Texture::initFromData(const std::vector<uint8_t>& data, int width, int height, int inChannels, int outChannels, bool stencil, bool useMipmaps) {
     width_ = width;
     height_ = height;
@@ -120,7 +133,8 @@ void Texture::initFromData(const std::vector<uint8_t>& data, int width, int heig
     wrapping_ = Wrapping::Clamp;
     anisotropy_ = 1.0f;
     if (runtimeUUID_ == 0) runtimeUUID_ = nextUUID();
-    if (auto backend = std::dynamic_pointer_cast<render::QueueRenderBackend>(getCurrentRenderBackend())) {
+    if (auto backend = getCurrentRenderBackend()) {
+        backend_ = backend;
         backendId_ = backend->createTexture(data_, width_, height_, outChannels, stencil_);
     }
 }
@@ -131,21 +145,30 @@ void Texture::setFiltering(bool point) {
 
 void Texture::setFiltering(Filtering mode) {
     filtering_ = mode;
-    if (auto backend = std::dynamic_pointer_cast<render::QueueRenderBackend>(getCurrentRenderBackend())) {
+    auto backend = backend_.lock();
+    if (!backend) backend = getCurrentRenderBackend();
+    if (backend) {
+        backend_ = backend;
         if (backendId_ != 0) backend->setTextureParams(backendId_, filtering_, wrapping_, anisotropy_);
     }
 }
 
 void Texture::setWrapping(Wrapping mode) {
     wrapping_ = mode;
-    if (auto backend = std::dynamic_pointer_cast<render::QueueRenderBackend>(getCurrentRenderBackend())) {
+    auto backend = backend_.lock();
+    if (!backend) backend = getCurrentRenderBackend();
+    if (backend) {
+        backend_ = backend;
         if (backendId_ != 0) backend->setTextureParams(backendId_, filtering_, wrapping_, anisotropy_);
     }
 }
 
 void Texture::setAnisotropy(float val) {
     anisotropy_ = val;
-    if (auto backend = std::dynamic_pointer_cast<render::QueueRenderBackend>(getCurrentRenderBackend())) {
+    auto backend = backend_.lock();
+    if (!backend) backend = getCurrentRenderBackend();
+    if (backend) {
+        backend_ = backend;
         if (backendId_ != 0) backend->setTextureParams(backendId_, filtering_, wrapping_, anisotropy_);
     }
 }
@@ -159,7 +182,10 @@ void Texture::setData(const std::vector<uint8_t>& data, int inChannels) {
     }
     data_ = data;
     modified_ = true;
-    if (auto backend = std::dynamic_pointer_cast<render::QueueRenderBackend>(getCurrentRenderBackend())) {
+    auto backend = backend_.lock();
+    if (!backend) backend = getCurrentRenderBackend();
+    if (backend) {
+        backend_ = backend;
         if (backendId_ == 0) {
             backendId_ = backend->createTexture(data_, width_, height_, channels_, stencil_);
         } else {
@@ -172,10 +198,44 @@ void Texture::dispose() {
     data_.clear();
     width_ = height_ = 0;
     runtimeUUID_ = 0;
-    if (auto backend = std::dynamic_pointer_cast<render::QueueRenderBackend>(getCurrentRenderBackend())) {
+    if (auto backend = backend_.lock()) {
         if (backendId_ != 0) backend->disposeTexture(backendId_);
     }
     backendId_ = 0;
+    backend_.reset();
+}
+
+void Texture::disposeDeferred() {
+    if (backendId_ == 0) return;
+
+    auto backend = backend_.lock();
+    if (!backend) {
+        backend = getCurrentRenderBackend();
+    }
+    if (!backend) {
+        backendId_ = 0;
+        backend_.reset();
+        return;
+    }
+
+    std::lock_guard<std::mutex> lock(gPendingTextureDisposalsMutex);
+    gPendingTextureDisposals.push_back(PendingTextureDisposal{std::move(backend), backendId_});
+    backendId_ = 0;
+    backend_.reset();
+}
+
+void inDrainPendingTextureDisposals() {
+    std::vector<PendingTextureDisposal> pending;
+    {
+        std::lock_guard<std::mutex> lock(gPendingTextureDisposalsMutex);
+        pending.swap(gPendingTextureDisposals);
+    }
+
+    for (const auto& item : pending) {
+        if (item.backend && item.backendId != 0) {
+            item.backend->disposeTexture(item.backendId);
+        }
+    }
 }
 
 void Texture::lock() {
@@ -190,7 +250,10 @@ void Texture::unlock() {
     locked_ = false;
     if (modified_) {
         data_ = lockedData_;
-        if (auto backend = std::dynamic_pointer_cast<render::QueueRenderBackend>(getCurrentRenderBackend())) {
+        auto backend = backend_.lock();
+        if (!backend) backend = getCurrentRenderBackend();
+        if (backend) {
+            backend_ = backend;
             if (backendId_ == 0) {
                 backendId_ = backend->createTexture(data_, width_, height_, channels_, stencil_);
             } else {

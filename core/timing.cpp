@@ -1,5 +1,6 @@
 #include "timing.hpp"
 #include "runtime_state.hpp"
+#include "texture.hpp"
 
 #include <chrono>
 #include <mutex>
@@ -40,6 +41,7 @@ void inUpdate() {
     gCurrentTime = gTimeFunc();
     gDeltaTime = gCurrentTime - gLastTime;
     gLastTime = gCurrentTime;
+    inDrainPendingTextureDisposals();
 }
 
 double deltaTime() {
