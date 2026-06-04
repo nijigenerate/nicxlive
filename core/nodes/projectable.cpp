@@ -364,7 +364,8 @@ bool Projectable::createSimpleMesh() {
         }
     }
 
-    auto originOffset = transform().translation;
+    auto translation = transform().translation;
+    auto originOffset = translation;
     originOffset.x += deformOffset.x;
     originOffset.y += deformOffset.y;
     auto makeVert = [&](float x, float y) {
@@ -386,11 +387,11 @@ bool Projectable::createSimpleMesh() {
         Part::rebuffer(data);
         shouldUpdateVertices = true;
         autoResizedSize = Vec2{bounds.z - bounds.x, bounds.w - bounds.y};
-        textureOffset = Vec2{(bounds.x + bounds.z) / 2.0f + deformOffset.x - originOffset.x,
-                             (bounds.y + bounds.w) / 2.0f + deformOffset.y - originOffset.y};
+        textureOffset = Vec2{(bounds.x + bounds.z) / 2.0f + deformOffset.x - translation.x,
+                             (bounds.y + bounds.w) / 2.0f + deformOffset.y - translation.y};
     } else {
-        Vec2 newTextureOffset{(bounds.x + bounds.z) / 2.0f + deformOffset.x - originOffset.x,
-                              (bounds.y + bounds.w) / 2.0f + deformOffset.y - originOffset.y};
+        Vec2 newTextureOffset{(bounds.x + bounds.z) / 2.0f + deformOffset.x - translation.x,
+                              (bounds.y + bounds.w) / 2.0f + deformOffset.y - translation.y};
         constexpr float TextureOffsetEpsilon = 0.001f;
         bool offsetChanged = std::abs(newTextureOffset.x - textureOffset.x) > TextureOffsetEpsilon ||
                              std::abs(newTextureOffset.y - textureOffset.y) > TextureOffsetEpsilon;
