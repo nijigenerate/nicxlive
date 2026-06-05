@@ -72,6 +72,7 @@ public:
     Transform transform() override;
     Transform transform() const override;
     virtual Mat4 fullTransformMatrix() const;
+    virtual Mat4 childOffscreenModelMatrix(const std::shared_ptr<Part>& child) const;
     virtual Vec4 boundsFromMatrix(const std::shared_ptr<Part>& child, const Mat4& matrix) const;
     virtual bool detectAncestorTransformChange(std::size_t frameId);
     virtual Vec4 getChildrenBounds(bool forceUpdate = true);

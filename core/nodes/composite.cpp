@@ -354,9 +354,8 @@ bool Composite::createSimpleMesh() {
     }
 
     auto t = transform();
-    Vec2 originOffset{t.translation.x * scale.x, t.translation.y * scale.y};
-    originOffset.x += scaledDeformOffset.x;
-    originOffset.y += scaledDeformOffset.y;
+    Vec2 scaledTranslation{t.translation.x * scale.x, t.translation.y * scale.y};
+    Vec2 originOffset{scaledTranslation.x + scaledDeformOffset.x, scaledTranslation.y + scaledDeformOffset.y};
     auto makeVert = [&](float x, float y) {
         return Vec2{x + scaledDeformOffset.x - originOffset.x, y + scaledDeformOffset.y - originOffset.y};
     };
