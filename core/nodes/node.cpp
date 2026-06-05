@@ -340,7 +340,7 @@ Transform Node::transformNoLock() const {
 
 void Node::setRelativeTo(const std::shared_ptr<Node>& to) {
     if (!to) return;
-    setRelativeTo(to->transformNoLock().toMat4());
+    setRelativeTo(to->transform().toMat4());
     zSort(zSortNoOffset() - to->zSortNoOffset());
 }
 

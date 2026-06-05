@@ -64,7 +64,7 @@ public:
     }
 };
 
-void testProjectableTextureOffsetKeepsUniformDeformationOffset() {
+void testProjectableTextureOffsetUsesOriginOffset() {
     FixedBoundsProjectable node;
     node.fixedBounds = Vec4{10.0f, 20.0f, 50.0f, 80.0f};
     node.fixedDeformOffset = Vec2{7.0f, -3.0f};
@@ -74,11 +74,11 @@ void testProjectableTextureOffsetKeepsUniformDeformationOffset() {
     bool resized = node.createSimpleMesh();
 
     requireTrue("projectable createSimpleMesh resized", resized);
-    requireNear("projectable textureOffset.x", node.textureOffset.x, -63.0f);
-    requireNear("projectable textureOffset.y", node.textureOffset.y, -153.0f);
+    requireNear("projectable textureOffset.x", node.textureOffset.x, -70.0f);
+    requireNear("projectable textureOffset.y", node.textureOffset.y, -150.0f);
 }
 
-void testCompositeTextureOffsetKeepsUniformDeformationOffset() {
+void testCompositeTextureOffsetUsesOriginOffset() {
     auto node = std::make_shared<FixedBoundsComposite>();
     node->fixedBounds = Vec4{-20.0f, 10.0f, 40.0f, 70.0f};
     appendUniformDeformation(*node, Vec2{5.0f, 9.0f});
@@ -88,14 +88,14 @@ void testCompositeTextureOffsetKeepsUniformDeformationOffset() {
     bool resized = node->createSimpleMesh();
 
     requireTrue("composite createSimpleMesh resized", resized);
-    requireNear("composite textureOffset.x", node->textureOffset.x, -15.0f);
-    requireNear("composite textureOffset.y", node->textureOffset.y, 89.0f);
+    requireNear("composite textureOffset.x", node->textureOffset.x, -20.0f);
+    requireNear("composite textureOffset.y", node->textureOffset.y, 80.0f);
 }
 
 } // namespace
 
 int main() {
-    testProjectableTextureOffsetKeepsUniformDeformationOffset();
-    testCompositeTextureOffsetKeepsUniformDeformationOffset();
+    testProjectableTextureOffsetUsesOriginOffset();
+    testCompositeTextureOffsetUsesOriginOffset();
     return 0;
 }

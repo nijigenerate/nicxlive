@@ -161,6 +161,10 @@ Transform Projectable::transform() const {
 
 Mat4 Projectable::fullTransformMatrix() const { return fullTransform().toMat4(); }
 
+Mat4 Projectable::childOffscreenModelMatrix(const std::shared_ptr<Part>& child) const {
+    return child ? child->transform().toMat4() : Mat4::identity();
+}
+
 Vec4 Projectable::boundsFromMatrix(const std::shared_ptr<Part>& child, const Mat4& matrix) const {
     float tx = matrix[0][3];
     float ty = matrix[1][3];
@@ -364,8 +368,7 @@ bool Projectable::createSimpleMesh() {
         }
     }
 
-    auto translation = transform().translation;
-    auto originOffset = translation;
+    auto originOffset = transform().translation;
     originOffset.x += deformOffset.x;
     originOffset.y += deformOffset.y;
     auto makeVert = [&](float x, float y) {
@@ -387,11 +390,11 @@ bool Projectable::createSimpleMesh() {
         Part::rebuffer(data);
         shouldUpdateVertices = true;
         autoResizedSize = Vec2{bounds.z - bounds.x, bounds.w - bounds.y};
-        textureOffset = Vec2{(bounds.x + bounds.z) / 2.0f + deformOffset.x - translation.x,
-                             (bounds.y + bounds.w) / 2.0f + deformOffset.y - translation.y};
+        textureOffset = Vec2{(bounds.x + bounds.z) / 2.0f + deformOffset.x - originOffset.x,
+                             (bounds.y + bounds.w) / 2.0f + deformOffset.y - originOffset.y};
     } else {
-        Vec2 newTextureOffset{(bounds.x + bounds.z) / 2.0f + deformOffset.x - translation.x,
-                              (bounds.y + bounds.w) / 2.0f + deformOffset.y - translation.y};
+        Vec2 newTextureOffset{(bounds.x + bounds.z) / 2.0f + deformOffset.x - originOffset.x,
+                              (bounds.y + bounds.w) / 2.0f + deformOffset.y - originOffset.y};
         constexpr float TextureOffsetEpsilon = 0.001f;
         bool offsetChanged = std::abs(newTextureOffset.x - textureOffset.x) > TextureOffsetEpsilon ||
                              std::abs(newTextureOffset.y - textureOffset.y) > TextureOffsetEpsilon;
@@ -635,7 +638,6 @@ void Projectable::dynamicRenderBegin(core::RenderContext& ctx) {
                  name.c_str(), uuid, dynamicScopeToken, pass.surface->textureCount, pass.surface->stencil ? 1 : 0);
 
     Mat4 translate = Mat4::translation(Vec3{-textureOffset.x, -textureOffset.y, 0});
-    Mat4 correction = Mat4::multiply(fullTransformMatrix(), Mat4::inverse(transform().toMat4()));
     Mat4 childBasis = Mat4::multiply(translate, Mat4::inverse(transform().toMat4()));
     queuedOffscreenParts.clear();
 
@@ -643,7 +645,7 @@ void Projectable::dynamicRenderBegin(core::RenderContext& ctx) {
     for (auto& p : subParts) {
         if (!p) continue;
         if (std::dynamic_pointer_cast<Mask>(p)) continue;
-        Mat4 childMatrix = Mat4::multiply(correction, p->transform().toMat4());
+        Mat4 childMatrix = childOffscreenModelMatrix(p);
         Mat4 finalMatrix = Mat4::multiply(childBasis, childMatrix);
         if (traceDynamicMatrix) {
             NJCX_DBG_LOG(
@@ -670,8 +672,8 @@ void Projectable::dynamicRenderBegin(core::RenderContext& ctx) {
     }
     for (auto& m : maskParts) {
         if (!m) continue;
-        Mat4 maskMatrix = Mat4::multiply(correction, m->transform().toMat4());
-        Mat4 finalMatrix = Mat4::multiply(translate, maskMatrix);
+        Mat4 maskMatrix = childOffscreenModelMatrix(m);
+        Mat4 finalMatrix = Mat4::multiply(childBasis, maskMatrix);
         m->setOffscreenModelMatrix(finalMatrix);
         m->enqueueRenderCommands(ctx);
         queuedOffscreenParts.push_back(m);
@@ -945,6 +947,7 @@ void Projectable::rebuffer(const MeshData& data) {
 
 bool Projectable::setupChild(const std::shared_ptr<Node>& child) {
     setIgnorePuppetRecurse(child, true);
+    scanSubParts(childrenRef());
     if (auto pup = puppetRef()) pup->rescanNodes();
     forceResize = true;
     invalidateChildrenBounds();
@@ -954,7 +957,11 @@ bool Projectable::setupChild(const std::shared_ptr<Node>& child) {
 
 bool Projectable::releaseChild(const std::shared_ptr<Node>& child) {
     setIgnorePuppetRecurse(child, false);
-    scanSubParts(childrenRef());
+    auto remaining = childrenRef();
+    remaining.erase(std::remove_if(remaining.begin(), remaining.end(), [&](const std::shared_ptr<Node>& node) {
+        return node == child;
+    }), remaining.end());
+    scanSubParts(remaining);
     forceResize = true;
     invalidateChildrenBounds();
     boundsDirty = true;

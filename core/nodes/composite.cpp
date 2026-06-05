@@ -375,11 +375,11 @@ bool Composite::createSimpleMesh() {
         rebuffer(data);
         shouldUpdateVertices = true;
         autoResizedSize = Vec2{bounds.z - bounds.x, bounds.w - bounds.y};
-        textureOffset = Vec2{(bounds.x + bounds.z) / 2.0f + scaledDeformOffset.x - scaledTranslation.x,
-                             (bounds.y + bounds.w) / 2.0f + scaledDeformOffset.y - scaledTranslation.y};
+        textureOffset = Vec2{(bounds.x + bounds.z) / 2.0f + scaledDeformOffset.x - originOffset.x,
+                             (bounds.y + bounds.w) / 2.0f + scaledDeformOffset.y - originOffset.y};
     } else {
-        Vec2 newTextureOffset{(bounds.x + bounds.z) / 2.0f + scaledDeformOffset.x - scaledTranslation.x,
-                              (bounds.y + bounds.w) / 2.0f + scaledDeformOffset.y - scaledTranslation.y};
+        Vec2 newTextureOffset{(bounds.x + bounds.z) / 2.0f + scaledDeformOffset.x - originOffset.x,
+                              (bounds.y + bounds.w) / 2.0f + scaledDeformOffset.y - originOffset.y};
         constexpr float TextureOffsetEpsilon = 0.001f;
         bool offsetChanged = std::abs(newTextureOffset.x - textureOffset.x) > TextureOffsetEpsilon ||
                              std::abs(newTextureOffset.y - textureOffset.y) > TextureOffsetEpsilon;
