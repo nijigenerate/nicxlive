@@ -1,5 +1,7 @@
 #include "../core/nodes/composite.hpp"
 #include "../core/nodes/projectable.hpp"
+#include "../core/nodes/simple_physics_driver.hpp"
+#include "../core/serde.hpp"
 
 #include <cmath>
 #include <cstdio>
@@ -10,7 +12,10 @@ using nicxlive::core::math::Vec2;
 using nicxlive::core::math::Vec3;
 using nicxlive::core::math::Vec4;
 using nicxlive::core::nodes::Composite;
+using nicxlive::core::nodes::ParamMapMode;
+using nicxlive::core::nodes::PhysicsModel;
 using nicxlive::core::nodes::Projectable;
+using nicxlive::core::nodes::SimplePhysicsDriver;
 
 namespace {
 
@@ -92,10 +97,24 @@ void testCompositeTextureOffsetUsesOriginOffset() {
     requireNear("composite textureOffset.y", node->textureOffset.y, 80.0f);
 }
 
+void testSimplePhysicsDeserializesDEnumNames() {
+    nicxlive::core::serde::Fghj data;
+    data.put("model_type", "SpringPendulum");
+    data.put("map_mode", "XY");
+
+    SimplePhysicsDriver driver;
+    auto err = driver.deserializeFromFghj(data);
+
+    requireTrue("simple physics deserialize D enum names", !err.has_value());
+    requireTrue("simple physics model SpringPendulum", driver.modelType == PhysicsModel::SpringPendulum);
+    requireTrue("simple physics map XY", driver.mapMode == ParamMapMode::XY);
+}
+
 } // namespace
 
 int main() {
     testProjectableTextureOffsetUsesOriginOffset();
     testCompositeTextureOffsetUsesOriginOffset();
+    testSimplePhysicsDeserializesDEnumNames();
     return 0;
 }

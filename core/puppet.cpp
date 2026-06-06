@@ -9,6 +9,7 @@
 #include "nodes/mesh_group.hpp"
 #include "nodes/path_deformer.hpp"
 #include "nodes/grid_deformer.hpp"
+#include "timing.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -334,6 +335,7 @@ void Puppet::resetDrivers() {
     for (auto& driver : drivers) {
         if (driver) driver->reset();
     }
+    inUpdate();
 }
 
 std::ptrdiff_t Puppet::findParameterIndex(const std::string& name) {
