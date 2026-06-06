@@ -33,6 +33,10 @@ enum class NjgRenderCommandKind : uint32_t {
     EndMask,
 };
 
+enum class NjgQueryKind : uint32_t {
+    Parameters = 1,
+};
+
 struct UnityRendererConfig {
     int viewportWidth;
     int viewportHeight;
@@ -58,6 +62,8 @@ struct NjgParameterInfo {
     nicxlive::core::nodes::Vec2 defaults;
     const char* name;
     size_t nameLength;
+    nicxlive::core::nodes::Vec2 value;
+    nicxlive::core::nodes::Vec2 latestInternal;
 };
 
 struct UnityResourceCallbacks {
@@ -243,6 +249,7 @@ void njgDestroyRenderer(void* renderer);
 NjgResult njgLoadPuppet(void* renderer, const char* pathUtf8, void** outPuppet);
 NjgResult njgUnloadPuppet(void* renderer, void* puppet);
 NjgResult njgGetParameters(void* puppet, NjgParameterInfo* buffer, size_t bufferLength, size_t* outCount);
+NjgResult njgQuery(void* handle, NjgQueryKind kind, void* buffer, size_t itemSize, size_t itemCapacity, size_t* outCount);
 NjgResult njgUpdateParameters(void* puppet, const PuppetParameterUpdate* updates, size_t updateCount);
 NjgResult njgGetPuppetExtData(void* puppet, const char* key, const uint8_t** outData, size_t* outLength);
 NjgResult njgPlayAnimation(void* renderer, void* puppet, const char* name, bool loop, bool playLeadOut);
