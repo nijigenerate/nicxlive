@@ -28,11 +28,11 @@ bool isFiniteVec(const Vec2& v) {
 }
 
 bool parsePhysicsModel(const std::string& value, PhysicsModel& out) {
-    if (value == "pendulum") {
+    if (value == "pendulum" || value == "Pendulum") {
         out = PhysicsModel::Pendulum;
         return true;
     }
-    if (value == "spring_pendulum") {
+    if (value == "spring_pendulum" || value == "SpringPendulum") {
         out = PhysicsModel::SpringPendulum;
         return true;
     }
@@ -40,19 +40,19 @@ bool parsePhysicsModel(const std::string& value, PhysicsModel& out) {
 }
 
 bool parseParamMapMode(const std::string& value, ParamMapMode& out) {
-    if (value == "angle_length") {
+    if (value == "angle_length" || value == "AngleLength") {
         out = ParamMapMode::AngleLength;
         return true;
     }
-    if (value == "xy") {
+    if (value == "xy" || value == "XY") {
         out = ParamMapMode::XY;
         return true;
     }
-    if (value == "length_angle") {
+    if (value == "length_angle" || value == "LengthAngle") {
         out = ParamMapMode::LengthAngle;
         return true;
     }
-    if (value == "yx") {
+    if (value == "yx" || value == "YX") {
         out = ParamMapMode::YX;
         return true;
     }
@@ -124,7 +124,7 @@ public:
             float next = cur[i] + h * (k1[i] + 2 * k2[i] + 2 * k3[i] + k4[i]) / 6.0f;
             if (!std::isfinite(next)) {
                 for (std::size_t j = 0; j < refs.size(); ++j) *refs[j] = cur[j];
-                return;
+                break;
             }
             *refs[i] = next;
         }
@@ -319,11 +319,21 @@ public:
             return;
         }
         float offLen = std::sqrt(offPos.x * offPos.x + offPos.y * offPos.y);
-        Vec2 offPosNorm = (offLen > std::numeric_limits<float>::epsilon()) ? Vec2{offPos.x / offLen, offPos.y / offLen} : Vec2{0, 0};
-        if (!isFiniteVec(offPosNorm)) {
-            driver->logPhysicsState("SpringPendulum:offPosNormNonFinite");
+        Vec2 offPosNorm{};
+        if (!std::isfinite(offLen)) {
+            driver->logPhysicsState("SpringPendulum:offLenNonFinite");
             setD(2, Vec2{0, 0});
             return;
+        } else if (offLen <= std::numeric_limits<float>::epsilon()) {
+            offPosNorm = isFiniteVec(lastValidOffPosNorm) ? lastValidOffPosNorm : Vec2{0.0f, 1.0f};
+        } else {
+            offPosNorm = Vec2{offPos.x / offLen, offPos.y / offLen};
+            if (!isFiniteVec(offPosNorm)) {
+                driver->logPhysicsState("SpringPendulum:offPosNormNonFinite");
+                setD(2, Vec2{0, 0});
+                return;
+            }
+            lastValidOffPosNorm = offPosNorm;
         }
 
         float lengthRatio = g / lengthVal;
@@ -426,20 +436,17 @@ private:
     SimplePhysicsDriver* driver{};
     Vec2 bob{};
     Vec2 dBob{};
+    Vec2 lastValidOffPosNorm{0.0f, 1.0f};
 };
 
 SimplePhysicsDriver::~SimplePhysicsDriver() = default;
 
 SimplePhysicsDriver::SimplePhysicsDriver() {
-    requirePreProcessTask();
-    requirePostTask(0);
     reset();
 }
 
 SimplePhysicsDriver::SimplePhysicsDriver(uint32_t uuidVal, const std::shared_ptr<Node>& parent)
     : Driver(uuidVal, parent) {
-    requirePreProcessTask();
-    requirePostTask(0);
     reset();
 }
 
@@ -685,13 +692,6 @@ void SimplePhysicsDriver::reset() {
     offsetAngleDamping = 1.0f;
     offsetLengthDamping = 1.0f;
     offsetOutputScale = {1.0f, 1.0f};
-    prevAnchor = {0, 0};
-    prevAnchorSet = false;
-    simPhase = 0.0f;
-    output = {0, 0};
-    angle = 0.0f;
-    dAngle = 0.0f;
-    lengthVel = 0.0f;
 
     switch (modelType) {
     case PhysicsModel::Pendulum:
