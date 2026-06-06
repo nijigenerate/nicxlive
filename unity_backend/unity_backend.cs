@@ -65,6 +65,11 @@ namespace Nicxlive.UnityBackend.Interop
             EndMask,
         }
 
+        public enum NjgQueryKind : uint
+        {
+            Parameters = 1,
+        }
+
         public enum MaskDrawableKind : uint
         {
             Part = 0,
@@ -125,6 +130,8 @@ namespace Nicxlive.UnityBackend.Interop
             public Vec2 Defaults;
             public IntPtr Name;
             public nuint NameLength;
+            public Vec2 Value;
+            public Vec2 LatestInternal;
         }
 
         [StructLayout(LayoutKind.Sequential)]
@@ -341,6 +348,9 @@ namespace Nicxlive.UnityBackend.Interop
         [DllImport(DllName, EntryPoint = "njgGetParameters", CallingConvention = CallingConvention.Cdecl)]
         public static extern NjgResult GetParameters(IntPtr puppet, IntPtr buffer, nuint bufferLength, out nuint outCount);
 
+        [DllImport(DllName, EntryPoint = "njgQuery", CallingConvention = CallingConvention.Cdecl)]
+        public static extern NjgResult Query(IntPtr handle, NjgQueryKind kind, IntPtr buffer, nuint itemSize, nuint itemCapacity, out nuint outCount);
+
         [DllImport(DllName, EntryPoint = "njgUpdateParameters", CallingConvention = CallingConvention.Cdecl)]
         public static extern NjgResult UpdateParameters(IntPtr puppet, IntPtr updates, nuint updateCount);
 
@@ -548,6 +558,8 @@ namespace Nicxlive.UnityBackend.Managed
         public Vector2 Min;
         public Vector2 Max;
         public Vector2 Defaults;
+        public Vector2 Value;
+        public Vector2 LatestInternal;
     }
 
     [Serializable]
@@ -1009,10 +1021,17 @@ namespace Nicxlive.UnityBackend.Managed
                 return output;
             }
 
-            var queryResult = NicxliveNative.GetParameters(_puppet, IntPtr.Zero, 0, out var count);
+            var stride = Marshal.SizeOf<NicxliveNative.NjgParameterInfo>();
+            var queryResult = NicxliveNative.Query(
+                _puppet,
+                NicxliveNative.NjgQueryKind.Parameters,
+                IntPtr.Zero,
+                checked((nuint)stride),
+                0,
+                out var count);
             if (queryResult != NicxliveNative.NjgResult.Ok)
             {
-                throw new InvalidOperationException($"njgGetParameters(count) failed: {queryResult}");
+                throw new InvalidOperationException($"njgQuery(parameters count) failed: {queryResult}");
             }
 
             if (count == 0)
@@ -1020,15 +1039,20 @@ namespace Nicxlive.UnityBackend.Managed
                 return output;
             }
 
-            var stride = Marshal.SizeOf<NicxliveNative.NjgParameterInfo>();
             var byteLength = checked((int)count * stride);
             var buffer = Marshal.AllocHGlobal(byteLength);
             try
             {
-                var result = NicxliveNative.GetParameters(_puppet, buffer, count, out var outCount);
+                var result = NicxliveNative.Query(
+                    _puppet,
+                    NicxliveNative.NjgQueryKind.Parameters,
+                    buffer,
+                    checked((nuint)stride),
+                    count,
+                    out var outCount);
                 if (result != NicxliveNative.NjgResult.Ok)
                 {
-                    throw new InvalidOperationException($"njgGetParameters(data) failed: {result}");
+                    throw new InvalidOperationException($"njgQuery(parameters data) failed: {result}");
                 }
 
                 var actual = Math.Min(count, outCount);
@@ -1044,6 +1068,8 @@ namespace Nicxlive.UnityBackend.Managed
                         Min = new Vector2(native.Min.X, native.Min.Y),
                         Max = new Vector2(native.Max.X, native.Max.Y),
                         Defaults = new Vector2(native.Defaults.X, native.Defaults.Y),
+                        Value = new Vector2(native.Value.X, native.Value.Y),
+                        LatestInternal = new Vector2(native.LatestInternal.X, native.LatestInternal.Y),
                         Name = DecodeUtf8(native.Name, native.NameLength),
                     });
                 }
@@ -4432,7 +4458,7 @@ namespace Nicxlive.UnityBackend.Managed
                     IsVec2 = info.IsVec2,
                     Min = info.Min,
                     Max = info.Max,
-                    Value = ClampParameterValue(info.Defaults, info.Min, info.Max, info.IsVec2),
+                    Value = ClampParameterValue(info.Value, info.Min, info.Max, info.IsVec2),
                 };
 
                 if (_parameterStatesByUuid.TryGetValue(info.Uuid, out var existing))
@@ -5349,5 +5375,4 @@ namespace Nicxlive.UnityBackend.Managed
 
     }
 }
-
 
