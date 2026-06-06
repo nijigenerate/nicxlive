@@ -677,15 +677,60 @@ NjgResult njgGetParameters(void* puppetHandle, NjgParameterInfo* buffer, size_t 
     nameCache.reserve(params.size());
     for (const auto& p : params) nameCache.push_back(p->name);
 
+    auto fill = [](NjgParameterInfo& out, const auto& param, const std::string& name) {
+        out.uuid = param->uuid;
+        out.isVec2 = param->isVec2;
+        out.min = param->min;
+        out.max = param->max;
+        out.defaults = param->defaults;
+        out.name = name.c_str();
+        out.nameLength = name.size();
+        out.value = param->value;
+        out.latestInternal = param->latestInternal;
+    };
     for (std::size_t i = 0; i < params.size(); ++i) {
-        const auto& param = params[i];
-        buffer[i].uuid = param->uuid;
-        buffer[i].isVec2 = param->isVec2;
-        buffer[i].min = param->min;
-        buffer[i].max = param->max;
-        buffer[i].defaults = param->defaults;
-        buffer[i].name = nameCache[i].c_str();
-        buffer[i].nameLength = nameCache[i].size();
+        fill(buffer[i], params[i], nameCache[i]);
+    }
+    return NjgResult::Ok;
+}
+
+NjgResult njgQuery(void* handle, NjgQueryKind kind, void* buffer, size_t itemSize, size_t itemCapacity, size_t* outCount) {
+    if (kind != NjgQueryKind::Parameters) return NjgResult::InvalidArgument;
+    if (!outCount) return NjgResult::InvalidArgument;
+    if (itemSize < sizeof(NjgParameterInfo)) return NjgResult::InvalidArgument;
+    *outCount = 0;
+    std::shared_ptr<Puppet> pup;
+    {
+        std::lock_guard<std::mutex> lock(gMutex);
+        auto it = gPuppets.find(handle);
+        if (it == gPuppets.end() || !it->second || !it->second->puppet) return NjgResult::InvalidArgument;
+        pup = it->second->puppet;
+    }
+    const auto& params = pup->parameters;
+    *outCount = params.size();
+    if (!buffer) return NjgResult::Ok;
+    if (itemCapacity < params.size()) return NjgResult::InvalidArgument;
+
+    thread_local std::vector<std::string> nameCache;
+    nameCache.clear();
+    nameCache.reserve(params.size());
+    for (const auto& p : params) nameCache.push_back(p->name);
+
+    auto fill = [](NjgParameterInfo& out, const auto& param, const std::string& name) {
+        out.uuid = param->uuid;
+        out.isVec2 = param->isVec2;
+        out.min = param->min;
+        out.max = param->max;
+        out.defaults = param->defaults;
+        out.name = name.c_str();
+        out.nameLength = name.size();
+        out.value = param->value;
+        out.latestInternal = param->latestInternal;
+    };
+    auto* bytes = static_cast<uint8_t*>(buffer);
+    for (std::size_t i = 0; i < params.size(); ++i) {
+        auto* item = reinterpret_cast<NjgParameterInfo*>(bytes + i * itemSize);
+        fill(*item, params[i], nameCache[i]);
     }
     return NjgResult::Ok;
 }
