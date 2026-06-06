@@ -697,7 +697,6 @@ NjgResult njgGetParameters(void* puppetHandle, NjgParameterInfo* buffer, size_t 
 NjgResult njgQuery(void* handle, NjgQueryKind kind, void* buffer, size_t itemSize, size_t itemCapacity, size_t* outCount) {
     if (kind != NjgQueryKind::Parameters) return NjgResult::InvalidArgument;
     if (!outCount) return NjgResult::InvalidArgument;
-    if (itemSize < sizeof(NjgParameterInfo)) return NjgResult::InvalidArgument;
     *outCount = 0;
     std::shared_ptr<Puppet> pup;
     {
@@ -709,6 +708,7 @@ NjgResult njgQuery(void* handle, NjgQueryKind kind, void* buffer, size_t itemSiz
     const auto& params = pup->parameters;
     *outCount = params.size();
     if (!buffer) return NjgResult::Ok;
+    if (itemSize < sizeof(NjgParameterInfo)) return NjgResult::InvalidArgument;
     if (itemCapacity < params.size()) return NjgResult::InvalidArgument;
 
     thread_local std::vector<std::string> nameCache;
