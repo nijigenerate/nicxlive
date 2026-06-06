@@ -135,6 +135,27 @@ void testSimplePhysicsSpringPendulumRecoversFromZeroLength() {
                 driver.output.y > driver.anchor.y);
 }
 
+void testSimplePhysicsResetIgnoresStaleLengthOffset() {
+    double now = 0.0;
+    nicxlive::core::inSetTimingFunc([&now]() {
+        return now;
+    });
+    nicxlive::core::inUpdate();
+
+    SimplePhysicsDriver driver;
+    driver.modelType = PhysicsModel::SpringPendulum;
+    driver.anchor = Vec2{0.0f, 0.0f};
+    driver.length = 100.0f;
+    requireTrue("simple physics length offset accepted", driver.setValue("length", 50.0f));
+
+    driver.reset();
+    driver.updateDriver();
+
+    requireTrue("simple physics reset output finite",
+                std::isfinite(driver.output.x) && std::isfinite(driver.output.y));
+    requireNear("simple physics reset output ignores length offset", driver.output.y, 100.0f);
+}
+
 } // namespace
 
 int main() {
@@ -142,5 +163,6 @@ int main() {
     testCompositeTextureOffsetUsesOriginOffset();
     testSimplePhysicsDeserializesDEnumNames();
     testSimplePhysicsSpringPendulumRecoversFromZeroLength();
+    testSimplePhysicsResetIgnoresStaleLengthOffset();
     return 0;
 }

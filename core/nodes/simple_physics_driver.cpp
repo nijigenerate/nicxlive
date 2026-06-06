@@ -686,6 +686,12 @@ void SimplePhysicsDriver::updateDriver() {
 
 void SimplePhysicsDriver::reset() {
     updateInputs();
+    offsetGravity = 1.0f;
+    offsetLength = 0.0f;
+    offsetFrequency = 1.0f;
+    offsetAngleDamping = 1.0f;
+    offsetLengthDamping = 1.0f;
+    offsetOutputScale = {1.0f, 1.0f};
 
     switch (modelType) {
     case PhysicsModel::Pendulum:
