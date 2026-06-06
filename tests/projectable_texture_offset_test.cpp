@@ -2,6 +2,7 @@
 #include "../core/nodes/projectable.hpp"
 #include "../core/nodes/simple_physics_driver.hpp"
 #include "../core/serde.hpp"
+#include "../core/timing.hpp"
 
 #include <cmath>
 #include <cstdio>
@@ -110,11 +111,36 @@ void testSimplePhysicsDeserializesDEnumNames() {
     requireTrue("simple physics map XY", driver.mapMode == ParamMapMode::XY);
 }
 
+void testSimplePhysicsSpringPendulumRecoversFromZeroLength() {
+    double now = 0.0;
+    nicxlive::core::inSetTimingFunc([&now]() {
+        return now;
+    });
+    nicxlive::core::inUpdate();
+
+    SimplePhysicsDriver driver;
+    driver.modelType = PhysicsModel::SpringPendulum;
+    driver.anchor = Vec2{0.0f, 0.0f};
+    driver.length = 0.0f;
+    driver.reset();
+
+    driver.length = 100.0f;
+    now = 0.01;
+    nicxlive::core::inUpdate();
+    driver.updateDriver();
+
+    requireTrue("simple physics zero-length output finite",
+                std::isfinite(driver.output.x) && std::isfinite(driver.output.y));
+    requireTrue("simple physics zero-length output recovers along +Y",
+                driver.output.y > driver.anchor.y);
+}
+
 } // namespace
 
 int main() {
     testProjectableTextureOffsetUsesOriginOffset();
     testCompositeTextureOffsetUsesOriginOffset();
     testSimplePhysicsDeserializesDEnumNames();
+    testSimplePhysicsSpringPendulumRecoversFromZeroLength();
     return 0;
 }

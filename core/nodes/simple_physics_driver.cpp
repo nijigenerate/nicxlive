@@ -319,11 +319,21 @@ public:
             return;
         }
         float offLen = std::sqrt(offPos.x * offPos.x + offPos.y * offPos.y);
-        Vec2 offPosNorm{offPos.x / offLen, offPos.y / offLen};
-        if (!isFiniteVec(offPosNorm)) {
-            driver->logPhysicsState("SpringPendulum:offPosNormNonFinite");
+        Vec2 offPosNorm{};
+        if (!std::isfinite(offLen)) {
+            driver->logPhysicsState("SpringPendulum:offLenNonFinite");
             setD(2, Vec2{0, 0});
             return;
+        } else if (offLen <= std::numeric_limits<float>::epsilon()) {
+            offPosNorm = isFiniteVec(lastValidOffPosNorm) ? lastValidOffPosNorm : Vec2{0.0f, 1.0f};
+        } else {
+            offPosNorm = Vec2{offPos.x / offLen, offPos.y / offLen};
+            if (!isFiniteVec(offPosNorm)) {
+                driver->logPhysicsState("SpringPendulum:offPosNormNonFinite");
+                setD(2, Vec2{0, 0});
+                return;
+            }
+            lastValidOffPosNorm = offPosNorm;
         }
 
         float lengthRatio = g / lengthVal;
@@ -426,6 +436,7 @@ private:
     SimplePhysicsDriver* driver{};
     Vec2 bob{};
     Vec2 dBob{};
+    Vec2 lastValidOffPosNorm{0.0f, 1.0f};
 };
 
 SimplePhysicsDriver::~SimplePhysicsDriver() = default;
