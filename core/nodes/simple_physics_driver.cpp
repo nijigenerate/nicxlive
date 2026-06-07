@@ -702,6 +702,8 @@ void SimplePhysicsDriver::reset() {
         break;
     }
     systemModel = modelType;
+    anchorInitialized = false;
+    prevAnchorSet = false;
 }
 
 void SimplePhysicsDriver::updateInputs() {
@@ -712,7 +714,12 @@ void SimplePhysicsDriver::updateInputs() {
         logPhysicsState("updateInputs:anchorNonFinite");
         return;
     }
-    anchor = Vec2{anchorPos.x, anchorPos.y};
+    Vec2 nextAnchor{anchorPos.x, anchorPos.y};
+    anchor = nextAnchor;
+    if (!anchorInitialized) {
+        if (system) system->updateAnchor();
+        anchorInitialized = true;
+    }
 }
 
 void SimplePhysicsDriver::updateOutputs() {

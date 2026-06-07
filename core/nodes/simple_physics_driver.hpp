@@ -54,6 +54,7 @@ public:
     Vec2 output{0.0f, 0.0f};
     Vec2 prevAnchor{0.0f, 0.0f};
     Mat4 prevTransMat{Mat4::identity()};
+    bool anchorInitialized{false};
     bool prevAnchorSet{false};
     float simPhase{0.0f};
     std::weak_ptr<core::param::Parameter> paramCached{};

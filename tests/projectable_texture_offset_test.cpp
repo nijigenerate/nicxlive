@@ -156,6 +156,38 @@ void testSimplePhysicsResetIgnoresStaleLengthOffset() {
     requireNear("simple physics reset output ignores length offset", driver.output.y, 100.0f);
 }
 
+void testSimplePhysicsInitializesAtResolvedAnchor() {
+    double now = 0.0;
+    nicxlive::core::inSetTimingFunc([&now]() {
+        return now;
+    });
+    nicxlive::core::inUpdate();
+
+    SimplePhysicsDriver driver;
+    driver.modelType = PhysicsModel::SpringPendulum;
+    driver.localOnly = true;
+    driver.length = 100.0f;
+    driver.reset();
+
+    driver.localTransform.translation = Vec3{30.0f, 40.0f, 0.0f};
+    driver.localTransform.update();
+
+    now = 0.01;
+    nicxlive::core::inUpdate();
+    driver.updateDriver();
+    const float initialX = driver.output.x;
+    const float initialY = driver.output.y;
+
+    now = 0.02;
+    nicxlive::core::inUpdate();
+    driver.updateDriver();
+
+    requireNear("simple physics initial anchor output.x", initialX, 30.0f);
+    requireNear("simple physics initial anchor output.y", initialY, 140.0f);
+    requireNear("simple physics initial anchor remains stable.x", driver.output.x, initialX);
+    requireNear("simple physics initial anchor remains stable.y", driver.output.y, initialY);
+}
+
 } // namespace
 
 int main() {
@@ -164,5 +196,6 @@ int main() {
     testSimplePhysicsDeserializesDEnumNames();
     testSimplePhysicsSpringPendulumRecoversFromZeroLength();
     testSimplePhysicsResetIgnoresStaleLengthOffset();
+    testSimplePhysicsInitializesAtResolvedAnchor();
     return 0;
 }
