@@ -806,7 +806,7 @@ namespace Nicxlive.UnityBackend.Compat
         }
         public static void Detach(Camera camera, CommandBuffer buffer)
         {
-            if (camera == null || buffer == null)
+            if (ReferenceEquals(camera, null) || buffer == null)
             {
                 return;
             }
@@ -4975,7 +4975,7 @@ namespace Nicxlive.UnityBackend.Managed
             }
             if (!Application.isPlaying && camera.cameraType == CameraType.SceneView)
             {
-                if (_attachedCamera != null && _commandBuffer != null)
+                if (!ReferenceEquals(_attachedCamera, null) && _commandBuffer != null)
                 {
                     Nicxlive.UnityBackend.Compat.UrpCommandBufferRouter.Detach(_attachedCamera, _commandBuffer);
                 }
@@ -5003,7 +5003,7 @@ namespace Nicxlive.UnityBackend.Managed
 
         private void ResetRuntimeForPuppetReload()
         {
-            if (_attachedCamera != null && _commandBuffer != null)
+            if (!ReferenceEquals(_attachedCamera, null) && _commandBuffer != null)
             {
                 Nicxlive.UnityBackend.Compat.UrpCommandBufferRouter.Detach(_attachedCamera, _commandBuffer);
             }
@@ -5299,7 +5299,7 @@ namespace Nicxlive.UnityBackend.Managed
             UnityEditor.SceneView.duringSceneGui -= OnSceneViewDuringGui;
 #endif
             RenderPipelineManager.endCameraRendering -= OnEndCameraRenderingDiagnostics;
-            if (_attachedCamera != null && _commandBuffer != null)
+            if (!ReferenceEquals(_attachedCamera, null) && _commandBuffer != null)
             {
                 Nicxlive.UnityBackend.Compat.UrpCommandBufferRouter.Detach(_attachedCamera, _commandBuffer);
             }
