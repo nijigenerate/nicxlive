@@ -84,6 +84,10 @@ public:
     virtual void initializeDrawableResources() {}
     virtual void bindDrawableVao() {}
     virtual void createDrawableBuffers(RenderResourceHandle& /*outHandle*/) {}
+    // Called by collectRenderResources on the rendering thread, never by a Drawable destructor.
+    virtual void disposeDrawableBuffers(RenderResourceHandle /*id*/) {}
+    // Batch resource compaction after all pending releases have been delivered.
+    virtual void collectDrawableBuffers() {}
     virtual void uploadDrawableIndices(RenderResourceHandle /*id*/, const std::vector<uint16_t>& /*indices*/) {}
     virtual void uploadSharedVertexBuffer(const ::nicxlive::core::common::Vec2Array&) {}
     virtual void uploadSharedUvBuffer(const ::nicxlive::core::common::Vec2Array&) {}

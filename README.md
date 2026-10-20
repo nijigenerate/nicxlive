@@ -42,3 +42,22 @@ cmake --build build-wasm
 
 ## Progress
 See `doc/compat-*.md` for detailed compatibility notes and remaining gaps.
+## Render resource lifetime
+
+`core/render/shared_deform_buffer.hpp` exposes `render::collectRenderResources()`.
+Call it on the rendering thread with the backend graphics context current, even
+when no Puppets remain. `inUpdate()` already calls it. Call it again after model
+cleanup and before destroying the graphics context. Model mutation and collection
+must be serialized.
+
+Drawable destruction unregisters the CPU vertex/UV/deform arrays and queues its
+index handle with a weak reference to the backend that created it. Destruction
+never calls GPU APIs. Collection invokes `RenderBackend::disposeDrawableBuffers(id)`
+for retired handles, then `collectDrawableBuffers()` once per affected backend.
+The backend owns GPU allocation, range compaction and deletion. Dirty shared CPU
+arrays are uploaded even when empty; an empty upload means the GPU allocation may
+be released. The last CPU array removal also frees atlas bookkeeping capacity.
+
+`nicxlive_render_resource_lifetime_test` verifies deferred backend notifications,
+surviving Drawable data, repeated creation/deletion, empty-array notification and
+that pending retirements do not keep the backend alive.

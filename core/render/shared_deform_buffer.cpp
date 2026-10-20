@@ -1,4 +1,7 @@
 #include "shared_deform_buffer.hpp"
+#include "common.hpp"
+#include "../runtime_state.hpp"
+#include <mutex>
 #include "../debug_log.hpp"
 
 #include <algorithm>
@@ -67,6 +70,10 @@ struct SharedVecAtlas {
             lookup[bindings[idx].target] = idx;
         }
         bindings.pop_back();
+        if (bindings.empty()) {
+            std::vector<Binding>().swap(bindings);
+            std::unordered_map<Vec2Array*, std::size_t>().swap(lookup);
+        }
         rebuild();
         if (traceSharedEnabled()) {
             NJCX_DBG_LOG("[nicxlive][shared-atlas] unregister target=%p bindings=%zu stride=%zu\n",
@@ -196,5 +203,33 @@ bool sharedUvBufferDirty() { return uvAtlas.isDirty(); }
 void sharedUvMarkDirty() { uvAtlas.markDirty(); }
 void sharedUvMarkUploaded() { uvAtlas.markUploaded(); }
 std::size_t sharedUvBufferRevision() { return uvAtlas.currentRevision(); }
+
+namespace {
+struct Retirement { std::weak_ptr<RenderBackend> backend; uint32_t handle; };
+struct RetirementQueue { std::mutex mutex; std::vector<Retirement> items; };
+// Remains valid during late global/TLS Drawable destruction; no backend is owned.
+RetirementQueue& retirements() { static auto* queue=new RetirementQueue;return *queue; }
+}
+void retireDrawableBuffers(std::weak_ptr<RenderBackend> backend,uint32_t handle) {
+    if(!handle || backend.expired())return;
+    auto& queue=retirements();std::lock_guard lock(queue.mutex);
+    queue.items.push_back({std::move(backend),handle});
+}
+void collectRenderResources() {
+    std::vector<Retirement> pending;
+    {auto& queue=retirements();std::lock_guard lock(queue.mutex);pending.swap(queue.items);}
+    std::vector<std::shared_ptr<RenderBackend>> touched;
+    for(auto& entry:pending)if(auto backend=entry.backend.lock()) {
+        backend->disposeDrawableBuffers(entry.handle);
+        if(std::find(touched.begin(),touched.end(),backend)==touched.end())touched.push_back(backend);
+    }
+    for(auto& backend:touched)backend->collectDrawableBuffers();
+    if(auto backend=getCurrentRenderBackend()) {
+        // Empty data is meaningful: the driver must release its allocation.
+        if(sharedVertexBufferDirty()){backend->uploadSharedVertexBuffer(sharedVertexBufferData());sharedVertexMarkUploaded();}
+        if(sharedUvBufferDirty()){backend->uploadSharedUvBuffer(sharedUvBufferData());sharedUvMarkUploaded();}
+        if(sharedDeformBufferDirty()){backend->uploadSharedDeformBuffer(sharedDeformBufferData());sharedDeformMarkUploaded();}
+    }
+}
 
 } // namespace nicxlive::core::render

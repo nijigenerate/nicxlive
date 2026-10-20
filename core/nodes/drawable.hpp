@@ -72,6 +72,7 @@ public:
     std::size_t uvOffset{0};
     std::size_t deformOffset{0};
     uint32_t ibo{0};
+    std::weak_ptr<::nicxlive::core::RenderBackend> drawableBackend;
     Vec3 tint{};
     Vec3 screenTint{};
     float emissionStrength{0.0f};
@@ -124,6 +125,7 @@ public:
 
     virtual void setupSelf() override;
 
+    void finalize() override;
     virtual void finalizeDrawable();
 
     virtual void normalizeUv();

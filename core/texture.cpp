@@ -1,3 +1,5 @@
+#include <atomic>
+#include <stdexcept>
 #include "third_party/stb_image_full.h"
 
 #include <cstring>
@@ -21,7 +23,11 @@ struct PendingTextureDisposal {
 };
 
 std::mutex gPendingTextureDisposalsMutex;
-std::vector<PendingTextureDisposal> gPendingTextureDisposals;
+std::atomic<bool> gPendingTextureDisposalsAlive{true};
+struct PendingTextureDisposalQueue : std::vector<PendingTextureDisposal> {
+    ~PendingTextureDisposalQueue() { gPendingTextureDisposalsAlive.store(false); }
+};
+PendingTextureDisposalQueue gPendingTextureDisposals;
 
 std::vector<uint8_t> loadImage(const std::string& file, int& w, int& h, int& comp, int reqComp) {
     int width = 0, height = 0, components = 0;
@@ -55,22 +61,24 @@ std::vector<uint8_t> loadImageBuffer(const std::vector<uint8_t>& buffer, int& w,
 
 ShallowTexture::ShallowTexture(const std::string& file, int channels) {
     int w = 0, h = 0, comp = 0;
-    auto img = loadImage(file, w, h, comp, channels);
+    auto img = loadImage(file, w, h, comp, 0);
+    if (img.empty()) throw std::runtime_error("Cannot decode image: " + file);
     data = img;
     width = w;
     height = h;
-    channels = channels == 0 ? comp : channels;
-    convChannels = channels;
+    this->channels = comp;
+    convChannels = channels == 0 ? comp : channels;
 }
 
 ShallowTexture::ShallowTexture(const std::vector<uint8_t>& buffer, int channels) {
     int w = 0, h = 0, comp = 0;
-    auto img = loadImageBuffer(buffer, w, h, comp, channels);
+    auto img = loadImageBuffer(buffer, w, h, comp, 0);
+    if (img.empty()) throw std::runtime_error("Cannot decode image buffer");
     data = img;
     width = w;
     height = h;
-    this->channels = channels == 0 ? comp : channels;
-    convChannels = this->channels;
+    this->channels = comp;
+    convChannels = channels == 0 ? comp : channels;
 }
 
 ShallowTexture::ShallowTexture(const std::vector<uint8_t>& buffer, int w, int h, int channels)
@@ -122,13 +130,25 @@ Texture::~Texture() {
     disposeDeferred();
 }
 
+namespace {
+std::vector<uint8_t> convertTextureChannels(const std::vector<uint8_t>& data, int w, int h, int from, int to) {
+    if (from < 1 || from > 4 || to < 1 || to > 4 || w < 0 || h < 0) throw std::invalid_argument("Invalid texture dimensions/channels");
+    if (data.empty()) return {};
+    const size_t count = static_cast<size_t>(w) * h;
+    if (data.size() < count * from) throw std::invalid_argument("Incomplete texture data");
+    std::vector<uint8_t> result(count * to);
+    for (size_t i=0;i<count;++i) for (int c=0;c<to;++c)
+        result[i*to+c] = c < from ? data[i*from+c] : (c==3 ? 255 : 0);
+    return result;
+}
+}
 void Texture::initFromData(const std::vector<uint8_t>& data, int width, int height, int inChannels, int outChannels, bool stencil, bool useMipmaps) {
     width_ = width;
     height_ = height;
     channels_ = outChannels;
     stencil_ = stencil;
     useMipmaps_ = useMipmaps;
-    data_ = data;
+    data_ = convertTextureChannels(data, width, height, inChannels, outChannels);
     filtering_ = Filtering::Linear;
     wrapping_ = Wrapping::Clamp;
     anisotropy_ = 1.0f;
@@ -174,13 +194,13 @@ void Texture::setAnisotropy(float val) {
 }
 
 void Texture::setData(const std::vector<uint8_t>& data, int inChannels) {
-    channels_ = inChannels;
+    const auto converted = convertTextureChannels(data, width_, height_, inChannels == -1 ? channels_ : inChannels, channels_);
     if (locked_) {
-        lockedData_ = data;
+        lockedData_ = converted;
         modified_ = true;
         return;
     }
-    data_ = data;
+    data_ = converted;
     modified_ = true;
     auto backend = backend_.lock();
     if (!backend) backend = getCurrentRenderBackend();
@@ -206,6 +226,11 @@ void Texture::dispose() {
 }
 
 void Texture::disposeDeferred() {
+    if (!gPendingTextureDisposalsAlive.load()) {
+        backendId_ = 0;
+        backend_.reset();
+        return;
+    }
     if (backendId_ == 0) return;
 
     auto backend = backend_.lock();
