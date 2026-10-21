@@ -276,36 +276,14 @@ bool QueueCommandEmitter::tryMakeMaskApplyPacket(const std::shared_ptr<nodes::Dr
 
 void QueueCommandEmitter::uploadSharedBuffers() {
     if (!activeBackend_) return;
-    using ::nicxlive::core::render::sharedDeformBufferData;
-    using ::nicxlive::core::render::sharedDeformBufferDirty;
-    using ::nicxlive::core::render::sharedDeformMarkUploaded;
-    using ::nicxlive::core::render::sharedVertexBufferData;
-    using ::nicxlive::core::render::sharedVertexBufferDirty;
-    using ::nicxlive::core::render::sharedVertexMarkUploaded;
-    using ::nicxlive::core::render::sharedUvBufferData;
-    using ::nicxlive::core::render::sharedUvBufferDirty;
-    using ::nicxlive::core::render::sharedUvMarkUploaded;
-
-    if (sharedVertexBufferDirty()) {
-        auto& vertices = sharedVertexBufferData();
-        if (vertices.size()) {
-            activeBackend_->uploadSharedVertexBuffer(vertices);
-        }
-        sharedVertexMarkUploaded();
-    }
-    if (sharedUvBufferDirty()) {
-        auto& uvs = sharedUvBufferData();
-        if (uvs.size()) {
-            activeBackend_->uploadSharedUvBuffer(uvs);
-        }
-        sharedUvMarkUploaded();
-    }
-    if (sharedDeformBufferDirty()) {
-        auto& deform = sharedDeformBufferData();
-        if (deform.size()) {
-            activeBackend_->uploadSharedDeformBuffer(deform);
-        }
-        sharedDeformMarkUploaded();
+    if (activeBackend_ == backend_.get()) {
+        syncSharedBuffers(backend_);
+    } else {
+        // The caller can supply a different non-owning backend. Upload directly
+        // rather than retaining an untracked pointer across frames.
+        activeBackend_->uploadSharedVertexBuffer(sharedVertexBufferData());
+        activeBackend_->uploadSharedUvBuffer(sharedUvBufferData());
+        activeBackend_->uploadSharedDeformBuffer(sharedDeformBufferData());
     }
 }
 

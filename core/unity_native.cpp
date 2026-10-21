@@ -616,6 +616,18 @@ void njgDestroyRenderer(void* renderer) {
 
 NjgResult njgLoadPuppet(void* renderer, const char* pathUtf8, void** outPuppet) {
     if (!renderer || !pathUtf8 || !outPuppet) return NjgResult::InvalidArgument;
+    std::shared_ptr<QueueRenderBackend> requestedBackend;
+    {
+        std::lock_guard<std::mutex> lock(gMutex);
+        auto it = gRenderers.find(renderer);
+        if (it == gRenderers.end()) return NjgResult::InvalidArgument;
+        requestedBackend = it->second->backend;
+    }
+    struct RestoreBackend {
+        std::shared_ptr<RenderBackend> previous;
+        ~RestoreBackend() { setCurrentRenderBackend(previous); }
+    } restore{getCurrentRenderBackend()};
+    setCurrentRenderBackend(requestedBackend);
     try {
         auto pup = fmt::inLoadPuppet<Puppet>(pathUtf8);
         if (auto root = pup->actualRoot()) {
@@ -931,6 +943,10 @@ NjgResult njgUnloadPuppet(void* renderer, void* puppet) {
         auto rit = gRenderers.find(renderer);
         if (rit != gRenderers.end()) {
             ownerBackend = rit->second->backend;
+            // Invalidate commands retaining surfaces before draining destruction.
+            ownerBackend->clear();
+            rit->second->recorded.clear();
+            rit->second->queued.clear();
             auto& v = rit->second->puppetHandles;
             v.erase(std::remove(v.begin(), v.end(), puppet), v.end());
             auto pit = gPuppets.find(puppet);
@@ -946,6 +962,11 @@ NjgResult njgUnloadPuppet(void* renderer, void* puppet) {
     // No puppet remains to tick after the last unload. Retire while its renderer lives.
     collectRenderResources();
     inDrainPendingTextureDisposals();
+    {
+        std::lock_guard<std::mutex> lock(gMutex);
+        auto it = gRenderers.find(renderer);
+        if (it != gRenderers.end()) applyTextureCommands(*it->second);
+    }
     setCurrentRenderBackend(previousBackend);
     return NjgResult::Ok;
 }

@@ -87,6 +87,20 @@ int main(){try{
         check(!r::sharedVertexAtlasStride()&&!r::sharedUvAtlasStride()&&!r::sharedDeformAtlasStride(),"CPU atlas retained data");
     }
     {
+        auto other=std::make_shared<Backend>();
+        auto first=std::make_shared<nodes::Drawable>(mesh,16,nullptr);
+        inSetRenderBackend(other);
+        auto second=std::make_shared<nodes::Drawable>(mesh,17,nullptr);
+        r::syncSharedBuffers(backend); r::syncSharedBuffers(other);
+        check(backend->vertex==6 && other->vertex==6,"initial multi-backend upload failed");
+        first.reset(); inSetRenderBackend(backend); r::collectRenderResources();
+        check(backend->vertex==3 && other->vertex==6,"collector touched a noncurrent context");
+        r::syncSharedBuffers(other);
+        check(other->vertex==3 && other->uv==3 && other->deform==3,"second backend missed atlas compaction");
+        second.reset(); r::collectRenderResources(); r::syncSharedBuffers(other);
+        check(!other->vertex && !other->uv && !other->deform,"second backend retained empty atlas");
+    }
+    {
         auto queue=std::make_shared<r::QueueRenderBackend>();
         inSetRenderBackend(queue);
         auto drawable=std::make_shared<nodes::Drawable>(mesh,13,nullptr);
@@ -100,16 +114,36 @@ int main(){try{
             "nicxlive-retirement-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())+".inp");
         struct TempFile {std::filesystem::path path;~TempFile(){std::error_code error;std::filesystem::remove(path,error);}} cleanup{path};
         // An empty puppet suffices to exercise the last-handle unload path.
-        { Puppet fixture; nicxlive::core::fmt::inWriteINPPuppet(fixture,path.string()); }
+        { Puppet fixture;
+          fixture.textureSlots={nullptr, std::make_shared<Texture>(), std::make_shared<Texture>(std::vector<uint8_t>{3,4,5,255},1,1,4,4,false,false)};
+          nicxlive::core::fmt::inWriteINPPuppet(fixture,path.string()); }
+        { auto loaded=fmt::inLoadPuppet<Puppet>(path.string());
+          check(loaded->textureSlots.size()==3 && !loaded->textureSlots[0] && !loaded->textureSlots[1] && loaded->textureSlots[2],"empty texture slots failed roundtrip"); }
+        inDrainPendingTextureDisposals();
         UnityRendererConfig config{32,32};void* renderer=nullptr;void* puppet=nullptr;
         check(njgCreateRenderer(&config,nullptr,&renderer)==NjgResult::Ok,"C API renderer creation failed");
         auto queue=std::dynamic_pointer_cast<r::QueueRenderBackend>(getCurrentRenderBackend());
+        void* otherRenderer=nullptr;
+        check(njgCreateRenderer(&config,nullptr,&otherRenderer)==NjgResult::Ok,"second renderer creation failed");
+        auto otherQueue=std::dynamic_pointer_cast<r::QueueRenderBackend>(getCurrentRenderBackend());
+        queue->resourceQueue.clear(); otherQueue->resourceQueue.clear();
         check(njgLoadPuppet(renderer,path.string().c_str(),&puppet)==NjgResult::Ok,"C API puppet load failed");
+        check(!queue->resourceQueue.empty() && otherQueue->resourceQueue.empty(),"load allocated textures on wrong renderer");
+        check(getCurrentRenderBackend()==otherQueue,"load did not restore calling backend");
+        inSetRenderBackend(queue);
+        std::weak_ptr<Texture> pendingTexture;
+        { DynamicCompositePass pass;
+          pass.textures.push_back(std::make_shared<Texture>(std::vector<uint8_t>{1,2,3,255},1,1,4,4,false,false));
+          pendingTexture=pass.textures[0]; queue->beginDynamicComposite(pass); queue->endDynamicComposite(pass); }
+        check(!pendingTexture.expired(),"test did not retain queued surface");
         // Queue a real Drawable retirement before unload; no subsequent tick is allowed.
         { auto drawable=std::make_shared<nodes::Drawable>(mesh,15,nullptr); }
         check(queue->drawableIndexBufferCount()==1,"C API renderer has no pending retirement");
         check(njgUnloadPuppet(renderer,puppet)==NjgResult::Ok,"C API unload failed");
         check(queue->drawableIndexBufferCount()==0,"last C API puppet unload left pending indices");
+        check(pendingTexture.expired(),"unload retained queued surface texture");
+        check(std::any_of(queue->resourceQueue.begin(),queue->resourceQueue.end(),[](const auto& command){return command.kind==r::TextureCommandKind::Dispose;}),"unload did not drain surface texture disposal");
+        njgDestroyRenderer(otherRenderer);
         njgDestroyRenderer(renderer);njgRuntimeTerm();inSetRenderBackend(backend);
     }
     auto last=std::make_shared<nodes::Drawable>(mesh,12,nullptr);

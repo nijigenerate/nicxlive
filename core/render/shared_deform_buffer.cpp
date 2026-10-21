@@ -99,7 +99,7 @@ struct SharedVecAtlas {
     Vec2Array& data() { return storage; }
     bool isDirty() const { return dirty; }
     void markDirty() {
-        if (!dirty) bumpRevision();
+        bumpRevision();
         dirty = true;
     }
     void markUploaded() { dirty = false; }
@@ -155,7 +155,7 @@ private:
             }
             if (binding.offsetSink) *binding.offsetSink = binding.offset;
         }
-        if (!dirty) bumpRevision();
+        bumpRevision();
         dirty = true;
         if (traceSharedEnabled()) {
             std::size_t maxEnd = 0;
@@ -224,11 +224,35 @@ void collectRenderResources() {
         if(std::find(touched.begin(),touched.end(),backend)==touched.end())touched.push_back(backend);
     }
     for(auto& backend:touched)backend->collectDrawableBuffers();
-    if(auto backend=getCurrentRenderBackend()) {
-        // Empty data is meaningful: the driver must release its allocation.
-        if(sharedVertexBufferDirty()){backend->uploadSharedVertexBuffer(sharedVertexBufferData());sharedVertexMarkUploaded();}
-        if(sharedUvBufferDirty()){backend->uploadSharedUvBuffer(sharedUvBufferData());sharedUvMarkUploaded();}
-        if(sharedDeformBufferDirty()){backend->uploadSharedDeformBuffer(sharedDeformBufferData());sharedDeformMarkUploaded();}
+    syncSharedBuffers(getCurrentRenderBackend());
+}
+
+void syncSharedBuffers(const std::shared_ptr<RenderBackend>& backend) {
+    if (!backend) return;
+    struct UploadState {
+        std::weak_ptr<RenderBackend> backend;
+        std::size_t vertex, uv, deform;
+    };
+    static std::vector<UploadState> states;
+    std::erase_if(states, [](const auto& state) { return state.backend.expired(); });
+    auto it = std::find_if(states.begin(), states.end(), [&](const auto& state) { return state.backend.lock() == backend; });
+    if (it == states.end()) {
+        states.push_back({backend, static_cast<std::size_t>(-1), static_cast<std::size_t>(-1), static_cast<std::size_t>(-1)});
+        it = std::prev(states.end());
+    }
+    // Empty data releases the driver's allocation. Global dirty flags cannot
+    // establish whether another backend has received the latest atlas contents.
+    if (it->vertex != sharedVertexBufferRevision()) {
+        backend->uploadSharedVertexBuffer(sharedVertexBufferData());
+        it->vertex = sharedVertexBufferRevision(); sharedVertexMarkUploaded();
+    }
+    if (it->uv != sharedUvBufferRevision()) {
+        backend->uploadSharedUvBuffer(sharedUvBufferData());
+        it->uv = sharedUvBufferRevision(); sharedUvMarkUploaded();
+    }
+    if (it->deform != sharedDeformBufferRevision()) {
+        backend->uploadSharedDeformBuffer(sharedDeformBufferData());
+        it->deform = sharedDeformBufferRevision(); sharedDeformMarkUploaded();
     }
 }
 

@@ -5,7 +5,7 @@
 
 namespace nicxlive::core::render {
 
-void QueueRenderBackend::clear() { queue.clear(); }
+void QueueRenderBackend::clear() { queue.clear(); dynamicStack.clear(); lastDynamic.reset(); }
 // resourceQueue は applyTextureCommands 後に caller で明示的に clearResourceQueue される
 void QueueRenderBackend::initializeDrawableResources() {}
 void QueueRenderBackend::bindDrawableVao() {}
