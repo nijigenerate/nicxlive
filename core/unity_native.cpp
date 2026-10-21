@@ -925,10 +925,12 @@ NjgResult njgSetPuppetTranslation(void* puppetHandle, float tx, float ty) {
 }
 
 NjgResult njgUnloadPuppet(void* renderer, void* puppet) {
+    std::shared_ptr<QueueRenderBackend> ownerBackend;
     if (renderer) {
         std::lock_guard<std::mutex> lock(gMutex);
         auto rit = gRenderers.find(renderer);
         if (rit != gRenderers.end()) {
+            ownerBackend = rit->second->backend;
             auto& v = rit->second->puppetHandles;
             v.erase(std::remove(v.begin(), v.end(), puppet), v.end());
             auto pit = gPuppets.find(puppet);
@@ -938,7 +940,13 @@ NjgResult njgUnloadPuppet(void* renderer, void* puppet) {
             rit->second->animationStates.erase(puppet);
         }
     }
+    auto previousBackend = getCurrentRenderBackend();
+    if (ownerBackend) setCurrentRenderBackend(ownerBackend);
     destroyHandle(gPuppets, puppet);
+    // No puppet remains to tick after the last unload. Retire while its renderer lives.
+    collectRenderResources();
+    inDrainPendingTextureDisposals();
+    setCurrentRenderBackend(previousBackend);
     return NjgResult::Ok;
 }
 

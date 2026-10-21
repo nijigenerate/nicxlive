@@ -114,7 +114,8 @@ Puppet::Puppet() {
     renderContext.renderGraph = &renderGraph;
     renderContext.renderBackend = renderBackend.get();
     renderContext.gpuState = RenderGpuState::init();
-    // Constructing a puppet must not replace the host resource backend.
+    // Preserve an explicit host backend, but keep standalone loading usable.
+    if (!getCurrentRenderBackend()) setCurrentRenderBackend(renderBackend);
     forceFullRebuild = true;
 }
 

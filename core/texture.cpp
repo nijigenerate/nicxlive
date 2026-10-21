@@ -137,8 +137,18 @@ std::vector<uint8_t> convertTextureChannels(const std::vector<uint8_t>& data, in
     const size_t count = static_cast<size_t>(w) * h;
     if (data.size() < count * from) throw std::invalid_argument("Incomplete texture data");
     std::vector<uint8_t> result(count * to);
-    for (size_t i=0;i<count;++i) for (int c=0;c<to;++c)
-        result[i*to+c] = c < from ? data[i*from+c] : (c==3 ? 255 : 0);
+    for (size_t i=0;i<count;++i) {
+        const auto* src = data.data() + i * from;
+        auto* dst = result.data() + i * to;
+        const uint8_t gray = from <= 2 ? src[0]
+            : static_cast<uint8_t>((77 * src[0] + 150 * src[1] + 29 * src[2]) >> 8);
+        const uint8_t alpha = from == 2 ? src[1] : (from == 4 ? src[3] : 255);
+        if (to <= 2) { dst[0] = gray; if (to == 2) dst[1] = alpha; }
+        else {
+            for (int c=0;c<3;++c) dst[c] = from <= 2 ? gray : src[c];
+            if (to == 4) dst[3] = alpha;
+        }
+    }
     return result;
 }
 }

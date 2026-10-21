@@ -10,6 +10,10 @@ void QueueRenderBackend::clear() { queue.clear(); }
 void QueueRenderBackend::initializeDrawableResources() {}
 void QueueRenderBackend::bindDrawableVao() {}
 void QueueRenderBackend::createDrawableBuffers(RenderResourceHandle& outHandle) { outHandle = nextIndexId++; }
+void QueueRenderBackend::disposeDrawableBuffers(RenderResourceHandle id) {
+    indexBuffers.erase(id);
+    lastDraw.erase(id);
+}
 void QueueRenderBackend::uploadDrawableIndices(RenderResourceHandle id, const std::vector<uint16_t>& indices) { indexBuffers[id] = indices; }
 void QueueRenderBackend::uploadSharedVertexBuffer(const ::nicxlive::core::nodes::Vec2Array& v) { sharedVertices = v.dup(); }
 void QueueRenderBackend::uploadSharedUvBuffer(const ::nicxlive::core::nodes::Vec2Array& u) { sharedUvs = u.dup(); }

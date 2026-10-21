@@ -739,7 +739,7 @@ std::array<float, 4> Node::getCombinedBounds(bool reupdate, bool countPuppet) {
     if (auto drawable = std::dynamic_pointer_cast<Drawable>(shared_from_this())) {
         if (reupdate) drawable->updateBounds();
         if (!drawable->vertices.empty() || children.empty()) {
-            combined = drawable->bounds.value_or(std::array<float,4>{NAN,NAN,NAN,NAN});
+            combined = drawable->bounds.value_or(combined);
             hasCombined = true;
         }
     } else { hasCombined = children.empty(); }
@@ -760,7 +760,7 @@ std::array<float, 4> Node::getCombinedBounds(bool reupdate, bool countPuppet) {
         auto matrix=puppet->transform.matrix();
         auto tl=matrix.transformPoint({combined[0],combined[1],0});
         auto br=matrix.transformPoint({combined[2],combined[3],0});
-        return {tl.x,tl.y,br.x,br.y};
+        return {std::min(tl.x,br.x),std::min(tl.y,br.y),std::max(tl.x,br.x),std::max(tl.y,br.y)};
     }
     return combined;
 }
