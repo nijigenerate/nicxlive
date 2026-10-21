@@ -938,23 +938,23 @@ NjgResult njgSetPuppetTranslation(void* puppetHandle, float tx, float ty) {
 
 NjgResult njgUnloadPuppet(void* renderer, void* puppet) {
     std::shared_ptr<QueueRenderBackend> ownerBackend;
-    if (renderer) {
+    {
         std::lock_guard<std::mutex> lock(gMutex);
         auto rit = gRenderers.find(renderer);
-        if (rit != gRenderers.end()) {
-            ownerBackend = rit->second->backend;
-            // Invalidate commands retaining surfaces before draining destruction.
-            ownerBackend->clear();
-            rit->second->recorded.clear();
-            rit->second->queued.clear();
-            auto& v = rit->second->puppetHandles;
-            v.erase(std::remove(v.begin(), v.end(), puppet), v.end());
-            auto pit = gPuppets.find(puppet);
-            if (pit != gPuppets.end() && pit->second && pit->second->puppet) {
-                releasePuppetTextures(*rit->second, pit->second->puppet);
-            }
-            rit->second->animationStates.erase(puppet);
-        }
+        auto pit = gPuppets.find(puppet);
+        if (rit == gRenderers.end() || pit == gPuppets.end() || !pit->second || !pit->second->puppet)
+            return NjgResult::InvalidArgument;
+        auto& handles = rit->second->puppetHandles;
+        auto owned = std::find(handles.begin(), handles.end(), puppet);
+        if (owned == handles.end()) return NjgResult::InvalidArgument;
+        ownerBackend = rit->second->backend;
+        // Invalidate commands retaining surfaces only after validating ownership.
+        ownerBackend->clear();
+        rit->second->recorded.clear();
+        rit->second->queued.clear();
+        handles.erase(owned);
+        releasePuppetTextures(*rit->second, pit->second->puppet);
+        rit->second->animationStates.erase(puppet);
     }
     auto previousBackend = getCurrentRenderBackend();
     if (ownerBackend) setCurrentRenderBackend(ownerBackend);

@@ -218,13 +218,23 @@ void retireDrawableBuffers(std::weak_ptr<RenderBackend> backend,uint32_t handle)
 void collectRenderResources() {
     std::vector<Retirement> pending;
     {auto& queue=retirements();std::lock_guard lock(queue.mutex);pending.swap(queue.items);}
-    std::vector<std::shared_ptr<RenderBackend>> touched;
-    for(auto& entry:pending)if(auto backend=entry.backend.lock()) {
+    const auto current = getCurrentRenderBackend();
+    std::vector<Retirement> deferred;
+    bool disposed = false;
+    for (auto& entry : pending) if (auto backend = entry.backend.lock()) {
+        if (backend != current) {
+            deferred.push_back(std::move(entry));
+            continue;
+        }
         backend->disposeDrawableBuffers(entry.handle);
-        if(std::find(touched.begin(),touched.end(),backend)==touched.end())touched.push_back(backend);
+        disposed = true;
     }
-    for(auto& backend:touched)backend->collectDrawableBuffers();
-    syncSharedBuffers(getCurrentRenderBackend());
+    if (!deferred.empty()) {
+        auto& queue = retirements(); std::lock_guard lock(queue.mutex);
+        queue.items.insert(queue.items.end(), deferred.begin(), deferred.end());
+    }
+    if (disposed) current->collectDrawableBuffers();
+    syncSharedBuffers(current);
 }
 
 void syncSharedBuffers(const std::shared_ptr<RenderBackend>& backend) {

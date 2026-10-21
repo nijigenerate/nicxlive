@@ -105,10 +105,12 @@ Puppet::Puppet() {
     root->setParent(puppetRootNode);
     root->name = "Root";
     transform = Transform{};
-    auto backendQueue = std::make_shared<render::QueueRenderBackend>();
-    renderBackend = backendQueue;
-    commandEmitterOwned = std::make_unique<SimpleRenderCommandEmitter>(backendQueue);
-    commandEmitterRaw = commandEmitterOwned.get();
+    renderBackend = getCurrentRenderBackend();
+    if (!renderBackend) renderBackend = std::make_shared<render::QueueRenderBackend>();
+    if (auto backendQueue = std::dynamic_pointer_cast<render::QueueRenderBackend>(renderBackend)) {
+        commandEmitterOwned = std::make_unique<SimpleRenderCommandEmitter>(backendQueue);
+        commandEmitterRaw = commandEmitterOwned.get();
+    }
     renderGraph = RenderGraphBuilder{};
     renderScheduler = TaskScheduler{};
     renderContext.renderGraph = &renderGraph;
@@ -428,6 +430,9 @@ void Puppet::setRenderBackend(const std::shared_ptr<::nicxlive::core::RenderBack
     if (auto queueBackend = std::dynamic_pointer_cast<render::QueueRenderBackend>(renderBackend)) {
         commandEmitterOwned = std::make_unique<SimpleRenderCommandEmitter>(queueBackend);
         commandEmitterRaw = commandEmitterOwned.get();
+    } else {
+        commandEmitterOwned.reset();
+        commandEmitterRaw = nullptr;
     }
 }
 

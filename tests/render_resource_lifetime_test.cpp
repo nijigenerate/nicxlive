@@ -93,16 +93,28 @@ int main(){try{
         auto second=std::make_shared<nodes::Drawable>(mesh,17,nullptr);
         r::syncSharedBuffers(backend); r::syncSharedBuffers(other);
         check(backend->vertex==6 && other->vertex==6,"initial multi-backend upload failed");
-        first.reset(); inSetRenderBackend(backend); r::collectRenderResources();
-        check(backend->vertex==3 && other->vertex==6,"collector touched a noncurrent context");
+        first.reset(); r::collectRenderResources();
+        check(backend->indices.size()==1,"retirement ran on the wrong current context");
+        inSetRenderBackend(backend); r::collectRenderResources();
+        check(backend->indices.empty(),"owner context failed to retire indices");
+        check(backend->vertex==3 && other->vertex==3,"current-context compaction uploads failed");
         r::syncSharedBuffers(other);
         check(other->vertex==3 && other->uv==3 && other->deform==3,"second backend missed atlas compaction");
         second.reset(); r::collectRenderResources(); r::syncSharedBuffers(other);
         check(!other->vertex && !other->uv && !other->deform,"second backend retained empty atlas");
+        check(other->indices.size()==1,"second retirement ran on wrong context");
+        inSetRenderBackend(other); r::collectRenderResources();
+        check(other->indices.empty(),"second owner failed to collect");
+        inSetRenderBackend(backend);
     }
     {
         auto queue=std::make_shared<r::QueueRenderBackend>();
         inSetRenderBackend(queue);
+        auto puppet=std::make_shared<Puppet>();
+        check(puppet->commandEmitter()!=nullptr,"queue puppet has no emitter");
+        nodes::PartDrawPacket packet{};
+        puppet->commandEmitter()->drawPartPacket(packet);
+        check(queue->queue.size()==1,"Puppet emitter did not adopt the host queue");
         auto drawable=std::make_shared<nodes::Drawable>(mesh,13,nullptr);
         check(queue->drawableIndexBufferCount()==1,"queue geometry not registered");
         drawable.reset();r::collectRenderResources();
@@ -136,6 +148,9 @@ int main(){try{
           pass.textures.push_back(std::make_shared<Texture>(std::vector<uint8_t>{1,2,3,255},1,1,4,4,false,false));
           pendingTexture=pass.textures[0]; queue->beginDynamicComposite(pass); queue->endDynamicComposite(pass); }
         check(!pendingTexture.expired(),"test did not retain queued surface");
+        otherQueue->beginMask(false);
+        check(njgUnloadPuppet(otherRenderer,puppet)==NjgResult::InvalidArgument,"cross-renderer unload accepted");
+        check(otherQueue->queue.size()==1,"invalid unload erased unrelated renderer commands");
         // Queue a real Drawable retirement before unload; no subsequent tick is allowed.
         { auto drawable=std::make_shared<nodes::Drawable>(mesh,15,nullptr); }
         check(queue->drawableIndexBufferCount()==1,"C API renderer has no pending retirement");
@@ -143,6 +158,9 @@ int main(){try{
         check(queue->drawableIndexBufferCount()==0,"last C API puppet unload left pending indices");
         check(pendingTexture.expired(),"unload retained queued surface texture");
         check(std::any_of(queue->resourceQueue.begin(),queue->resourceQueue.end(),[](const auto& command){return command.kind==r::TextureCommandKind::Dispose;}),"unload did not drain surface texture disposal");
+        queue->beginMask(false);
+        check(njgUnloadPuppet(renderer,puppet)==NjgResult::InvalidArgument,"double unload accepted");
+        check(queue->queue.size()==1,"double unload erased renderer commands");
         njgDestroyRenderer(otherRenderer);
         njgDestroyRenderer(renderer);njgRuntimeTerm();inSetRenderBackend(backend);
     }
