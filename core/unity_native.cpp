@@ -667,7 +667,6 @@ NjgResult njgLoadPuppet(void* renderer, const char* pathUtf8, void** outPuppet) 
     }
     // Deserialization may have allocated geometry and textures before failing.
     // No loaded puppet will tick them; collect before restoring the caller context.
-    collectRenderResources();
     inDrainPendingTextureDisposals();
     {
         std::lock_guard<std::mutex> lock(gMutex);
@@ -968,7 +967,6 @@ NjgResult njgUnloadPuppet(void* renderer, void* puppet) {
     if (ownerBackend) setCurrentRenderBackend(ownerBackend);
     destroyHandle(gPuppets, puppet);
     // No puppet remains to tick after the last unload. Retire while its renderer lives.
-    collectRenderResources();
     inDrainPendingTextureDisposals();
     {
         std::lock_guard<std::mutex> lock(gMutex);

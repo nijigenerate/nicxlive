@@ -1,7 +1,6 @@
 #include "timing.hpp"
 #include "runtime_state.hpp"
 #include "texture.hpp"
-#include "render/shared_deform_buffer.hpp"
 
 #include <chrono>
 #include <mutex>
@@ -43,7 +42,6 @@ void inUpdate() {
     gDeltaTime = gCurrentTime - gLastTime;
     gLastTime = gCurrentTime;
     inDrainPendingTextureDisposals();
-    render::collectRenderResources();
 }
 
 double deltaTime() {

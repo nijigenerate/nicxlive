@@ -5,6 +5,7 @@
 #include <cstring>
 #include "texture.hpp"
 #include "render/common.hpp"
+#include "render/resource_lifetime_internal.hpp"
 #include "render/backend_queue.hpp"
 
 #include <cstdint>
@@ -257,6 +258,7 @@ void Texture::disposeDeferred() {
 }
 
 void inDrainPendingTextureDisposals() {
+    render::detail::drainDrawableReleases();
     std::vector<PendingTextureDisposal> pending;
     {
         std::lock_guard<std::mutex> lock(gPendingTextureDisposalsMutex);

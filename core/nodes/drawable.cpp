@@ -6,6 +6,7 @@
 #include "../serde.hpp"
 #include "../render/common.hpp"
 #include "../render/shared_deform_buffer.hpp"
+#include "../render/resource_lifetime_internal.hpp"
 #include "../render/commands.hpp"
 #include "../math/triangle.hpp"
 #include "../math/mat3.hpp"
@@ -120,7 +121,7 @@ Drawable::Drawable(const MeshData& data, uint32_t uuidVal, const std::shared_ptr
 }
 
 Drawable::~Drawable() {
-    ::nicxlive::core::render::retireDrawableBuffers(drawableBackend, ibo);
+    ::nicxlive::core::render::detail::enqueueDrawableRelease(drawableBackend, ibo);
     ::nicxlive::core::render::sharedDeformUnregister(deformation);
     ::nicxlive::core::render::sharedVertexUnregister(vertices);
     ::nicxlive::core::render::sharedUvUnregister(sharedUvs);

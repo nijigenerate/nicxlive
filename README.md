@@ -44,19 +44,18 @@ cmake --build build-wasm
 See `doc/compat-*.md` for detailed compatibility notes and remaining gaps.
 ## Render resource lifetime
 
-`core/render/shared_deform_buffer.hpp` exposes `render::collectRenderResources()`.
-Call it on the rendering thread with the backend graphics context current, even
-when no Puppets remain. `inUpdate()` already calls it. Call it again after model
-cleanup and before destroying the graphics context. Model mutation and collection
-must be serialized.
+Resource retirement is internal. Normal `inUpdate()` processing and DLL model
+unload/load-failure handling drain pending releases. Detaching the renderer with
+`inSetRenderBackend(nullptr)` also drains before releasing the old backend, while
+its graphics context is still current. Applications do not call a
+shared-buffer collection API. Model mutation and rendering remain serialized.
 
-Drawable destruction unregisters the CPU vertex/UV/deform arrays and queues its
-index handle with a weak reference to the backend that created it. Destruction
-never calls GPU APIs. Collection invokes `RenderBackend::disposeDrawableBuffers(id)`
-for retired handles, then `collectDrawableBuffers()` once per affected backend.
-The backend owns GPU allocation, range compaction and deletion. Dirty shared CPU
-arrays are uploaded even when empty; an empty upload means the GPU allocation may
-be released. The last CPU array removal also frees atlas bookkeeping capacity.
+Drawable destruction unregisters CPU vertex/UV/deform arrays and queues the index
+handle with a weak reference to its backend. GPU calls are deferred to the rendering
+thread. `RenderBackend::disposeDrawableBuffers(id)` delivers individual releases;
+the backend owns its allocation and compaction policy without a collection hook.
+Dirty arrays are uploaded even when empty, so deleting the last model also clears
+backend copies. The last CPU array removal frees atlas bookkeeping capacity.
 
 `nicxlive_render_resource_lifetime_test` verifies deferred backend notifications,
 surviving Drawable data, repeated creation/deletion, empty-array notification and

@@ -1,4 +1,5 @@
 #include "shared_deform_buffer.hpp"
+#include "resource_lifetime_internal.hpp"
 #include "common.hpp"
 #include "../runtime_state.hpp"
 #include <mutex>
@@ -199,12 +200,14 @@ struct RetirementQueue { std::mutex mutex; std::vector<Retirement> items; };
 // Remains valid during late global/TLS Drawable destruction; no backend is owned.
 RetirementQueue& retirements() { static auto* queue=new RetirementQueue;return *queue; }
 }
-void retireDrawableBuffers(std::weak_ptr<RenderBackend> backend,uint32_t handle) {
+namespace detail {
+static void uploadDirtySharedBuffers(const std::shared_ptr<RenderBackend>& backend);
+void enqueueDrawableRelease(std::weak_ptr<RenderBackend> backend,uint32_t handle) {
     if(!handle || backend.expired())return;
     auto& queue=retirements();std::lock_guard lock(queue.mutex);
     queue.items.push_back({std::move(backend),handle});
 }
-void collectRenderResources() {
+void drainDrawableReleases() {
     std::vector<Retirement> pending;
     {auto& queue=retirements();std::lock_guard lock(queue.mutex);pending.swap(queue.items);}
     const auto current = getCurrentRenderBackend();
@@ -222,11 +225,10 @@ void collectRenderResources() {
         auto& queue = retirements(); std::lock_guard lock(queue.mutex);
         queue.items.insert(queue.items.end(), deferred.begin(), deferred.end());
     }
-    if (disposed) current->collectDrawableBuffers();
-    if (disposed) syncSharedBuffers(current);
+    if (disposed) uploadDirtySharedBuffers(current);
 }
 
-void syncSharedBuffers(const std::shared_ptr<RenderBackend>& backend) {
+static void uploadDirtySharedBuffers(const std::shared_ptr<RenderBackend>& backend) {
     if (!backend) return;
     // Preserve dirty-based uploads, including an empty atlas after deletion.
     if (sharedVertexBufferDirty()) {
@@ -243,4 +245,5 @@ void syncSharedBuffers(const std::shared_ptr<RenderBackend>& backend) {
     }
 }
 
+} // namespace detail
 } // namespace nicxlive::core::render

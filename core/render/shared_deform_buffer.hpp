@@ -9,12 +9,6 @@ namespace nicxlive::core { class RenderBackend; }
 
 namespace nicxlive::core::render {
 
-// Destruction queues only a backend identity and handle. Call collection with a
-// current rendering context (inUpdate already does this), including empty scenes.
-void retireDrawableBuffers(std::weak_ptr<RenderBackend> backend, uint32_t handle);
-void collectRenderResources();
-// Synchronize only the backend whose rendering context is current.
-void syncSharedBuffers(const std::shared_ptr<RenderBackend>& backend);
 
 // D: nijilive.core.render.shared_deform_buffer
 void sharedDeformRegister(::nicxlive::core::common::Vec2Array& target, std::size_t* offsetSink);

@@ -1,6 +1,8 @@
 #include "nodes/drawable.hpp"
 #include "render/shared_deform_buffer.hpp"
 #include "runtime_state.hpp"
+#include "timing.hpp"
+#include "render/command_emitter.hpp"
 #include "puppet.hpp"
 #include "texture.hpp"
 #include "render/backend_queue.hpp"
@@ -14,7 +16,7 @@ using namespace nicxlive::core;
 namespace r=nicxlive::core::render;
 void check(bool b,const char* m){if(!b)throw std::runtime_error(m);}
 struct Backend:RenderBackend {
-    uint32_t next=1;size_t batches=0,vertex=0,uv=0,deform=0,uploads=0;
+    uint32_t next=1;size_t vertex=0,uv=0,deform=0,uploads=0;
     std::map<uint32_t,std::vector<uint16_t>> indices;
     std::map<uint32_t,std::vector<uint8_t>> textures;
     uint32_t createTexture(const std::vector<uint8_t>& data,int,int,int,bool)override {
@@ -25,11 +27,17 @@ struct Backend:RenderBackend {
     void createDrawableBuffers(uint32_t& id)override{id=next++;}
     void uploadDrawableIndices(uint32_t id,const std::vector<uint16_t>& data)override{indices[id]=data;}
     void disposeDrawableBuffers(uint32_t id)override{indices.erase(id);}
-    void collectDrawableBuffers()override{++batches;}
     void uploadSharedVertexBuffer(const common::Vec2Array& v)override{++uploads;vertex=v.size();}
     void uploadSharedUvBuffer(const common::Vec2Array& v)override{++uploads;uv=v.size();}
     void uploadSharedDeformBuffer(const common::Vec2Array& v)override{++uploads;deform=v.size();}
 };
+// Exercise the existing frame path, without any explicit resource collection API.
+void drawFrame(const std::shared_ptr<RenderBackend>& backend) {
+    r::QueueCommandEmitter emitter(nullptr);
+    RenderGpuState state;
+    emitter.beginFrame(backend.get(), state);
+    emitter.endFrame(backend.get(), state);
+}
 int main(){try{
     inSetRenderBackend(nullptr);
     {
@@ -86,25 +94,25 @@ int main(){try{
         auto mirrored=drawable->getCombinedBounds(false,true);
         check(mirrored[0]==-3 && mirrored[1]==-4 && mirrored[2]==-1 && mirrored[3]==-2,"mirrored bounds not normalized");
     }
-    r::collectRenderResources();
+    inUpdate();
     for(int cycle=0;cycle<8;++cycle){
         auto first=std::make_shared<nodes::Drawable>(mesh,10,nullptr);
         auto second=std::make_shared<nodes::Drawable>(mesh,11,nullptr);
-        r::collectRenderResources();
+        inUpdate();
         check(backend->indices.size()==2,"two drawables not allocated");
-        r::syncSharedBuffers(backend);
+        drawFrame(backend);
         const auto uploads = backend->uploads;
-        r::syncSharedBuffers(backend);
-        r::collectRenderResources();
+        drawFrame(backend);
+        inUpdate();
         check(backend->uploads==uploads,"clean atlas uploaded again");
         r::sharedDeformMarkDirty();
-        r::syncSharedBuffers(backend);
+        drawFrame(backend);
         check(backend->uploads==uploads+1,"dirty deform did not upload exactly once");
         auto remaining=second->ibo;first.reset();
         check(backend->indices.size()==2,"destructor called backend directly");
-        r::collectRenderResources();
+        inUpdate();
         check(backend->indices.size()==1&&backend->indices.at(remaining)==mesh.indices,"remaining drawable changed");
-        second.reset();r::collectRenderResources();
+        second.reset();inUpdate();
         check(backend->indices.empty(),"index retirement leak");
         check(!backend->vertex&&!backend->uv&&!backend->deform,"empty atlas was not sent to backend");
         check(!r::sharedVertexAtlasStride()&&!r::sharedUvAtlasStride()&&!r::sharedDeformAtlasStride(),"CPU atlas retained data");
@@ -114,16 +122,26 @@ int main(){try{
         auto first=std::make_shared<nodes::Drawable>(mesh,16,nullptr);
         inSetRenderBackend(other);
         auto second=std::make_shared<nodes::Drawable>(mesh,17,nullptr);
-        r::syncSharedBuffers(backend); r::syncSharedBuffers(other);
-        first.reset(); r::collectRenderResources();
+        drawFrame(backend); drawFrame(other);
+        first.reset(); inUpdate();
         check(backend->indices.size()==1,"retirement ran on the wrong current context");
-        inSetRenderBackend(backend); r::collectRenderResources();
+        inSetRenderBackend(backend); inUpdate();
         check(backend->indices.empty(),"owner context failed to retire indices");
-        r::syncSharedBuffers(other);
-        second.reset(); r::collectRenderResources(); r::syncSharedBuffers(other);
+        drawFrame(other);
+        second.reset(); inUpdate(); drawFrame(other);
         check(other->indices.size()==1,"second retirement ran on wrong context");
-        inSetRenderBackend(other); r::collectRenderResources();
+        inSetRenderBackend(other); inUpdate();
         check(other->indices.empty(),"second owner failed to collect");
+        inSetRenderBackend(backend);
+    }
+    {
+        auto drawable=std::make_shared<nodes::Drawable>(mesh,18,nullptr);
+        drawFrame(backend);
+        drawable.reset();
+        // No extra frame or explicit collection is required at renderer shutdown.
+        inSetRenderBackend(nullptr);
+        check(backend->indices.empty(),"renderer detach retained indices");
+        check(!backend->vertex&&!backend->uv&&!backend->deform,"renderer detach retained shared buffers");
         inSetRenderBackend(backend);
     }
     {
@@ -136,7 +154,7 @@ int main(){try{
         check(queue->queue.size()==1,"Puppet emitter did not adopt the host queue");
         auto drawable=std::make_shared<nodes::Drawable>(mesh,13,nullptr);
         check(queue->drawableIndexBufferCount()==1,"queue geometry not registered");
-        drawable.reset();r::collectRenderResources();
+        drawable.reset();inUpdate();
         check(queue->drawableIndexBufferCount()==0,"queue backend retained retired indices");
         inSetRenderBackend(backend);
     }
@@ -186,7 +204,7 @@ int main(){try{
         inSetRenderBackend(queue);
         { auto probe=fmt::inLoadJSONPuppet<Puppet>(geometry);
           check(queue->drawableIndexBufferCount()>0,"failure fixture contains no allocated geometry"); }
-        r::collectRenderResources();
+        inUpdate();
         std::vector<uint8_t> invalid(fmt::MAGIC_BYTES.begin(),fmt::MAGIC_BYTES.end());
         auto append32=[&](uint32_t n){for(int shift:{24,16,8,0})invalid.push_back(static_cast<uint8_t>(n>>shift));};
         append32(static_cast<uint32_t>(geometry.size())); invalid.insert(invalid.end(),geometry.begin(),geometry.end());
@@ -209,7 +227,7 @@ int main(){try{
     auto last=std::make_shared<nodes::Drawable>(mesh,12,nullptr);
     last.reset();std::weak_ptr<Backend> weak=backend;
     inSetRenderBackend(nullptr);backend.reset();check(weak.expired(),"retirement queue owns backend");
-    r::collectRenderResources();
+    inUpdate();
     std::cout<<"PASS: deferred retirement, survivor integrity, empty atlases and repeated load/delete\n";
     return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
