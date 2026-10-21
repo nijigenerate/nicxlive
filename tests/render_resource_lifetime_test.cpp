@@ -59,6 +59,21 @@ int main(){try{
         texture.reset();check(backend->textures.contains(id),"texture destructor disposed synchronously");
         inDrainPendingTextureDisposals();check(backend->textures.empty(),"texture not retired");
     }
+    {
+        auto other=std::make_shared<Backend>();
+        auto texture=std::make_shared<Texture>(std::vector<uint8_t>{1,2,3,255},1,1,4,4,false,false);
+        auto id=texture->backendId(); texture.reset();
+        inSetRenderBackend(other); inDrainPendingTextureDisposals();
+        check(backend->textures.contains(id),"texture disposal ran on wrong current context");
+        inSetRenderBackend(backend); inDrainPendingTextureDisposals();
+        check(!backend->textures.contains(id),"texture disposal missing on owner context");
+        inSetRenderBackend(other);
+        auto late=std::make_shared<Texture>(std::vector<uint8_t>{1,2,3,255},1,1,4,4,false,false);
+        late.reset(); std::weak_ptr<Backend> weakOther=other;
+        inSetRenderBackend(backend); other.reset();
+        check(weakOther.expired(),"pending texture disposal owns backend");
+        inDrainPendingTextureDisposals();
+    }
     nodes::MeshData mesh;mesh.vertices={{0,0},{1,0},{0,1}};mesh.uvs=mesh.vertices;mesh.indices={0,1,2};
     {
         auto drawable=std::make_shared<nodes::Drawable>(mesh,14,nullptr);
@@ -161,6 +176,29 @@ int main(){try{
         queue->beginMask(false);
         check(njgUnloadPuppet(renderer,puppet)==NjgResult::InvalidArgument,"double unload accepted");
         check(queue->queue.size()==1,"double unload erased renderer commands");
+        // A late texture error must retire geometry and earlier valid textures
+        // before restoring the caller's backend, without a subsequent tick.
+        const std::string geometry=R"({"nodes":{"type":"Part","uuid":91,"mesh":{"verts":[0,0,1,0,0,1],"uvs":[0,0,1,0,0,1],"indices":[0,1,2]}}})";
+        inSetRenderBackend(queue);
+        { auto probe=fmt::inLoadJSONPuppet<Puppet>(geometry);
+          check(queue->drawableIndexBufferCount()>0,"failure fixture contains no allocated geometry"); }
+        r::collectRenderResources();
+        std::vector<uint8_t> invalid(fmt::MAGIC_BYTES.begin(),fmt::MAGIC_BYTES.end());
+        auto append32=[&](uint32_t n){for(int shift:{24,16,8,0})invalid.push_back(static_cast<uint8_t>(n>>shift));};
+        append32(static_cast<uint32_t>(geometry.size())); invalid.insert(invalid.end(),geometry.begin(),geometry.end());
+        invalid.insert(invalid.end(),fmt::TEX_SECTION.begin(),fmt::TEX_SECTION.end()); append32(2);
+        auto good=fmt::encodeTga({1,2,3,255},1,1,4);
+        append32(static_cast<uint32_t>(good.size())); invalid.push_back(0); invalid.insert(invalid.end(),good.begin(),good.end());
+        append32(3); invalid.push_back(0); invalid.insert(invalid.end(),{1,2,3});
+        { std::ofstream file(path,std::ios::binary|std::ios::trunc); file.write(reinterpret_cast<const char*>(invalid.data()),static_cast<std::streamsize>(invalid.size())); }
+        inSetRenderBackend(otherQueue);
+        for(int attempt=0;attempt<3;++attempt) {
+            queue->resourceQueue.clear(); void* failed=nullptr;
+            check(njgLoadPuppet(renderer,path.string().c_str(),&failed)==NjgResult::Failure,"invalid texture load succeeded");
+            check(getCurrentRenderBackend()==otherQueue,"failed load did not restore caller");
+            check(queue->drawableIndexBufferCount()==0,"failed load retained indices");
+            check(std::count_if(queue->resourceQueue.begin(),queue->resourceQueue.end(),[](const auto& c){return c.kind==r::TextureCommandKind::Dispose;})==1,"failed load retained earlier valid texture");
+        }
         njgDestroyRenderer(otherRenderer);
         njgDestroyRenderer(renderer);njgRuntimeTerm();inSetRenderBackend(backend);
     }

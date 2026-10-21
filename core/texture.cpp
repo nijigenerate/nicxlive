@@ -18,7 +18,7 @@ namespace nicxlive::core {
 
 namespace {
 struct PendingTextureDisposal {
-    std::shared_ptr<RenderBackend> backend;
+    std::weak_ptr<RenderBackend> backend;
     uint32_t backendId{0};
 };
 
@@ -245,9 +245,6 @@ void Texture::disposeDeferred() {
 
     auto backend = backend_.lock();
     if (!backend) {
-        backend = getCurrentRenderBackend();
-    }
-    if (!backend) {
         backendId_ = 0;
         backend_.reset();
         return;
@@ -266,10 +263,17 @@ void inDrainPendingTextureDisposals() {
         pending.swap(gPendingTextureDisposals);
     }
 
+    const auto current = getCurrentRenderBackend();
+    std::vector<PendingTextureDisposal> deferred;
     for (const auto& item : pending) {
-        if (item.backend && item.backendId != 0) {
-            item.backend->disposeTexture(item.backendId);
+        if (auto backend = item.backend.lock(); backend && item.backendId != 0) {
+            if (backend == current) backend->disposeTexture(item.backendId);
+            else deferred.push_back(item);
         }
+    }
+    if (!deferred.empty()) {
+        std::lock_guard<std::mutex> lock(gPendingTextureDisposalsMutex);
+        gPendingTextureDisposals.insert(gPendingTextureDisposals.end(), deferred.begin(), deferred.end());
     }
 }
 

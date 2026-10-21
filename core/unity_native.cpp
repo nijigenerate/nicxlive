@@ -662,11 +662,19 @@ NjgResult njgLoadPuppet(void* renderer, const char* pathUtf8, void** outPuppet) 
         return NjgResult::Ok;
     } catch (const std::exception& ex) {
         unityLog(std::string("[nicxlive] njgLoadPuppet exception: ") + ex.what());
-        return NjgResult::Failure;
     } catch (...) {
         unityLog("[nicxlive] njgLoadPuppet exception: unknown");
-        return NjgResult::Failure;
     }
+    // Deserialization may have allocated geometry and textures before failing.
+    // No loaded puppet will tick them; collect before restoring the caller context.
+    collectRenderResources();
+    inDrainPendingTextureDisposals();
+    {
+        std::lock_guard<std::mutex> lock(gMutex);
+        auto it = gRenderers.find(renderer);
+        if (it != gRenderers.end()) applyTextureCommands(*it->second);
+    }
+    return NjgResult::Failure;
 }
 
 NjgResult njgGetParameters(void* puppetHandle, NjgParameterInfo* buffer, size_t bufferLength, size_t* outCount) {
