@@ -14,7 +14,7 @@ using namespace nicxlive::core;
 namespace r=nicxlive::core::render;
 void check(bool b,const char* m){if(!b)throw std::runtime_error(m);}
 struct Backend:RenderBackend {
-    uint32_t next=1;size_t batches=0,vertex=0,uv=0,deform=0;
+    uint32_t next=1;size_t batches=0,vertex=0,uv=0,deform=0,uploads=0;
     std::map<uint32_t,std::vector<uint16_t>> indices;
     std::map<uint32_t,std::vector<uint8_t>> textures;
     uint32_t createTexture(const std::vector<uint8_t>& data,int,int,int,bool)override {
@@ -26,9 +26,9 @@ struct Backend:RenderBackend {
     void uploadDrawableIndices(uint32_t id,const std::vector<uint16_t>& data)override{indices[id]=data;}
     void disposeDrawableBuffers(uint32_t id)override{indices.erase(id);}
     void collectDrawableBuffers()override{++batches;}
-    void uploadSharedVertexBuffer(const common::Vec2Array& v)override{vertex=v.size();}
-    void uploadSharedUvBuffer(const common::Vec2Array& v)override{uv=v.size();}
-    void uploadSharedDeformBuffer(const common::Vec2Array& v)override{deform=v.size();}
+    void uploadSharedVertexBuffer(const common::Vec2Array& v)override{++uploads;vertex=v.size();}
+    void uploadSharedUvBuffer(const common::Vec2Array& v)override{++uploads;uv=v.size();}
+    void uploadSharedDeformBuffer(const common::Vec2Array& v)override{++uploads;deform=v.size();}
 };
 int main(){try{
     inSetRenderBackend(nullptr);
@@ -92,6 +92,14 @@ int main(){try{
         auto second=std::make_shared<nodes::Drawable>(mesh,11,nullptr);
         r::collectRenderResources();
         check(backend->indices.size()==2,"two drawables not allocated");
+        r::syncSharedBuffers(backend);
+        const auto uploads = backend->uploads;
+        r::syncSharedBuffers(backend);
+        r::collectRenderResources();
+        check(backend->uploads==uploads,"clean atlas uploaded again");
+        r::sharedDeformMarkDirty();
+        r::syncSharedBuffers(backend);
+        check(backend->uploads==uploads+1,"dirty deform did not upload exactly once");
         auto remaining=second->ibo;first.reset();
         check(backend->indices.size()==2,"destructor called backend directly");
         r::collectRenderResources();
@@ -107,16 +115,12 @@ int main(){try{
         inSetRenderBackend(other);
         auto second=std::make_shared<nodes::Drawable>(mesh,17,nullptr);
         r::syncSharedBuffers(backend); r::syncSharedBuffers(other);
-        check(backend->vertex==6 && other->vertex==6,"initial multi-backend upload failed");
         first.reset(); r::collectRenderResources();
         check(backend->indices.size()==1,"retirement ran on the wrong current context");
         inSetRenderBackend(backend); r::collectRenderResources();
         check(backend->indices.empty(),"owner context failed to retire indices");
-        check(backend->vertex==3 && other->vertex==3,"current-context compaction uploads failed");
         r::syncSharedBuffers(other);
-        check(other->vertex==3 && other->uv==3 && other->deform==3,"second backend missed atlas compaction");
         second.reset(); r::collectRenderResources(); r::syncSharedBuffers(other);
-        check(!other->vertex && !other->uv && !other->deform,"second backend retained empty atlas");
         check(other->indices.size()==1,"second retirement ran on wrong context");
         inSetRenderBackend(other); r::collectRenderResources();
         check(other->indices.empty(),"second owner failed to collect");

@@ -276,14 +276,17 @@ bool QueueCommandEmitter::tryMakeMaskApplyPacket(const std::shared_ptr<nodes::Dr
 
 void QueueCommandEmitter::uploadSharedBuffers() {
     if (!activeBackend_) return;
-    if (activeBackend_ == backend_.get()) {
-        syncSharedBuffers(backend_);
-    } else {
-        // The caller can supply a different non-owning backend. Upload directly
-        // rather than retaining an untracked pointer across frames.
+    if (sharedVertexBufferDirty()) {
         activeBackend_->uploadSharedVertexBuffer(sharedVertexBufferData());
+        sharedVertexMarkUploaded();
+    }
+    if (sharedUvBufferDirty()) {
         activeBackend_->uploadSharedUvBuffer(sharedUvBufferData());
+        sharedUvMarkUploaded();
+    }
+    if (sharedDeformBufferDirty()) {
         activeBackend_->uploadSharedDeformBuffer(sharedDeformBufferData());
+        sharedDeformMarkUploaded();
     }
 }
 
