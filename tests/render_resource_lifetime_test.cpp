@@ -111,12 +111,14 @@ int main(int argc, char** argv){try{
             auto parent=std::make_shared<nodes::Part>();
             auto child=std::make_shared<nodes::Part>();
             parentWeak=parent; childWeak=child;
-            child->setParent(parent);
+            parent->addChild(child);
             parent->textures[0]=std::make_shared<Texture>(std::vector<uint8_t>{1,2,3,255},1,1,4,4,false,false);
             textureWeak=parent->textures[0];
             child->masks.push_back({parent->uuid,parent,nodes::MaskingMode::Mask});
             check(child->maskCount()==1 && child->masks[0].maskSrc.lock()==parent,"live ancestor mask was lost");
-            child.reset(); parent.reset();
+            child.reset();
+            check(!childWeak.expired(),"parent did not retain its child");
+            parent.reset();
         }
         check(parentWeak.expired() && childWeak.expired(),"ancestor mask retained node hierarchy");
         check(textureWeak.expired(),"ancestor mask retained texture");
