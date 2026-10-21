@@ -22,7 +22,8 @@ enum class MaskingMode {
 
 struct MaskBinding {
     NodeId maskSrcUUID{0};
-    std::shared_ptr<Drawable> maskSrc{};
+    // The puppet hierarchy owns mask nodes; masks may reference ancestors.
+    std::weak_ptr<Drawable> maskSrc{};
     MaskingMode mode{MaskingMode::Mask};
 };
 

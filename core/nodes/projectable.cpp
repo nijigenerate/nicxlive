@@ -691,7 +691,7 @@ void Projectable::dynamicRenderEnd(core::RenderContext& ctx) {
             std::vector<MaskBinding> result;
             std::set<uint64_t> seen;
             for (auto m : masks) {
-                auto maskPtr = m.maskSrc;
+                auto maskPtr = m.maskSrc.lock();
                 if (!maskPtr && pup && m.maskSrcUUID != 0) {
                     auto node = pup->findNodeById(m.maskSrcUUID);
                     maskPtr = std::dynamic_pointer_cast<Drawable>(node);
@@ -716,7 +716,7 @@ void Projectable::dynamicRenderEnd(core::RenderContext& ctx) {
             if (!maskBindings.empty()) {
                 emitter.beginMask(useStencil);
                 for (auto binding : maskBindings) {
-                    auto maskPtr = binding.maskSrc;
+                    auto maskPtr = binding.maskSrc.lock();
                     if (!maskPtr) {
                         if (auto pup = self->puppetRef()) {
                             auto node = pup->findNodeById(binding.maskSrcUUID);
