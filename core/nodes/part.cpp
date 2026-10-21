@@ -188,8 +188,8 @@ void Part::drawOneImmediate() {
         auto bindings = dedupMasks(masks);
         for (auto m : bindings) {
             PartDrawPacket mp{};
-            if (m.maskSrc) {
-                m.maskSrc->fillDrawPacket(*m.maskSrc, mp, true);
+            if (auto mask = m.maskSrc.lock()) {
+                mask->fillDrawPacket(*mask, mp, true);
                 unity->submitMask(mp);
             }
         }
@@ -210,7 +210,7 @@ static void emitMasks(const std::vector<MaskBinding>& bindings, core::RenderComm
     }
     emitter.beginMask(useStencil);
     for (auto m : bindings) {
-        auto maskPtr = m.maskSrc;
+        auto maskPtr = m.maskSrc.lock();
         if (!maskPtr) continue;
         emitter.applyMask(maskPtr, m.mode == MaskingMode::DodgeMask);
     }
@@ -540,7 +540,7 @@ void Part::drawOneDirect(bool forMasking) {
                 core::render::QueueCommandEmitter emitter(qb);
                 emitter.beginMask(true);
                 for (auto m : maskBindings) {
-                    auto maskPtr = m.maskSrc;
+                    auto maskPtr = m.maskSrc.lock();
                     if (!maskPtr) {
                         if (auto pup = puppetRef()) {
                             maskPtr = std::dynamic_pointer_cast<Drawable>(pup->findNodeById(m.maskSrcUUID));
@@ -731,7 +731,7 @@ std::vector<MaskBinding> Part::backendMasks() const { return masks; }
 static std::size_t maskCount(const std::vector<MaskBinding>& masks) {
     std::size_t c = 0;
     for (const auto& m : masks) {
-        if (!m.maskSrc) continue;
+        if (m.maskSrc.expired()) continue;
         if (m.mode == MaskingMode::Mask || m.mode == MaskingMode::DodgeMask) ++c;
     }
     return c;
@@ -745,7 +745,7 @@ void Part::finalize() {
             if (m.maskSrcUUID == 0) continue;
             auto node = pup->findNodeById(m.maskSrcUUID);
             m.maskSrc = std::dynamic_pointer_cast<Drawable>(node);
-            if (m.maskSrc) {
+            if (!m.maskSrc.expired()) {
                 valid.push_back(m);
             }
         }
@@ -762,7 +762,7 @@ void Part::finalize() {
 void Part::setOneTimeTransform(const std::shared_ptr<Mat4>& transform) {
     Node::setOneTimeTransform(transform);
     for (auto& m : masks) {
-        if (m.maskSrc) m.maskSrc->setOneTimeTransform(transform);
+        if (auto mask = m.maskSrc.lock()) mask->setOneTimeTransform(transform);
     }
 }
 
@@ -784,8 +784,9 @@ static std::vector<MaskBinding> dedupMasks(const std::vector<MaskBinding>& masks
     std::vector<MaskBinding> out;
     std::set<uint64_t> seen;
     for (const auto& m : masks) {
-        if (!m.maskSrc) continue;
-        uint64_t key = (static_cast<uint64_t>(m.maskSrc->uuid) << 32) | static_cast<uint32_t>(m.mode);
+        auto mask = m.maskSrc.lock();
+        if (!mask) continue;
+        uint64_t key = (static_cast<uint64_t>(mask->uuid) << 32) | static_cast<uint32_t>(m.mode);
         if (seen.count(key)) continue;
         seen.insert(key);
         out.push_back(m);
@@ -810,7 +811,7 @@ void Part::enqueueRenderCommands(core::RenderContext& ctx, const std::function<v
         std::vector<MaskBinding> result;
         std::set<uint64_t> seen;
         for (auto m : masks) {
-            auto maskPtr = m.maskSrc;
+            auto maskPtr = m.maskSrc.lock();
             if (!maskPtr) continue;
             uint64_t key = (static_cast<uint64_t>(maskPtr->uuid) << 32) | static_cast<uint32_t>(m.mode);
             if (seen.count(key)) continue;
@@ -835,7 +836,7 @@ void Part::enqueueRenderCommands(core::RenderContext& ctx, const std::function<v
         if (!maskBindings.empty()) {
             emitter.beginMask(useStencil);
             for (auto binding : maskBindings) {
-                auto maskPtr = binding.maskSrc;
+                auto maskPtr = binding.maskSrc.lock();
                 if (!maskPtr) continue;
                 bool isDodge = binding.mode == MaskingMode::DodgeMask;
                 emitter.applyMask(maskPtr, isDodge);

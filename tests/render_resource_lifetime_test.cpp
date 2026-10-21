@@ -38,7 +38,28 @@ void drawFrame(const std::shared_ptr<RenderBackend>& backend) {
     emitter.beginFrame(backend.get(), state);
     emitter.endFrame(backend.get(), state);
 }
-int main(){try{
+int main(int argc, char** argv){try{
+    if(argc>1){
+        auto queue=std::make_shared<r::QueueRenderBackend>(); inSetRenderBackend(queue);
+        for(int i=0;i<8;++i){
+            std::vector<std::weak_ptr<Texture>> textures;
+            std::vector<std::weak_ptr<nodes::Node>> nodes;
+            {
+                auto p=fmt::inLoadPuppet<Puppet>(argv[1+i%(argc-1)]);
+                for(auto& t:p->textureSlots) textures.push_back(t);
+                std::function<void(std::shared_ptr<nodes::Node>)> visit=[&](auto n){nodes.push_back(n);for(auto& c:n->childrenList())visit(c);};
+                visit(p->actualRoot());
+                p->actualRoot()->build(true);
+                p->update();
+                queue->resourceQueue.clear();queue->clear();
+            }
+            inDrainPendingTextureDisposals();queue->resourceQueue.clear();queue->clear();
+            check(std::all_of(textures.begin(),textures.end(),[](auto& w){return w.expired();}),"model unload retained textures");
+            check(std::all_of(nodes.begin(),nodes.end(),[](auto& w){return w.expired();}),"model unload retained nodes");
+            std::cout<<i<<" textures alive "<<std::count_if(textures.begin(),textures.end(),[](auto& w){return !w.expired();})<<" nodes alive "<<std::count_if(nodes.begin(),nodes.end(),[](auto& w){return !w.expired();})<<std::endl;
+        }
+        return 0;
+    }
     inSetRenderBackend(nullptr);
     {
         auto standalone=std::make_shared<Puppet>();
@@ -81,6 +102,31 @@ int main(){try{
         inSetRenderBackend(backend); other.reset();
         check(weakOther.expired(),"pending texture disposal owns backend");
         inDrainPendingTextureDisposals();
+    }
+    {
+        // A child masking against its ancestor must not own the ancestor back.
+        std::weak_ptr<nodes::Part> parentWeak, childWeak;
+        std::weak_ptr<Texture> textureWeak;
+        {
+            auto parent=std::make_shared<nodes::Part>();
+            auto child=std::make_shared<nodes::Part>();
+            parentWeak=parent; childWeak=child;
+            parent->addChild(child);
+            parent->textures[0]=std::make_shared<Texture>(std::vector<uint8_t>{1,2,3,255},1,1,4,4,false,false);
+            textureWeak=parent->textures[0];
+            child->masks.push_back({parent->uuid,parent,nodes::MaskingMode::Mask});
+            check(child->maskCount()==1 && child->masks[0].maskSrc.lock()==parent,"live ancestor mask was lost");
+            child.reset();
+            check(!childWeak.expired(),"parent did not retain its child");
+            parent.reset();
+        }
+        check(parentWeak.expired() && childWeak.expired(),"ancestor mask retained node hierarchy");
+        check(textureWeak.expired(),"ancestor mask retained texture");
+        inDrainPendingTextureDisposals();
+        check(backend->textures.empty(),"ancestor mask retained backend texture");
+        auto target=std::make_shared<nodes::Part>();
+        { auto mask=std::make_shared<nodes::Part>(); target->masks.push_back({mask->uuid,mask,nodes::MaskingMode::DodgeMask}); }
+        check(target->maskCount()==0,"expired mask counted as live");
     }
     nodes::MeshData mesh;mesh.vertices={{0,0},{1,0},{0,1}};mesh.uvs=mesh.vertices;mesh.indices={0,1,2};
     {
