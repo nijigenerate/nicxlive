@@ -209,25 +209,28 @@ if(NICXLIVE_BUILD_SHARED)
   nicxlive_apply_optimizations(nicxlive_shared)
 endif()
 
+if(BUILD_WASM)
+  add_executable(nicxlive_wasm wasm/main.cpp)
+  target_link_libraries(nicxlive_wasm PRIVATE nicxlive::nicxlive)
+  set_target_properties(nicxlive_wasm PROPERTIES OUTPUT_NAME nicxlive)
+  # Keep Unity C API entrypoints and JS runtime methods required by the wasm/webgl test app.
+  target_link_options(nicxlive_wasm PRIVATE
+    "SHELL:-sWASM=1"
+    "SHELL:-sALLOW_MEMORY_GROWTH=1"
+    "SHELL:-sNO_EXIT_RUNTIME=1"
+    "SHELL:-sALLOW_TABLE_GROWTH=1"
+    "SHELL:-sFORCE_FILESYSTEM=1"
+    "SHELL:-sEXPORTED_FUNCTIONS=['_main','_malloc','_free','_njgRuntimeInit','_njgRuntimeTerm','_njgCreateRenderer','_njgDestroyRenderer','_njgLoadPuppet','_njgUnloadPuppet','_njgBeginFrame','_njgTickPuppet','_njgEmitCommands','_njgGetSharedBuffers','_njgGetSharedBufferState','_njgGetRenderTargets','_njgSetLogCallback','_njgFlushCommandBuffer','_njgGetGcHeapSize','_njgGetTextureStats','_njgSetPuppetScale','_njgSetPuppetTranslation','_njgGetParameters','_njgQuery','_njgUpdateParameters','_njgGetPuppetExtData','_njgPlayAnimation','_njgPauseAnimation','_njgStopAnimation','_njgSeekAnimation','_njgGetWasmLayout']"
+    "SHELL:-sEXPORTED_RUNTIME_METHODS=['addFunction','removeFunction','ccall','cwrap','UTF8ToString','stringToUTF8','lengthBytesUTF8','FS_createPath','FS_createDataFile','FS_unlink','HEAP8','HEAPU8','HEAP16','HEAPU16','HEAP32','HEAPU32','HEAPF32','HEAPF64']"
+  )
+endif()
+
 if(NICXLIVE_BUILD_TESTS)
   add_executable(nicxlive_render_resource_lifetime_test tests/render_resource_lifetime_test.cpp)
   target_link_libraries(nicxlive_render_resource_lifetime_test PRIVATE nicxlive::nicxlive)
   add_test(NAME nicxlive_render_resource_lifetime_test COMMAND nicxlive_render_resource_lifetime_test)
   enable_testing()
   add_executable(nicxlive_vec2array_test tests/vec2array_test.cpp)
-  if(BUILD_WASM)
-    set_target_properties(nicxlive_vec2array_test PROPERTIES OUTPUT_NAME nicxlive)
-    # Keep Unity C API entrypoints and JS runtime methods required by the wasm/webgl test app.
-    target_link_options(nicxlive_vec2array_test PRIVATE
-      "SHELL:-sWASM=1"
-      "SHELL:-sALLOW_MEMORY_GROWTH=1"
-      "SHELL:-sNO_EXIT_RUNTIME=1"
-      "SHELL:-sALLOW_TABLE_GROWTH=1"
-      "SHELL:-sFORCE_FILESYSTEM=1"
-      "SHELL:-sEXPORTED_FUNCTIONS=['_main','_malloc','_free','_njgRuntimeInit','_njgRuntimeTerm','_njgCreateRenderer','_njgDestroyRenderer','_njgLoadPuppet','_njgUnloadPuppet','_njgBeginFrame','_njgTickPuppet','_njgEmitCommands','_njgGetSharedBuffers','_njgGetRenderTargets','_njgSetLogCallback','_njgFlushCommandBuffer','_njgGetGcHeapSize','_njgGetTextureStats','_njgSetPuppetScale','_njgSetPuppetTranslation','_njgGetParameters','_njgQuery','_njgUpdateParameters','_njgGetPuppetExtData','_njgPlayAnimation','_njgPauseAnimation','_njgStopAnimation','_njgSeekAnimation','_njgGetWasmLayout']"
-      "SHELL:-sEXPORTED_RUNTIME_METHODS=['addFunction','removeFunction','ccall','cwrap','UTF8ToString','stringToUTF8','lengthBytesUTF8','FS_createPath','FS_createDataFile','FS_unlink','HEAP8','HEAPU8','HEAP16','HEAPU16','HEAP32','HEAPU32','HEAPF32','HEAPF64']"
-    )
-  endif()
   target_link_libraries(nicxlive_vec2array_test PRIVATE nicxlive::nicxlive)
   target_compile_features(nicxlive_vec2array_test PRIVATE cxx_std_20)
   nicxlive_apply_optimizations(nicxlive_vec2array_test)
