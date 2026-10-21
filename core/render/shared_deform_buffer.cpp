@@ -1,4 +1,8 @@
 #include "shared_deform_buffer.hpp"
+#include "resource_lifetime_internal.hpp"
+#include "common.hpp"
+#include "../runtime_state.hpp"
+#include <mutex>
 #include "../debug_log.hpp"
 
 #include <algorithm>
@@ -36,7 +40,6 @@ struct SharedVecAtlas {
     std::vector<Binding> bindings{};
     std::unordered_map<Vec2Array*, std::size_t> lookup{};
     bool dirty{false};
-    std::size_t revision{0};
 
     void registerArray(Vec2Array& target, std::size_t* offsetSink) {
         auto ptr = &target;
@@ -67,6 +70,10 @@ struct SharedVecAtlas {
             lookup[bindings[idx].target] = idx;
         }
         bindings.pop_back();
+        if (bindings.empty()) {
+            std::vector<Binding>().swap(bindings);
+            std::unordered_map<Vec2Array*, std::size_t>().swap(lookup);
+        }
         rebuild();
         if (traceSharedEnabled()) {
             NJCX_DBG_LOG("[nicxlive][shared-atlas] unregister target=%p bindings=%zu stride=%zu\n",
@@ -92,17 +99,11 @@ struct SharedVecAtlas {
     Vec2Array& data() { return storage; }
     bool isDirty() const { return dirty; }
     void markDirty() {
-        if (!dirty) bumpRevision();
         dirty = true;
     }
     void markUploaded() { dirty = false; }
-    std::size_t currentRevision() const { return revision; }
 
 private:
-    void bumpRevision() {
-        ++revision;
-        if (revision == 0) revision = 1;
-    }
 
     void rebuild() {
         std::size_t total = 0;
@@ -148,7 +149,6 @@ private:
             }
             if (binding.offsetSink) *binding.offsetSink = binding.offset;
         }
-        if (!dirty) bumpRevision();
         dirty = true;
         if (traceSharedEnabled()) {
             std::size_t maxEnd = 0;
@@ -175,7 +175,6 @@ Vec2Array& sharedDeformBufferData() { return deformAtlas.data(); }
 bool sharedDeformBufferDirty() { return deformAtlas.isDirty(); }
 void sharedDeformMarkDirty() { deformAtlas.markDirty(); }
 void sharedDeformMarkUploaded() { deformAtlas.markUploaded(); }
-std::size_t sharedDeformBufferRevision() { return deformAtlas.currentRevision(); }
 
 void sharedVertexRegister(Vec2Array& target, std::size_t* offsetSink) { vertexAtlas.registerArray(target, offsetSink); }
 void sharedVertexUnregister(Vec2Array& target) { vertexAtlas.unregisterArray(target); }
@@ -185,7 +184,6 @@ Vec2Array& sharedVertexBufferData() { return vertexAtlas.data(); }
 bool sharedVertexBufferDirty() { return vertexAtlas.isDirty(); }
 void sharedVertexMarkDirty() { vertexAtlas.markDirty(); }
 void sharedVertexMarkUploaded() { vertexAtlas.markUploaded(); }
-std::size_t sharedVertexBufferRevision() { return vertexAtlas.currentRevision(); }
 
 void sharedUvRegister(Vec2Array& target, std::size_t* offsetSink) { uvAtlas.registerArray(target, offsetSink); }
 void sharedUvUnregister(Vec2Array& target) { uvAtlas.unregisterArray(target); }
@@ -195,6 +193,57 @@ Vec2Array& sharedUvBufferData() { return uvAtlas.data(); }
 bool sharedUvBufferDirty() { return uvAtlas.isDirty(); }
 void sharedUvMarkDirty() { uvAtlas.markDirty(); }
 void sharedUvMarkUploaded() { uvAtlas.markUploaded(); }
-std::size_t sharedUvBufferRevision() { return uvAtlas.currentRevision(); }
 
+namespace {
+struct Retirement { std::weak_ptr<RenderBackend> backend; uint32_t handle; };
+struct RetirementQueue { std::mutex mutex; std::vector<Retirement> items; };
+// Remains valid during late global/TLS Drawable destruction; no backend is owned.
+RetirementQueue& retirements() { static auto* queue=new RetirementQueue;return *queue; }
+}
+namespace detail {
+static void uploadDirtySharedBuffers(const std::shared_ptr<RenderBackend>& backend);
+void enqueueDrawableRelease(std::weak_ptr<RenderBackend> backend,uint32_t handle) {
+    if(!handle || backend.expired())return;
+    auto& queue=retirements();std::lock_guard lock(queue.mutex);
+    queue.items.push_back({std::move(backend),handle});
+}
+void drainDrawableReleases() {
+    std::vector<Retirement> pending;
+    {auto& queue=retirements();std::lock_guard lock(queue.mutex);pending.swap(queue.items);}
+    const auto current = getCurrentRenderBackend();
+    std::vector<Retirement> deferred;
+    bool disposed = false;
+    for (auto& entry : pending) if (auto backend = entry.backend.lock()) {
+        if (backend != current) {
+            deferred.push_back(std::move(entry));
+            continue;
+        }
+        backend->disposeDrawableBuffers(entry.handle);
+        disposed = true;
+    }
+    if (!deferred.empty()) {
+        auto& queue = retirements(); std::lock_guard lock(queue.mutex);
+        queue.items.insert(queue.items.end(), deferred.begin(), deferred.end());
+    }
+    if (disposed) uploadDirtySharedBuffers(current);
+}
+
+static void uploadDirtySharedBuffers(const std::shared_ptr<RenderBackend>& backend) {
+    if (!backend) return;
+    // Preserve dirty-based uploads, including an empty atlas after deletion.
+    if (sharedVertexBufferDirty()) {
+        backend->uploadSharedVertexBuffer(sharedVertexBufferData());
+        sharedVertexMarkUploaded();
+    }
+    if (sharedUvBufferDirty()) {
+        backend->uploadSharedUvBuffer(sharedUvBufferData());
+        sharedUvMarkUploaded();
+    }
+    if (sharedDeformBufferDirty()) {
+        backend->uploadSharedDeformBuffer(sharedDeformBufferData());
+        sharedDeformMarkUploaded();
+    }
+}
+
+} // namespace detail
 } // namespace nicxlive::core::render

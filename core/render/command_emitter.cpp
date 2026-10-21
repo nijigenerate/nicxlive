@@ -276,35 +276,16 @@ bool QueueCommandEmitter::tryMakeMaskApplyPacket(const std::shared_ptr<nodes::Dr
 
 void QueueCommandEmitter::uploadSharedBuffers() {
     if (!activeBackend_) return;
-    using ::nicxlive::core::render::sharedDeformBufferData;
-    using ::nicxlive::core::render::sharedDeformBufferDirty;
-    using ::nicxlive::core::render::sharedDeformMarkUploaded;
-    using ::nicxlive::core::render::sharedVertexBufferData;
-    using ::nicxlive::core::render::sharedVertexBufferDirty;
-    using ::nicxlive::core::render::sharedVertexMarkUploaded;
-    using ::nicxlive::core::render::sharedUvBufferData;
-    using ::nicxlive::core::render::sharedUvBufferDirty;
-    using ::nicxlive::core::render::sharedUvMarkUploaded;
-
     if (sharedVertexBufferDirty()) {
-        auto& vertices = sharedVertexBufferData();
-        if (vertices.size()) {
-            activeBackend_->uploadSharedVertexBuffer(vertices);
-        }
+        activeBackend_->uploadSharedVertexBuffer(sharedVertexBufferData());
         sharedVertexMarkUploaded();
     }
     if (sharedUvBufferDirty()) {
-        auto& uvs = sharedUvBufferData();
-        if (uvs.size()) {
-            activeBackend_->uploadSharedUvBuffer(uvs);
-        }
+        activeBackend_->uploadSharedUvBuffer(sharedUvBufferData());
         sharedUvMarkUploaded();
     }
     if (sharedDeformBufferDirty()) {
-        auto& deform = sharedDeformBufferData();
-        if (deform.size()) {
-            activeBackend_->uploadSharedDeformBuffer(deform);
-        }
+        activeBackend_->uploadSharedDeformBuffer(sharedDeformBufferData());
         sharedDeformMarkUploaded();
     }
 }

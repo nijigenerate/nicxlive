@@ -1,6 +1,7 @@
 #include "runtime_state.hpp"
 
 #include "render/common.hpp"
+#include "texture.hpp"
 
 #include <algorithm>
 #include <cstddef>
@@ -17,6 +18,9 @@ std::shared_ptr<RenderBackend> gCachedRenderBackend{};
 } // namespace
 
 void inSetRenderBackend(const std::shared_ptr<RenderBackend>& backend) {
+    // Detach is the existing end-of-renderer lifecycle boundary. Drain while the
+    // old backend and its current graphics context are still available.
+    if (!backend) inDrainPendingTextureDisposals();
     gCachedRenderBackend = backend;
     setCurrentRenderBackend(backend);
 }

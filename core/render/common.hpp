@@ -84,6 +84,8 @@ public:
     virtual void initializeDrawableResources() {}
     virtual void bindDrawableVao() {}
     virtual void createDrawableBuffers(RenderResourceHandle& /*outHandle*/) {}
+    // Release notification on the rendering thread, never from a Drawable destructor.
+    virtual void disposeDrawableBuffers(RenderResourceHandle /*id*/) {}
     virtual void uploadDrawableIndices(RenderResourceHandle /*id*/, const std::vector<uint16_t>& /*indices*/) {}
     virtual void uploadSharedVertexBuffer(const ::nicxlive::core::common::Vec2Array&) {}
     virtual void uploadSharedUvBuffer(const ::nicxlive::core::common::Vec2Array&) {}

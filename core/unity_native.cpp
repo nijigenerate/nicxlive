@@ -616,6 +616,18 @@ void njgDestroyRenderer(void* renderer) {
 
 NjgResult njgLoadPuppet(void* renderer, const char* pathUtf8, void** outPuppet) {
     if (!renderer || !pathUtf8 || !outPuppet) return NjgResult::InvalidArgument;
+    std::shared_ptr<QueueRenderBackend> requestedBackend;
+    {
+        std::lock_guard<std::mutex> lock(gMutex);
+        auto it = gRenderers.find(renderer);
+        if (it == gRenderers.end()) return NjgResult::InvalidArgument;
+        requestedBackend = it->second->backend;
+    }
+    struct RestoreBackend {
+        std::shared_ptr<RenderBackend> previous;
+        ~RestoreBackend() { setCurrentRenderBackend(previous); }
+    } restore{getCurrentRenderBackend()};
+    setCurrentRenderBackend(requestedBackend);
     try {
         auto pup = fmt::inLoadPuppet<Puppet>(pathUtf8);
         if (auto root = pup->actualRoot()) {
@@ -650,11 +662,18 @@ NjgResult njgLoadPuppet(void* renderer, const char* pathUtf8, void** outPuppet) 
         return NjgResult::Ok;
     } catch (const std::exception& ex) {
         unityLog(std::string("[nicxlive] njgLoadPuppet exception: ") + ex.what());
-        return NjgResult::Failure;
     } catch (...) {
         unityLog("[nicxlive] njgLoadPuppet exception: unknown");
-        return NjgResult::Failure;
     }
+    // Deserialization may have allocated geometry and textures before failing.
+    // No loaded puppet will tick them; collect before restoring the caller context.
+    inDrainPendingTextureDisposals();
+    {
+        std::lock_guard<std::mutex> lock(gMutex);
+        auto it = gRenderers.find(renderer);
+        if (it != gRenderers.end()) applyTextureCommands(*it->second);
+    }
+    return NjgResult::Failure;
 }
 
 NjgResult njgGetParameters(void* puppetHandle, NjgParameterInfo* buffer, size_t bufferLength, size_t* outCount) {
@@ -925,20 +944,36 @@ NjgResult njgSetPuppetTranslation(void* puppetHandle, float tx, float ty) {
 }
 
 NjgResult njgUnloadPuppet(void* renderer, void* puppet) {
-    if (renderer) {
+    std::shared_ptr<QueueRenderBackend> ownerBackend;
+    {
         std::lock_guard<std::mutex> lock(gMutex);
         auto rit = gRenderers.find(renderer);
-        if (rit != gRenderers.end()) {
-            auto& v = rit->second->puppetHandles;
-            v.erase(std::remove(v.begin(), v.end(), puppet), v.end());
-            auto pit = gPuppets.find(puppet);
-            if (pit != gPuppets.end() && pit->second && pit->second->puppet) {
-                releasePuppetTextures(*rit->second, pit->second->puppet);
-            }
-            rit->second->animationStates.erase(puppet);
-        }
+        auto pit = gPuppets.find(puppet);
+        if (rit == gRenderers.end() || pit == gPuppets.end() || !pit->second || !pit->second->puppet)
+            return NjgResult::InvalidArgument;
+        auto& handles = rit->second->puppetHandles;
+        auto owned = std::find(handles.begin(), handles.end(), puppet);
+        if (owned == handles.end()) return NjgResult::InvalidArgument;
+        ownerBackend = rit->second->backend;
+        // Invalidate commands retaining surfaces only after validating ownership.
+        ownerBackend->clear();
+        rit->second->recorded.clear();
+        rit->second->queued.clear();
+        handles.erase(owned);
+        releasePuppetTextures(*rit->second, pit->second->puppet);
+        rit->second->animationStates.erase(puppet);
     }
+    auto previousBackend = getCurrentRenderBackend();
+    if (ownerBackend) setCurrentRenderBackend(ownerBackend);
     destroyHandle(gPuppets, puppet);
+    // No puppet remains to tick after the last unload. Retire while its renderer lives.
+    inDrainPendingTextureDisposals();
+    {
+        std::lock_guard<std::mutex> lock(gMutex);
+        auto it = gRenderers.find(renderer);
+        if (it != gRenderers.end()) applyTextureCommands(*it->second);
+    }
+    setCurrentRenderBackend(previousBackend);
     return NjgResult::Ok;
 }
 
@@ -1079,16 +1114,6 @@ NjgResult njgGetSharedBuffers(void* renderer, SharedBufferSnapshot* snapshot) {
     return NjgResult::Ok;
 }
 
-NjgResult njgGetSharedBufferState(void* renderer, SharedBufferState* state) {
-    if (!renderer || !state) return NjgResult::InvalidArgument;
-    std::lock_guard<std::mutex> lock(gMutex);
-    auto it = gRenderers.find(renderer);
-    if (it == gRenderers.end()) return NjgResult::InvalidArgument;
-    state->vertexRevision = ::nicxlive::core::render::sharedVertexBufferRevision();
-    state->uvRevision = ::nicxlive::core::render::sharedUvBufferRevision();
-    state->deformRevision = ::nicxlive::core::render::sharedDeformBufferRevision();
-    return NjgResult::Ok;
-}
 
 NjgRenderTargets njgGetRenderTargets(void* renderer) {
     std::lock_guard<std::mutex> lock(gMutex);

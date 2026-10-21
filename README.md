@@ -42,3 +42,21 @@ cmake --build build-wasm
 
 ## Progress
 See `doc/compat-*.md` for detailed compatibility notes and remaining gaps.
+## Render resource lifetime
+
+Resource retirement is internal. Normal `inUpdate()` processing and DLL model
+unload/load-failure handling drain pending releases. Detaching the renderer with
+`inSetRenderBackend(nullptr)` also drains before releasing the old backend, while
+its graphics context is still current. Applications do not call a
+shared-buffer collection API. Model mutation and rendering remain serialized.
+
+Drawable destruction unregisters CPU vertex/UV/deform arrays and queues the index
+handle with a weak reference to its backend. GPU calls are deferred to the rendering
+thread. `RenderBackend::disposeDrawableBuffers(id)` delivers individual releases;
+the backend owns its allocation and compaction policy without a collection hook.
+Dirty arrays are uploaded even when empty, so deleting the last model also clears
+backend copies. The last CPU array removal frees atlas bookkeeping capacity.
+
+`nicxlive_render_resource_lifetime_test` verifies deferred backend notifications,
+surviving Drawable data, repeated creation/deletion, empty-array notification and
+that pending retirements do not keep the backend alive.

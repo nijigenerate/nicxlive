@@ -62,6 +62,7 @@ public:
     void initializeDrawableResources() override;
     void bindDrawableVao() override;
     void createDrawableBuffers(RenderResourceHandle& outHandle) override;
+    void disposeDrawableBuffers(RenderResourceHandle id) override;
     void uploadDrawableIndices(RenderResourceHandle id, const std::vector<uint16_t>& indices) override;
     void uploadSharedVertexBuffer(const ::nicxlive::core::common::Vec2Array& v) override;
     void uploadSharedUvBuffer(const ::nicxlive::core::common::Vec2Array& u) override;

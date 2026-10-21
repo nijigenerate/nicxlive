@@ -104,12 +104,15 @@ std::shared_ptr<T> inLoadPuppetFromMemory(const std::vector<uint8_t>& data) {
             std::vector<uint8_t> payload(data.begin() + offset, data.begin() + offset + texLen);
             offset += texLen;
             if constexpr (requires(std::shared_ptr<T> p) { p->textureSlots; }) {
-                auto shallow = ::nicxlive::core::ShallowTexture(payload);
-                auto tex = std::make_shared<::nicxlive::core::Texture>(shallow);
                 if (puppet->textureSlots.size() <= i) {
                     puppet->textureSlots.resize(static_cast<std::size_t>(i) + 1);
                 }
-                puppet->textureSlots[static_cast<std::size_t>(i)] = tex;
+                if (payload.empty()) {
+                    puppet->textureSlots[i].reset();
+                    continue;
+                }
+                auto shallow = ::nicxlive::core::ShallowTexture(payload);
+                puppet->textureSlots[i] = std::make_shared<::nicxlive::core::Texture>(shallow);
             }
         }
     }

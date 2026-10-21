@@ -80,6 +80,9 @@ public:
     void update();
     void resetDrivers();
 
+    // Original D mutable collection queries, used by SceneItem attachment.
+    auto& getRootParts() { return rootParts; }
+    auto& getDrivers() { return drivers; }
     // queries
     std::shared_ptr<nodes::Node> findNode(const std::shared_ptr<nodes::Node>& n, const std::string& name);
     std::shared_ptr<nodes::Node> findNode(const std::shared_ptr<nodes::Node>& n, uint32_t uuid);

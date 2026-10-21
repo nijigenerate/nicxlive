@@ -3,8 +3,12 @@
 #include "../nodes/common.hpp"
 
 #include <cstddef>
+#include <memory>
+#include <cstdint>
+namespace nicxlive::core { class RenderBackend; }
 
 namespace nicxlive::core::render {
+
 
 // D: nijilive.core.render.shared_deform_buffer
 void sharedDeformRegister(::nicxlive::core::common::Vec2Array& target, std::size_t* offsetSink);
@@ -15,7 +19,6 @@ std::size_t sharedDeformAtlasStride();
 bool sharedDeformBufferDirty();
 void sharedDeformMarkDirty();
 void sharedDeformMarkUploaded();
-std::size_t sharedDeformBufferRevision();
 
 void sharedVertexRegister(::nicxlive::core::common::Vec2Array& target, std::size_t* offsetSink);
 void sharedVertexUnregister(::nicxlive::core::common::Vec2Array& target);
@@ -25,7 +28,6 @@ std::size_t sharedVertexAtlasStride();
 bool sharedVertexBufferDirty();
 void sharedVertexMarkDirty();
 void sharedVertexMarkUploaded();
-std::size_t sharedVertexBufferRevision();
 
 void sharedUvRegister(::nicxlive::core::common::Vec2Array& target, std::size_t* offsetSink);
 void sharedUvUnregister(::nicxlive::core::common::Vec2Array& target);
@@ -35,7 +37,6 @@ std::size_t sharedUvAtlasStride();
 bool sharedUvBufferDirty();
 void sharedUvMarkDirty();
 void sharedUvMarkUploaded();
-std::size_t sharedUvBufferRevision();
 
 } // namespace nicxlive::core::render
 

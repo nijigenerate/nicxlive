@@ -735,37 +735,32 @@ std::array<float, 4> Node::getInitialBoundsSize() const {
 
 std::array<float, 4> Node::getCombinedBounds(bool reupdate, bool countPuppet) {
     auto combined = getInitialBoundsSize();
+    bool hasCombined = false;
     if (auto drawable = std::dynamic_pointer_cast<Drawable>(shared_from_this())) {
         if (reupdate) drawable->updateBounds();
-        if (drawable->bounds) {
-            auto b = *drawable->bounds;
-            combined = {b[0], b[1], b[2], b[3]};
+        if (!drawable->vertices.empty() || children.empty()) {
+            combined = drawable->bounds.value_or(combined);
+            hasCombined = true;
         }
-    }
-    for (auto& child : children) {
+    } else { hasCombined = children.empty(); }
+    for (auto child : children) {
         if (!child) continue;
-        auto cb = child->getCombinedBounds(reupdate, false);
-        combined[0] = std::min(combined[0], cb[0]);
-        combined[1] = std::min(combined[1], cb[1]);
-        combined[2] = std::max(combined[2], cb[2]);
-        combined[3] = std::max(combined[3], cb[3]);
-    }
-    // Puppet transformを適用する場吁E
-    if (countPuppet) {
-        if (auto pup = puppetRef()) {
-            auto mat = pup->transform.toMat4();
-            auto apply = [&](float x, float y) {
-                Vec3 v{x, y, 0.0f};
-                auto tv = mat.transformPoint(v);
-                return std::array<float, 2>{tv.x, tv.y};
-            };
-            auto p1 = apply(combined[0], combined[1]);
-            auto p2 = apply(combined[2], combined[3]);
-            combined[0] = std::min(p1[0], p2[0]);
-            combined[1] = std::min(p1[1], p2[1]);
-            combined[2] = std::max(p1[0], p2[0]);
-            combined[3] = std::max(p1[1], p2[1]);
+        auto b = child->getCombinedBounds(reupdate);
+        if (!hasCombined) { combined=b; hasCombined=true; }
+        else {
+            if(b[0]<combined[0])combined[0]=b[0];
+            if(b[1]<combined[1])combined[1]=b[1];
+            if(b[2]>combined[2])combined[2]=b[2];
+            if(b[3]>combined[3])combined[3]=b[3];
         }
+    }
+    if(countPuppet) {
+        auto puppet = puppetRef();
+        if (!puppet) return combined;
+        auto matrix=puppet->transform.matrix();
+        auto tl=matrix.transformPoint({combined[0],combined[1],0});
+        auto br=matrix.transformPoint({combined[2],combined[3],0});
+        return {std::min(tl.x,br.x),std::min(tl.y,br.y),std::max(tl.x,br.x),std::max(tl.y,br.y)};
     }
     return combined;
 }

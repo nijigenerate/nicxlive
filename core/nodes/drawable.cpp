@@ -6,6 +6,7 @@
 #include "../serde.hpp"
 #include "../render/common.hpp"
 #include "../render/shared_deform_buffer.hpp"
+#include "../render/resource_lifetime_internal.hpp"
 #include "../render/commands.hpp"
 #include "../math/triangle.hpp"
 #include "../math/mat3.hpp"
@@ -120,6 +121,7 @@ Drawable::Drawable(const MeshData& data, uint32_t uuidVal, const std::shared_ptr
 }
 
 Drawable::~Drawable() {
+    ::nicxlive::core::render::detail::enqueueDrawableRelease(drawableBackend, ibo);
     ::nicxlive::core::render::sharedDeformUnregister(deformation);
     ::nicxlive::core::render::sharedVertexUnregister(vertices);
     ::nicxlive::core::render::sharedUvUnregister(sharedUvs);
@@ -334,35 +336,17 @@ void MeshData::serialize(::nicxlive::core::serde::InochiSerializer& serializer) 
 
 void Drawable::updateBounds() {
     if (!gDoGenerateBounds) return;
-    if (mesh->vertices.empty()) {
-        bounds.reset();
+    auto matrix=getDynamicMatrix();
+    if(vertices.empty()) {
+        auto transform=this->transform();
+        bounds=std::array<float,4>{transform.translation.x,transform.translation.y,transform.translation.x,transform.translation.y};
         return;
     }
-    Transform wtransform = transform();
-    std::array<float, 4> b{
-        wtransform.translation.x,
-        wtransform.translation.y,
-        wtransform.translation.x,
-        wtransform.translation.y
-    };
-    Mat4 matrix = getDynamicMatrix();
-    for (std::size_t i = 0; i < mesh->vertices.size(); ++i) {
-        Vec2 v = mesh->vertices[i];
-        if (i < deformationOffsets.size()) {
-            v.x += deformationOffsets[i].x;
-            v.y += deformationOffsets[i].y;
-        }
-        if (i < deformation.size()) {
-            v.x += deformation.xAt(i);
-            v.y += deformation.yAt(i);
-        }
-        Vec3 oriented = matrix.transformPoint(Vec3{v.x, v.y, 0.0f});
-        b[0] = std::min(b[0], oriented.x);
-        b[1] = std::min(b[1], oriented.y);
-        b[2] = std::max(b[2], oriented.x);
-        b[3] = std::max(b[3], oriented.y);
-    }
-    bounds = b;
+    auto point=[&](size_t i){auto v=vertices.at(i);auto d=deformation.at(i);return matrix.transformPoint({v.x+d.x,v.y+d.y,0});};
+    auto first=point(0);
+    std::array<float,4> b{first.x,first.y,first.x,first.y};
+    for(size_t i=1;i<vertices.size();++i){auto v=point(i);if(v.x<b[0])b[0]=v.x;if(v.y<b[1])b[1]=v.y;if(v.x>b[2])b[2]=v.x;if(v.y>b[3])b[3]=v.y;}
+    bounds=b;
 }
 
 void Drawable::drawMeshLines() const {
@@ -423,6 +407,7 @@ void Drawable::updateIndices() {
     backend->bindDrawableVao();
     if (ibo == 0) {
         backend->createDrawableBuffers(ibo);
+        drawableBackend = backend;
     }
     backend->uploadDrawableIndices(ibo, mesh->indices);
 }
@@ -648,6 +633,12 @@ void Drawable::setupSelf() {
         }
         registerWeldFilter(tgt);
     }
+}
+
+void Drawable::finalize() {
+    Deformable::finalize();
+    finalizeDrawable();
+    setupSelf();
 }
 
 void Drawable::finalizeDrawable() {

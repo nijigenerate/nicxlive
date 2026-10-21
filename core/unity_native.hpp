@@ -87,11 +87,6 @@ struct SharedBufferSnapshot {
     size_t deformCount;
 };
 
-struct SharedBufferState {
-    size_t vertexRevision;
-    size_t uvRevision;
-    size_t deformRevision;
-};
 
 struct NjgWasmLayout {
     uint32_t sizeQueued;
@@ -262,7 +257,6 @@ NjgResult njgBeginFrame(void* renderer, const FrameConfig* cfg);
 NjgResult njgTickPuppet(void* puppet, double deltaSeconds);
 NjgResult njgEmitCommands(void* renderer, CommandQueueView* outView);
 NjgResult njgGetSharedBuffers(void* renderer, SharedBufferSnapshot* snapshot);
-NjgResult njgGetSharedBufferState(void* renderer, SharedBufferState* state);
 NjgRenderTargets njgGetRenderTargets(void* renderer);
 void njgSetLogCallback(NjgLogFn callback, void* userData);
 void njgFlushCommandBuffer(void* renderer);
