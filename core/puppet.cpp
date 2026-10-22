@@ -148,9 +148,11 @@ void Puppet::scanPartsRecurse(const std::shared_ptr<Node>& node, bool driversOnl
         }
     } else if (!driversOnly) {
         if (auto dcomp = std::dynamic_pointer_cast<DynamicComposite>(node)) {
+            dcomp->scanParts();
             rootParts.push_back(dcomp);
             driversOnly = true;
         } else if (auto comp = std::dynamic_pointer_cast<Composite>(node)) {
+            comp->scanParts();
             rootParts.push_back(comp);
             driversOnly = true;
         } else if (auto part = std::dynamic_pointer_cast<Part>(node)) {
