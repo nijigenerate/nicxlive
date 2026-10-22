@@ -410,6 +410,7 @@ void Puppet::applyDeformToChildren() {
 void Puppet::rescanNodes() {
     auto node = actualRoot();
     scanParts(false, node);
+    recordNodeChange(nodes::NotifyReason::StructureChanged);
 }
 
 void Puppet::updateTextureState() {
