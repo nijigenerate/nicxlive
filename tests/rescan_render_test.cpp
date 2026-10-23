@@ -5,6 +5,7 @@
 #include "render/backend_queue.hpp"
 #include "runtime_state.hpp"
 #include <algorithm>
+#include <cmath>
 #include <iostream>
 #include <stdexcept>
 using namespace nicxlive::core;
@@ -53,5 +54,38 @@ int main() { try {
     };
     checkCompositeRescan.operator()<nodes::Composite>();
     checkCompositeRescan.operator()<nodes::DynamicComposite>();
+    auto pinParent = nodes::Part::createSimple(texture, "deforming parent");
+    auto pinned = nodes::Part::createSimple(texture, "runtime pin");
+    pinned->reparent(pinParent, 0, true);
+    pinned->setPinToMesh(true);
+    constexpr std::uintptr_t attachTag = 0x6e617474u;
+    if (!pinned->hasDeformPreProcessFilter(0, attachTag))
+        throw std::runtime_error("Runtime pin did not register deformation following");
+    pinParent->setupChild(pinned);
+    if (pinned->deformPreProcessFilters.size() != 1)
+        throw std::runtime_error("Repeated pin setup duplicated the attachment filter");
+    RenderContext pinContext;
+    pinParent->runBeginTask(pinContext);
+    pinned->runBeginTask(pinContext);
+    for (auto& vertex : pinParent->getMesh().vertices) { vertex.x *= 100; vertex.y *= 100; }
+    pinParent->updateVertices();
+    pinParent->deformation.fill({40.0f, 20.0f});
+    auto beforePin = pinned->transform().translation;
+    pinned->preProcess();
+    auto position = pinned->transform().translation;
+    if (std::abs(position.x - beforePin.x - 40.0f) > 0.001f || std::abs(position.y - beforePin.y - 20.0f) > 0.001f)
+        throw std::runtime_error("Runtime pin did not follow parent mesh deformation");
+    pinned->setPinToMesh(false);
+    if (pinned->hasDeformPreProcessFilter(0, attachTag))
+        throw std::runtime_error("Disabling pin retained the attachment filter");
+    pinned->setPinToMesh(true);
+    pinned->reparent(nullptr, 0, true);
+    if (pinned->hasDeformPreProcessFilter(0, attachTag))
+        throw std::runtime_error("Detaching retained the attachment filter");
+    auto nextParent = nodes::Part::createSimple(texture, "next parent");
+    pinned->reparent(nextParent, 0, true);
+    if (!pinned->hasDeformPreProcessFilter(0, attachTag))
+        throw std::runtime_error("Reattaching did not register the new parent");
+    std::cout << "Runtime pin follows mesh deformation and releases its filter on disable/detach\n";
     return 0;
 } catch(const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;} }

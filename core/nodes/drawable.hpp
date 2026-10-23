@@ -136,6 +136,9 @@ public:
 
     virtual void copyFromDrawable(const Drawable& src);
 
+    bool setupChild(const std::shared_ptr<Node>& child) override;
+    bool releaseChild(const std::shared_ptr<Node>& child) override;
+
     virtual void setupChildDrawable();
     virtual void releaseChildDrawable();
 
