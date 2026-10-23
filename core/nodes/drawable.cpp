@@ -1,4 +1,4 @@
-﻿#include "drawable.hpp"
+#include "drawable.hpp"
 
 #include "node.hpp"
 #include "../puppet.hpp"
@@ -747,54 +747,56 @@ void Drawable::copyFromDrawable(const Drawable& src) {
     updateIndices();
 }
 
-void Drawable::setupChildDrawable() {
-    for (auto& child : children) {
-        if (!child) continue;
-        if (!child->pinToMesh) continue;
-        std::weak_ptr<Drawable> weakSelf = std::dynamic_pointer_cast<Drawable>(shared_from_this());
-        if (auto deformableChild = std::dynamic_pointer_cast<Deformable>(child)) {
-            child->preProcessFilters.erase(std::remove_if(child->preProcessFilters.begin(), child->preProcessFilters.end(), [](const FilterHook& h) {
-                return h.stage == 0 && h.tag == kNodeAttachFilterTag;
-            }), child->preProcessFilters.end());
-            if (!deformableChild->hasDeformPreProcessFilter(0, kNodeAttachFilterTag)) {
-                Node::DeformFilterHook hook;
-                hook.stage = 0;
-                hook.tag = kNodeAttachFilterTag;
-                hook.func = [weakSelf](std::shared_ptr<Node> self, const Vec2Array& verts, Vec2Array& deform, const Mat4* mat)
-                    -> Node::DeformFilterResult {
-                    (void)verts;
-                    (void)deform;
-                    (void)mat;
-                    auto owner = weakSelf.lock();
-                    Node::DeformFilterResult result;
-                    if (!owner) return result;
-                    result.changed = owner->updateAttachedNodeTransform(self);
-                    return result;
-                };
-                deformableChild->upsertDeformPreProcessFilter(std::move(hook));
-            }
-            continue;
-        }
-        bool exists = std::any_of(child->preProcessFilters.begin(), child->preProcessFilters.end(), [](const FilterHook& h) {
+bool Drawable::setupChild(const std::shared_ptr<Node>& child) {
+    Node::setupChild(child);
+    if (!child || !child->pinToMesh) return true;
+    std::weak_ptr<Drawable> weakSelf = std::dynamic_pointer_cast<Drawable>(shared_from_this());
+    if (auto deformableChild = std::dynamic_pointer_cast<Deformable>(child)) {
+        child->preProcessFilters.erase(std::remove_if(child->preProcessFilters.begin(), child->preProcessFilters.end(), [](const FilterHook& h) {
             return h.stage == 0 && h.tag == kNodeAttachFilterTag;
-        });
-        if (exists) continue;
-        FilterHook hook;
-        hook.stage = 0;
-        hook.tag = kNodeAttachFilterTag;
-        hook.func = [weakSelf](std::shared_ptr<Node> self, const Vec2Array& verts, Vec2Array deform, const Mat4* mat)
-            -> std::tuple<Vec2Array, Mat4*, bool> {
-            auto owner = weakSelf.lock();
-            if (!owner) return std::make_tuple(Vec2Array{}, static_cast<Mat4*>(nullptr), false);
-            return owner->nodeAttachProcessor(self, verts, deform, mat);
-        };
-        child->preProcessFilters.push_back(std::move(hook));
+        }), child->preProcessFilters.end());
+        if (!deformableChild->hasDeformPreProcessFilter(0, kNodeAttachFilterTag)) {
+            Node::DeformFilterHook hook;
+            hook.stage = 0;
+            hook.tag = kNodeAttachFilterTag;
+            hook.func = [weakSelf](std::shared_ptr<Node> self, const Vec2Array& verts, Vec2Array& deform, const Mat4* mat)
+                -> Node::DeformFilterResult {
+                (void)verts;
+                (void)deform;
+                (void)mat;
+                auto owner = weakSelf.lock();
+                Node::DeformFilterResult result;
+                if (!owner) return result;
+                result.changed = owner->updateAttachedNodeTransform(self);
+                return result;
+            };
+            deformableChild->upsertDeformPreProcessFilter(std::move(hook));
+        }
+        return true;
     }
+    bool exists = std::any_of(child->preProcessFilters.begin(), child->preProcessFilters.end(), [](const FilterHook& h) {
+        return h.stage == 0 && h.tag == kNodeAttachFilterTag;
+    });
+    if (exists) return true;
+    FilterHook hook;
+    hook.stage = 0;
+    hook.tag = kNodeAttachFilterTag;
+    hook.func = [weakSelf](std::shared_ptr<Node> self, const Vec2Array& verts, Vec2Array deform, const Mat4* mat)
+        -> std::tuple<Vec2Array, Mat4*, bool> {
+        auto owner = weakSelf.lock();
+        if (!owner) return std::make_tuple(Vec2Array{}, static_cast<Mat4*>(nullptr), false);
+        return owner->nodeAttachProcessor(self, verts, deform, mat);
+    };
+    child->preProcessFilters.push_back(std::move(hook));
+    return true;
 }
 
-void Drawable::releaseChildDrawable() {
-    for (auto& child : children) {
-        if (!child) continue;
+void Drawable::setupChildDrawable() {
+    for (auto& child : children) Drawable::setupChild(child);
+}
+
+bool Drawable::releaseChild(const std::shared_ptr<Node>& child) {
+    if (child) {
         if (auto deformableChild = std::dynamic_pointer_cast<Deformable>(child)) {
             deformableChild->removeDeformPreProcessFilter(0, kNodeAttachFilterTag);
         }
@@ -803,6 +805,12 @@ void Drawable::releaseChildDrawable() {
         }), child->preProcessFilters.end());
         attachedIndex.erase(child->uuid);
     }
+    Node::releaseChild(child);
+    return true;
+}
+
+void Drawable::releaseChildDrawable() {
+    for (auto& child : children) Drawable::releaseChild(child);
 }
 
 void Drawable::build(bool force) {
