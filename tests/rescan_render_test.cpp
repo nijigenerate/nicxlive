@@ -87,5 +87,22 @@ int main() { try {
     if (!pinned->hasDeformPreProcessFilter(0, attachTag))
         throw std::runtime_error("Reattaching did not register the new parent");
     std::cout << "Runtime pin follows mesh deformation and releases its filter on disable/detach\n";
+    auto checkCompositePinBuild = [&]<typename CompositeType>() {
+        auto composite = std::make_shared<CompositeType>();
+        auto child = nodes::Part::createSimple(texture, "loaded pin");
+        child->pinToMesh = true; // Serialized flag: no runtime setter call.
+        composite->addChild(child);
+        composite->build(false);
+        if (!child->hasDeformPreProcessFilter(0, 0x6e617474u))
+            throw std::runtime_error("Composite build omitted the attachment filter");
+        composite->build(false);
+        if (child->deformPreProcessFilters.size() != 1)
+            throw std::runtime_error("Composite rebuild duplicated the attachment filter");
+        composite->releaseChildDrawable();
+        if (child->hasDeformPreProcessFilter(0, 0x6e617474u))
+            throw std::runtime_error("Composite drawable release retained the attachment filter");
+    };
+    checkCompositePinBuild.operator()<nodes::Composite>();
+    checkCompositePinBuild.operator()<nodes::DynamicComposite>();
     return 0;
 } catch(const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;} }

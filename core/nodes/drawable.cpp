@@ -1,4 +1,4 @@
-﻿#include "drawable.hpp"
+#include "drawable.hpp"
 
 #include "node.hpp"
 #include "../puppet.hpp"
@@ -792,7 +792,7 @@ bool Drawable::setupChild(const std::shared_ptr<Node>& child) {
 }
 
 void Drawable::setupChildDrawable() {
-    for (auto& child : children) setupChild(child);
+    for (auto& child : children) Drawable::setupChild(child);
 }
 
 bool Drawable::releaseChild(const std::shared_ptr<Node>& child) {
@@ -810,7 +810,7 @@ bool Drawable::releaseChild(const std::shared_ptr<Node>& child) {
 }
 
 void Drawable::releaseChildDrawable() {
-    for (auto& child : children) releaseChild(child);
+    for (auto& child : children) Drawable::releaseChild(child);
 }
 
 void Drawable::build(bool force) {
