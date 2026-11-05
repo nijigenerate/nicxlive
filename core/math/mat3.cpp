@@ -1,4 +1,5 @@
 #include "mat3.hpp"
+#include "inmath_float.hpp"
 
 namespace nicxlive::core::math {
 
@@ -6,7 +7,11 @@ Mat3x3 multiply(const Mat3x3& a, const Mat3x3& b) {
     Mat3x3 out{};
     for (int r = 0; r < 3; ++r) {
         for (int c = 0; c < 3; ++c) {
-            out.m[r][c] = a.m[r][0] * b.m[0][c] + a.m[r][1] * b.m[1][c] + a.m[r][2] * b.m[2][c];
+            float value = 0.0f;
+            for (int k = 0; k < 3; ++k) {
+                value = detail::inmathAccumulate(value, detail::inmathProduct(a.m[r][k], b.m[k][c]));
+            }
+            out.m[r][c] = value;
         }
     }
     return out;

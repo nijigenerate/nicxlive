@@ -2,6 +2,10 @@
 
 namespace nicxlive::core {
 
+std::unique_ptr<RenderCommandEmitter> RenderBackend::createCommandEmitter() {
+    return {};
+}
+
 namespace {
 std::shared_ptr<RenderBackend> gCurrentBackend{};
 }

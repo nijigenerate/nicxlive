@@ -8,6 +8,7 @@
 #include "render/backend_queue.hpp"
 #include "unity_native.hpp"
 #include <filesystem>
+#include <algorithm>
 #include <chrono>
 #include <map>
 #include <iostream>
@@ -23,6 +24,15 @@ struct Backend:RenderBackend {
         auto id=next++;textures[id]=data;return id;
     }
     void updateTexture(uint32_t id,const std::vector<uint8_t>& data,int,int,int)override {textures.at(id)=data;}
+    void readTextureData(uint32_t id,int,bool,std::vector<uint8_t>& out)override {
+        const auto& data=textures.at(id);
+        std::fill(out.begin(),out.end(),uint8_t{0});
+        std::copy_n(data.begin(),std::min(data.size(),out.size()),out.begin());
+    }
+    void uploadTextureData(uint32_t id,int,int,int,int,bool,const std::vector<uint8_t>& data)override {
+        textures.at(id)=data;
+    }
+    void generateTextureMipmap(uint32_t)override {}
     void disposeTexture(uint32_t id)override {textures.erase(id);}
     void createDrawableBuffers(uint32_t& id)override{id=next++;}
     void uploadDrawableIndices(uint32_t id,const std::vector<uint16_t>& data)override{indices[id]=data;}
@@ -41,6 +51,7 @@ void drawFrame(const std::shared_ptr<RenderBackend>& backend) {
 int main(int argc, char** argv){try{
     if(argc>1){
         auto queue=std::make_shared<r::QueueRenderBackend>(); inSetRenderBackend(queue);
+        initRendererCommon();
         for(int i=0;i<8;++i){
             std::vector<std::weak_ptr<Texture>> textures;
             std::vector<std::weak_ptr<nodes::Node>> nodes;
@@ -66,6 +77,7 @@ int main(int argc, char** argv){try{
         check(getCurrentRenderBackend()!=nullptr,"standalone Puppet has no default backend");
     }
     auto backend=std::make_shared<Backend>();inSetRenderBackend(backend);
+    initRendererCommon();
     {
         auto puppet=std::make_shared<Puppet>();
         check(getCurrentRenderBackend()==backend,"Puppet construction replaced host backend");
@@ -157,7 +169,7 @@ int main(int argc, char** argv){try{
         auto remaining=second->ibo;first.reset();
         check(backend->indices.size()==2,"destructor called backend directly");
         inUpdate();
-        check(backend->indices.size()==1&&backend->indices.at(remaining)==mesh.indices,"remaining drawable changed");
+        check(backend->indices.size()==1&&std::ranges::equal(backend->indices.at(remaining),mesh.indices),"remaining drawable changed");
         second.reset();inUpdate();
         check(backend->indices.empty(),"index retirement leak");
         check(!backend->vertex&&!backend->uv&&!backend->deform,"empty atlas was not sent to backend");

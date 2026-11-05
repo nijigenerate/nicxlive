@@ -1,4 +1,5 @@
 #include "part.hpp"
+#include "dynamic_composite.hpp"
 
 #include "../puppet.hpp"
 #include "../render.hpp"
@@ -6,6 +7,8 @@
 #include "../render/backend_queue.hpp"
 #include "../runtime_state.hpp"
 #include "../texture.hpp"
+#include "../compat/native_access_fault.hpp"
+#include "../compat/system_error.hpp"
 #include "../../fmt/fmt.hpp"
 #include "../debug_log.hpp"
 
@@ -17,6 +20,8 @@
 #include <cstdlib>
 #include <cstring>
 #include <limits>
+#include <new>
+#include <source_location>
 #include <set>
 
 namespace nicxlive::core::nodes {
@@ -73,11 +78,52 @@ std::optional<MaskingMode> parseMaskingModeString(const std::string& raw) {
 
 }
 
-static std::vector<MaskBinding> dedupMasks(const std::vector<MaskBinding>& masks);
+static std::vector<MaskBinding> dedupMasks(const common::SharedArray<MaskBinding>& masks);
 static void emitMasks(const std::vector<MaskBinding>& bindings, core::RenderCommandEmitter& emitter);
 
 Part::Part() {
     initPartTasks();
+    updateUVs();
+}
+
+std::shared_ptr<Part> Part::create(const std::shared_ptr<Node>& parent) {
+    const auto actualParent = parent;
+    ngRegisterModelResourceClassNames();
+    auto result = std::shared_ptr<Part>(new Part(DeferredConstruction{}));
+    result->constructPartOwned(actualParent);
+    return result;
+}
+
+void Part::constructPartOwned(std::shared_ptr<Node> parent) {
+    constructDrawableOwned(parent);
+    initPartTasks();
+    updateUVs();
+}
+
+std::shared_ptr<Part> Part::allocateSourcePartReceiver() {
+    ngRegisterModelResourceClassNames();
+    try {
+        return std::shared_ptr<Part>(new Part(DeferredConstruction{}));
+    } catch (const std::bad_alloc&) {
+        throw d_runtime::ngStaticError<d_runtime::OutOfMemoryError>(std::source_location::current());
+    }
+}
+
+void Part::constructPartDataOwned(MeshData data, std::uint32_t id, std::shared_ptr<Node> parent) {
+    constructDrawableDataOwned(data, id, parent);
+    initPartTasks();
+    updateUVs();
+}
+
+void Part::constructPartDataOwned(MeshData data,
+    common::SharedArray<std::shared_ptr<::nicxlive::core::Texture>> inputTextures,
+    std::uint32_t id, std::shared_ptr<Node> parent) {
+    constructDrawableDataOwned(data, id, parent);
+    initPartTasks();
+    for (std::size_t index = 0; index < textures.size(); ++index) {
+        if (index >= inputTextures.size()) break;
+        textures[index] = inputTextures[index];
+    }
     updateUVs();
 }
 
@@ -97,28 +143,50 @@ Part::Part(const MeshData& data, const std::vector<std::shared_ptr<::nicxlive::c
 }(), uuidVal) {}
 
 std::shared_ptr<Part> Part::createSimple(const std::shared_ptr<::nicxlive::core::Texture>& tex, const std::string& name) {
-    if (!tex) return nullptr;
+    return createSimpleRetained(tex, common::NullableString(name));
+}
+
+std::shared_ptr<Part> Part::createSimpleRetained(const std::shared_ptr<::nicxlive::core::Texture>& tex,
+    common::NullableString name) {
+    const auto texture = d_runtime::ngRequireObject(tex);
     MeshData data;
-    float hw = static_cast<float>(tex->width()) * 0.5f;
-    float hh = static_cast<float>(tex->height()) * 0.5f;
-    data.vertices = {Vec2{-hw, -hh}, Vec2{-hw, hh}, Vec2{hw, -hh}, Vec2{hw, hh}};
+    // Source part/package.d73-79 evaluates every virtual property in component order.
+    const float x0 = static_cast<float>(-(texture->width() / 2));
+    const float y0 = static_cast<float>(-(texture->height() / 2));
+    const float x1 = static_cast<float>(-(texture->width() / 2));
+    const float y1 = static_cast<float>(texture->height() / 2);
+    const float x2 = static_cast<float>(texture->width() / 2);
+    const float y2 = static_cast<float>(-(texture->height() / 2));
+    const float x3 = static_cast<float>(texture->width() / 2);
+    const float y3 = static_cast<float>(texture->height() / 2);
+    data.vertices = {Vec2{x0, y0}, Vec2{x1, y1}, Vec2{x2, y2}, Vec2{x3, y3}};
     data.uvs = {Vec2{0, 0}, Vec2{0, 1}, Vec2{1, 0}, Vec2{1, 1}};
     data.indices = {0, 1, 2, 2, 1, 3};
-    auto p = std::make_shared<Part>(data, std::array<std::shared_ptr<::nicxlive::core::Texture>, 3>{tex, nullptr, nullptr}, 0);
-    p->name = name;
-    return p;
+    auto part = std::make_shared<Part>(data,
+        std::array<std::shared_ptr<::nicxlive::core::Texture>, 3>{texture, nullptr, nullptr}, 0);
+    part->setName(name);
+    return part;
 }
 
 std::shared_ptr<Part> Part::createSimpleFromFile(const std::string& path, const std::string& name) {
-    auto tex = std::make_shared<::nicxlive::core::Texture>(path);
-    if (!tex) return nullptr;
-    return createSimple(tex, name);
+    return createSimpleFromFileRetained(path, common::NullableString(name));
 }
 
-std::shared_ptr<Part> Part::createSimpleFromShallow(const ::nicxlive::core::ShallowTexture& shallow, const std::string& name) {
-    auto tex = std::make_shared<::nicxlive::core::Texture>(shallow);
-    if (!tex) return nullptr;
-    return createSimple(tex, name);
+std::shared_ptr<Part> Part::createSimpleFromFileRetained(const std::string& path,
+    common::NullableString name) {
+    auto texture = std::make_shared<::nicxlive::core::Texture>(path);
+    return createSimpleRetained(texture, name);
+}
+
+std::shared_ptr<Part> Part::createSimpleFromShallow(const ::nicxlive::core::ShallowTexture& shallow,
+    const std::string& name) {
+    return createSimpleFromShallowRetained(shallow, common::NullableString(name));
+}
+
+std::shared_ptr<Part> Part::createSimpleFromShallowRetained(const ::nicxlive::core::ShallowTexture& shallow,
+    common::NullableString name) {
+    auto texture = std::make_shared<::nicxlive::core::Texture>(shallow);
+    return createSimpleRetained(texture, name);
 }
 
 // Legacy free functions for convenience (D に合わせた API 互換)
@@ -140,18 +208,14 @@ std::shared_ptr<Part> inCreateSimplePart(const std::shared_ptr<::nicxlive::core:
     return part;
 }
 
-const std::string& Part::typeId() const {
-    static const std::string k = "Part";
-    return k;
+common::NullableString Part::typeId() const {
+    return common::NullableString::fromStaticLiteral("Part");
 }
 
 void Part::initPartTasks() { requireRenderTask(); }
 
 void Part::updateUVs() {
-    sharedUvResize(sharedUvs, mesh->uvs.size());
-    for (std::size_t i = 0; i < mesh->uvs.size(); ++i) {
-        sharedUvs.set(i, mesh->uvs[i]);
-    }
+    sharedUvResize(mesh->uvs, mesh->uvs.size());
     sharedUvMarkDirty();
 }
 
@@ -421,6 +485,59 @@ float Part::getValue(const std::string& key) const {
     return Drawable::getValue(key);
 }
 
+bool Part::hasParamSource(d_runtime::RetainedString sourceKey) {
+    const auto self = shared_from_this();
+    const auto key = sourceKey.view();
+    if (Drawable::hasParamSource(sourceKey)) return true;
+    return key == "alphaThreshold" || key == "opacity" ||
+           key == "tint.r" || key == "tint.g" || key == "tint.b" ||
+           key == "screenTint.r" || key == "screenTint.g" || key == "screenTint.b" ||
+           key == "emissionStrength";
+}
+
+float Part::getDefaultValueSource(d_runtime::RetainedString sourceKey) {
+    const auto self = shared_from_this();
+    const auto key = sourceKey.view();
+    float def = Drawable::getDefaultValueSource(sourceKey);
+    if (!std::isnan(def)) return def;
+    if (key == "alphaThreshold") return 0.0f;
+    if (key == "opacity" || key == "tint.r" || key == "tint.g" || key == "tint.b") return 1.0f;
+    if (key == "screenTint.r" || key == "screenTint.g" || key == "screenTint.b") return 0.0f;
+    if (key == "emissionStrength") return 1.0f;
+    return std::numeric_limits<float>::quiet_NaN();
+}
+
+bool Part::setValueSource(d_runtime::RetainedString sourceKey, float value) {
+    const auto self = shared_from_this();
+    const auto key = sourceKey.view();
+    if (Drawable::setValueSource(sourceKey, value)) return true;
+    if (key == "alphaThreshold") { offsetMaskThreshold *= value; return true; }
+    if (key == "opacity") { offsetOpacity *= value; return true; }
+    if (key == "tint.r") { offsetTint.x *= value; return true; }
+    if (key == "tint.g") { offsetTint.y *= value; return true; }
+    if (key == "tint.b") { offsetTint.z *= value; return true; }
+    if (key == "screenTint.r") { offsetScreenTint.x += value; return true; }
+    if (key == "screenTint.g") { offsetScreenTint.y += value; return true; }
+    if (key == "screenTint.b") { offsetScreenTint.z += value; return true; }
+    if (key == "emissionStrength") { offsetEmissionStrength += value; return true; }
+    return false;
+}
+
+float Part::getValueSource(d_runtime::RetainedString sourceKey) {
+    const auto self = shared_from_this();
+    const auto key = sourceKey.view();
+    if (key == "alphaThreshold") return offsetMaskThreshold;
+    if (key == "opacity") return offsetOpacity;
+    if (key == "tint.r") return offsetTint.x;
+    if (key == "tint.g") return offsetTint.y;
+    if (key == "tint.b") return offsetTint.z;
+    if (key == "screenTint.r") return offsetScreenTint.x;
+    if (key == "screenTint.g") return offsetScreenTint.y;
+    if (key == "screenTint.b") return offsetScreenTint.z;
+    if (key == "emissionStrength") return offsetEmissionStrength;
+    return Drawable::getValueSource(sourceKey);
+}
+
 bool Part::isMaskedBy(const std::shared_ptr<Drawable>& drawable) const {
     if (!drawable) return false;
     for (const auto& m : masks) {
@@ -440,6 +557,32 @@ std::ptrdiff_t Part::getMaskIdx(const std::shared_ptr<Drawable>& drawable) const
 std::ptrdiff_t Part::getMaskIdx(uint32_t uid) const {
     for (std::size_t i = 0; i < masks.size(); ++i) {
         if (masks[i].maskSrcUUID == uid) return static_cast<std::ptrdiff_t>(i);
+    }
+    return -1;
+}
+
+std::ptrdiff_t Part::getMaskIdx(std::shared_ptr<Drawable> drawable) {
+    if (!drawable) return -1;
+    const auto self = std::static_pointer_cast<Part>(shared_from_this());
+    const auto range = masks;
+    for (std::size_t index = 0; index < range.size(); ++index) {
+        const auto mask = range.retainPointer(index);
+        const auto source = mask->maskSrc.lock();
+        const auto sourceUuid = d_runtime::ngRequireObject(source)->getUUID();
+        const auto targetUuid = drawable->getUUID();
+        if (sourceUuid == targetUuid) return static_cast<std::ptrdiff_t>(index);
+    }
+    return -1;
+}
+
+std::ptrdiff_t Part::getMaskIdx(uint32_t uuid) {
+    const auto self = std::static_pointer_cast<Part>(shared_from_this());
+    const auto range = masks;
+    for (std::size_t index = 0; index < range.size(); ++index) {
+        const auto mask = range.retainPointer(index);
+        const auto source = mask->maskSrc.lock();
+        if (d_runtime::ngRequireObject(source)->getUUID() == uuid)
+            return static_cast<std::ptrdiff_t>(index);
     }
     return -1;
 }
@@ -489,7 +632,7 @@ void Part::syncTextureIds() {
             }
         }
     }
-    if (textureIds.size() < textures.size()) textureIds.resize(textures.size(), -1);
+    while (textureIds.size() < textures.size()) textureIds.push_back(-1);
 
     if (inpMode) {
         if (pup) {
@@ -562,7 +705,7 @@ void Part::drawOneDirect(bool forMasking) {
 }
 
 void Part::fillDrawPacket(const Node& header, PartDrawPacket& packet, bool isMask) const {
-    packet.renderable = enabled && opacity > 0.0f && mesh->isReady();
+    packet.renderable = enabled && mesh->isReady();
     packet.modelMatrix = immediateModelMatrix();
     auto renderSpace = currentRenderSpace();
     packet.renderMatrix = renderSpace.matrix;
@@ -614,6 +757,7 @@ void Part::fillDrawPacket(const Node& header, PartDrawPacket& packet, bool isMas
                          static_cast<unsigned>(packet.deformAtlasStride));
         }
     }
+    packet.textureCount = static_cast<uint32_t>(std::min<std::size_t>(textures.size(), 3));
     for (std::size_t i = 0; i < textures.size() && i < 3; ++i) {
         std::shared_ptr<::nicxlive::core::Texture> tex = textures[i];
         if (tex) {
@@ -678,7 +822,7 @@ void Part::fillDrawPacket(const Node& header, PartDrawPacket& packet, bool isMas
     if (packet.indexBuffer != 0 && !mesh->indices.empty()) {
         if (auto qb = std::dynamic_pointer_cast<core::render::QueueRenderBackend>(core::getCurrentRenderBackend())) {
             if (!qb->hasDrawableIndices(packet.indexBuffer)) {
-                qb->uploadDrawableIndices(packet.indexBuffer, mesh->indices);
+                qb->uploadDrawableIndices(packet.indexBuffer, std::vector<uint16_t>(mesh->indices.begin(), mesh->indices.end()));
             }
         }
     }
@@ -726,9 +870,9 @@ bool Part::backendRenderable() const { return enabled && mesh->isReady(); }
 
 std::size_t Part::backendMaskCount() const { return masks.size(); }
 
-std::vector<MaskBinding> Part::backendMasks() const { return masks; }
+std::vector<MaskBinding> Part::backendMasks() const { if (masks.empty()) return {}; return {masks.begin(), masks.end()}; }
 
-static std::size_t maskCount(const std::vector<MaskBinding>& masks) {
+static std::size_t maskCount(const common::SharedArray<MaskBinding>& masks) {
     std::size_t c = 0;
     for (const auto& m : masks) {
         if (m.maskSrc.expired()) continue;
@@ -749,7 +893,7 @@ void Part::finalize() {
                 valid.push_back(m);
             }
         }
-        masks = std::move(valid);
+        masks = valid.empty() ? common::SharedArray<MaskBinding>{} : common::SharedArray<MaskBinding>(std::move(valid));
         // Resolve texture pointers from slot IDs at finalize time.
         // During node deserialize, puppet texture slots may not be ready yet.
         for (std::size_t i = 0; i < textureIds.size() && i < textures.size(); ++i) {
@@ -767,12 +911,16 @@ void Part::setOneTimeTransform(const std::shared_ptr<Mat4>& transform) {
 }
 
 void Part::normalizeUV(void* dataPtr) {
-    auto* data = reinterpret_cast<MeshData*>(dataPtr);
-    if (!data || textures.empty() || !textures[0]) return;
-    float w = static_cast<float>(textures[0]->width());
-    float h = static_cast<float>(textures[0]->height());
-    if (w == 0.0f || h == 0.0f) return;
-    for (auto& uv : data->uvs) {
+    auto* data = static_cast<MeshData*>(dataPtr);
+    const auto texture = textures[0];
+    if (!texture || texture->width() == 0 || texture->height() == 0) {
+        Drawable::normalizeUV(dataPtr);
+        return;
+    }
+    float w = static_cast<float>(texture->width());
+    float h = static_cast<float>(texture->height());
+    for (std::size_t i=0; i<data->uvs.size(); ++i) {
+        auto uv=data->uvs[i];
         uv.x /= w;
         uv.y /= h;
         uv.x += 0.5f;
@@ -780,7 +928,7 @@ void Part::normalizeUV(void* dataPtr) {
     }
 }
 
-static std::vector<MaskBinding> dedupMasks(const std::vector<MaskBinding>& masks) {
+static std::vector<MaskBinding> dedupMasks(const common::SharedArray<MaskBinding>& masks) {
     std::vector<MaskBinding> out;
     std::set<uint64_t> seen;
     for (const auto& m : masks) {
@@ -855,23 +1003,190 @@ void Part::enqueueRenderCommands(core::RenderContext& ctx, const std::function<v
 }
 
 void Part::copyFrom(const Node& src, bool clone, bool deepCopy) {
+    if (dynamic_cast<const DynamicComposite*>(&src) && !dynamic_cast<DynamicComposite*>(this)) deepCopy = false;
     Drawable::copyFrom(src, clone, deepCopy);
     if (auto p = dynamic_cast<const Part*>(&src)) {
+        offsetMaskThreshold = 0;
+        offsetOpacity = 1;
+        offsetEmissionStrength = 1;
+        offsetTint = Vec3{0, 0, 0};
+        offsetScreenTint = Vec3{0, 0, 0};
         textures = p->textures;
-        textureIds = p->textureIds;
-        masks = p->masks;
+        textureIds = p->textureIds.duplicate();
+        masks = p->masks.duplicate();
         blendMode = p->blendMode;
         maskAlphaThreshold = p->maskAlphaThreshold;
         opacity = p->opacity;
         emissionStrength = p->emissionStrength;
         tint = p->tint;
         screenTint = p->screenTint;
-        offsetMaskThreshold = 0;
-        offsetOpacity = 1;
-        offsetEmissionStrength = 1;
-        offsetTint = Vec3{1, 1, 1};
-        offsetScreenTint = Vec3{0, 0, 0};
     }
 }
 
+void MaskBinding::serialize(::nicxlive::core::serde::TypedJsonWriter& serializer) const {
+    const auto object = serializer.structBegin();
+    serializer.putField("source", maskSrcUUID);
+    serializer.putKey("mode");
+    ::nicxlive::core::serde::serializeValue(serializer, mode);
+    serializer.structEnd(object);
+}
+
+::nicxlive::core::serde::ReadError MaskBinding::deserializeFromFghj(::nicxlive::core::serde::TypedJsonView data) {
+    namespace serde = ::nicxlive::core::serde;
+    if (data.kind() != serde::JsonKind::Object) {
+        static constexpr const char* names[] = {"null_", "false_", "number", "string", "array", "object"};
+        const auto kind = data.kind() == serde::JsonKind::Boolean && data.boolean() ? "true_" :
+            names[static_cast<unsigned>(data.kind())];
+        return "Cann't deserialize MaskBinding. Unexpected data: " + std::string(kind);
+    }
+    unsigned seen = 0;
+    for (const auto& [key, field] : data.members()) {
+        const auto flag = key == "source" ? 1u : key == "mode" ? 2u : 0u;
+        const auto member = flag == 1 ? "maskSrcUUID" : "mode";
+        if (seen & flag)
+            return "ASDF deserialisation: multiple keys for member '" + std::string(member) + "' in MaskBinding are not allowed.";
+        seen |= flag;
+        serde::ReadError error;
+        if (key == "source") error = serde::deserializeValue(field, maskSrcUUID);
+        else if (key == "mode") error = serde::deserializeValue(field, mode);
+        if (error) return error;
+    }
+    if (!(seen & 1)) return "FGHJ deserialisation: non-optional member 'maskSrcUUID' in MaskBinding is missing.";
+    if (!(seen & 2)) return "FGHJ deserialisation: non-optional member 'mode' in MaskBinding is missing.";
+    return {};
+}
+
+} // namespace nicxlive::core::nodes
+
+namespace nicxlive::core::serde {
+namespace {
+constexpr std::array<std::string_view, 19> partBlendNames{
+    "Normal", "Multiply", "Screen", "Overlay", "Darken", "Lighten", "ColorDodge",
+    "LinearDodge", "AddGlow", "ColorBurn", "HardLight", "SoftLight", "Difference",
+    "Exclusion", "Subtract", "Inverse", "DestinationIn", "ClipToLower", "SliceFromLower"};
+constexpr std::array<std::string_view, 2> partMaskNames{"Mask", "DodgeMask"};
+template<class E, std::size_t N>
+void serializePartEnum(TypedJsonWriter& serializer, E value, const std::array<std::string_view, N>& names) {
+    const auto index = static_cast<unsigned>(value);
+    if (index >= N) throw std::logic_error("Invalid part enum value");
+    serializer.putValue(names[index]);
+}
+template<class E, std::size_t N>
+ReadError deserializePartEnum(TypedJsonView data, E& value,
+    const std::array<std::string_view, N>& names, std::string_view typeName) {
+    std::optional<std::string> text;
+    (void)deserializeValue(data, text);
+    for (std::size_t i = 0; i < N; ++i) {
+        if (text && *text == names[i]) { value = static_cast<E>(i); return {}; }
+    }
+    throw JsonConversionError("Unable to deserialize string '" + text.value_or("") + "' to " +
+        std::string(typeName) + "Allowed keys:allowedKeys");
+}
+} // namespace
+void serializeValue(TypedJsonWriter& serializer, nodes::BlendMode value) {
+    serializePartEnum(serializer, value, partBlendNames);
+}
+void serializeValue(TypedJsonWriter& serializer, nodes::MaskingMode value) {
+    serializePartEnum(serializer, value, partMaskNames);
+}
+ReadError deserializeValue(TypedJsonView data, nodes::BlendMode& value) {
+    return deserializePartEnum(data, value, partBlendNames, "BlendMode");
+}
+ReadError deserializeValue(TypedJsonView data, nodes::MaskingMode& value) {
+    return deserializePartEnum(data, value, partMaskNames, "MaskingMode");
+}
+} // namespace nicxlive::core::serde
+
+namespace nicxlive::core::nodes {
+void Part::serializeSelfImpl(serde::TypedJsonWriter& serializer, bool recursive, SerializeNodeFlags flags) const {
+    Drawable::serializeSelfImpl(serializer, recursive, flags);
+    if (has_flag(flags, SerializeNodeFlags::Links) && ::nicxlive::core::fmt::inIsINPMode()) {
+        serializer.putKey("textures");
+        const auto list = serializer.listBegin();
+        for (const auto& texture : textures) {
+            std::size_t index = std::numeric_limits<std::uint32_t>::max();
+            if (texture) {
+                const auto owner = puppetRef();
+                if (!owner) throw std::runtime_error("Null Puppet while serializing Part textures");
+                const auto slot = owner->getTextureSlotIndexFor(texture);
+                if (slot >= 0) index = static_cast<std::size_t>(slot);
+            }
+            serializer.elemBegin(); serializer.putValue(index);
+        }
+        serializer.listEnd(list);
+    }
+    if (has_flag(flags, SerializeNodeFlags::State)) {
+        serializer.putKey("blend_mode"); serde::serializeValue(serializer, blendMode);
+        auto vector = [&](const char* key, const Vec3& value) {
+            serializer.putKey(key); const auto list = serializer.listBegin();
+            for (float element : {value.x, value.y, value.z}) { serializer.elemBegin(); serializer.putValue(element); }
+            serializer.listEnd(list);
+        };
+        vector("tint", tint); vector("screenTint", screenTint);
+        serializer.putField("emissionStrength", emissionStrength);
+    }
+    if (has_flag(flags, SerializeNodeFlags::Links) && !masks.empty()) {
+        serializer.putKey("masks"); const auto list = serializer.listBegin();
+        for (const auto& mask : masks) { serializer.elemBegin(); mask.serialize(serializer); }
+        serializer.listEnd(list);
+    }
+    if (has_flag(flags, SerializeNodeFlags::State)) {
+        serializer.putField("mask_threshold", maskAlphaThreshold);
+        serializer.putField("opacity", opacity);
+    }
+}
+serde::ReadError Part::deserializeFromFghj(serde::TypedJsonView data) {
+    (void)Drawable::deserializeFromFghj(data);
+    auto elements = [](serde::TypedJsonView value) {
+        if (value.isMissing() || value.kind() != serde::JsonKind::Array)
+            return std::vector<serde::TypedJsonView>{};
+        return value.elements();
+    };
+    if (::nicxlive::core::fmt::inIsINPMode()) {
+        std::size_t i = 0;
+        for (const auto element : elements(data.findFirst("textures"))) {
+            std::uint32_t id = 0;
+            (void)serde::deserializeValue(element, id);
+            if (id == std::numeric_limits<std::uint32_t>::max()) continue;
+            textureIds.push_back(static_cast<std::int32_t>(id));
+            textures.at(i++) = ::nicxlive::core::inGetTextureFromId(id);
+        }
+    } else throw std::runtime_error("Loading from texture path is deprecated.");
+    (void)serde::deserializeValue(data.findFirst("opacity"), opacity);
+    (void)serde::deserializeValue(data.findFirst("mask_threshold"), maskAlphaThreshold);
+    auto vector = [&](serde::TypedJsonView input, Vec3& value) {
+        if (input.isMissing() || input.kind() == serde::JsonKind::Null) return;
+        if (input.kind() != serde::JsonKind::Array) throw serde::JsonConversionError("Expected a numeric vector array");
+        const auto elements = input.elements();
+        const std::array<float*, 3> coordinates{&value.x, &value.y, &value.z};
+        for (std::size_t i = 0; i < elements.size() && i < coordinates.size(); ++i)
+            if (serde::deserializeNumber(elements[i], *coordinates[i])) return;
+    };
+    if (!data.findFirst("tint").isMissing()) vector(data.findFirst("tint"), tint);
+    if (!data.findFirst("screenTint").isMissing()) vector(data.findFirst("screenTint"), screenTint);
+    if (!data.findFirst("emissionStrength").isMissing())
+        if (auto error = serde::deserializeNumber(data.findFirst("emissionStrength"), emissionStrength)) return error;
+    if (!data.findFirst("blend_mode").isMissing()) (void)serde::deserializeValue(data.findFirst("blend_mode"), blendMode);
+    if (!data.findFirst("masked_by").isMissing()) {
+        MaskingMode mode = MaskingMode::Mask;
+        (void)serde::deserializeValue(data.findFirst("mask_mode"), mode);
+        for (const auto element : elements(data.findFirst("masked_by"))) {
+            std::uint32_t uuid = 0;
+            if (auto error = serde::deserializeValue(element, uuid)) return error;
+            masks.push_back({uuid, {}, mode});
+        }
+    }
+    if (!data.findFirst("masks").isMissing()) (void)serde::deserializeValue(data.findFirst("masks"), masks);
+    updateUVs();
+    return {};
+}
+void Part::serializePartial(serde::TypedJsonWriter& serializer, bool recursive) const {
+    Drawable::serializePartial(serializer, recursive);
+    serializer.putKey("textureUUIDs"); const auto list = serializer.listBegin();
+    for (const auto& texture : textures) {
+        const std::uint32_t uuid = texture ? texture->getRuntimeUUID() : std::numeric_limits<std::uint32_t>::max();
+        serializer.elemBegin(); serializer.putValue(static_cast<std::size_t>(uuid));
+    }
+    serializer.listEnd(list);
+}
 } // namespace nicxlive::core::nodes

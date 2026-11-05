@@ -59,7 +59,7 @@ bool tryMakeMaskApplyPacket(const std::shared_ptr<nodes::Drawable>& drawable, bo
         const auto& mesh = mask->getMesh();
         if (!indexRangeValid(mesh)) return false;
         if (packet.maskPacket.indexCount == 0 || packet.maskPacket.indexBuffer == 0) {
-            NJCX_DBG_LOG("[nicxlive] tryMakeMaskApplyPacket skip: mask index buffer invalid ibo=%u idxCount=%u\n",
+            NJCX_DBG_LOG("[nicxlive] tryMakeMaskApplyPacket skip: mask index buffer invalid ibo=%zu idxCount=%u\n",
                          packet.maskPacket.indexBuffer,
                          packet.maskPacket.indexCount);
             return false;
@@ -73,7 +73,7 @@ bool tryMakeMaskApplyPacket(const std::shared_ptr<nodes::Drawable>& drawable, bo
         const auto& mesh = part->getMesh();
         if (!indexRangeValid(mesh)) return false;
         if (packet.partPacket.indexCount == 0 || packet.partPacket.indexBuffer == 0) {
-            NJCX_DBG_LOG("[nicxlive] tryMakeMaskApplyPacket skip: part index buffer invalid ibo=%u idxCount=%u\n",
+            NJCX_DBG_LOG("[nicxlive] tryMakeMaskApplyPacket skip: part index buffer invalid ibo=%zu idxCount=%u\n",
                          packet.partPacket.indexBuffer,
                          packet.partPacket.indexCount);
             return false;

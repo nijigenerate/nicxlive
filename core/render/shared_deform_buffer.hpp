@@ -2,12 +2,15 @@
 
 #include "../nodes/common.hpp"
 
+#include <array>
 #include <cstddef>
 #include <memory>
 #include <cstdint>
 namespace nicxlive::core { class RenderBackend; }
 
 namespace nicxlive::core::render {
+
+std::array<std::uint64_t, 6> ngSharedRenderAtlasMemoryInfo();
 
 
 // D: nijilive.core.render.shared_deform_buffer

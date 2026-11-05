@@ -167,6 +167,16 @@ SharedVecAtlas vertexAtlas;
 SharedVecAtlas uvAtlas;
 } // namespace
 
+std::array<std::uint64_t, 6> ngSharedRenderAtlasMemoryInfo() {
+    // Native registration is retired synchronously; there is no D GC-finalizer pending list.
+    return {static_cast<std::uint64_t>(deformAtlas.bindings.size()),
+        static_cast<std::uint64_t>(vertexAtlas.bindings.size()),
+        static_cast<std::uint64_t>(uvAtlas.bindings.size()),
+        static_cast<std::uint64_t>(deformAtlas.storage.size()) * 2 * sizeof(float),
+        static_cast<std::uint64_t>(vertexAtlas.storage.size()) * 2 * sizeof(float),
+        static_cast<std::uint64_t>(uvAtlas.storage.size()) * 2 * sizeof(float)};
+}
+
 void sharedDeformRegister(Vec2Array& target, std::size_t* offsetSink) { deformAtlas.registerArray(target, offsetSink); }
 void sharedDeformUnregister(Vec2Array& target) { deformAtlas.unregisterArray(target); }
 void sharedDeformResize(Vec2Array& target, std::size_t newLength) { deformAtlas.resizeArray(target, newLength); }
@@ -195,14 +205,14 @@ void sharedUvMarkDirty() { uvAtlas.markDirty(); }
 void sharedUvMarkUploaded() { uvAtlas.markUploaded(); }
 
 namespace {
-struct Retirement { std::weak_ptr<RenderBackend> backend; uint32_t handle; };
+struct Retirement { std::weak_ptr<RenderBackend> backend; std::size_t handle; };
 struct RetirementQueue { std::mutex mutex; std::vector<Retirement> items; };
 // Remains valid during late global/TLS Drawable destruction; no backend is owned.
 RetirementQueue& retirements() { static auto* queue=new RetirementQueue;return *queue; }
 }
 namespace detail {
 static void uploadDirtySharedBuffers(const std::shared_ptr<RenderBackend>& backend);
-void enqueueDrawableRelease(std::weak_ptr<RenderBackend> backend,uint32_t handle) {
+void enqueueDrawableRelease(std::weak_ptr<RenderBackend> backend,std::size_t handle) {
     if(!handle || backend.expired())return;
     auto& queue=retirements();std::lock_guard lock(queue.mutex);
     queue.items.push_back({std::move(backend),handle});

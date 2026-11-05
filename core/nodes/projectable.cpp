@@ -1,4 +1,5 @@
 #include "projectable.hpp"
+#include "node_task_sort.hpp"
 
 #include <algorithm>
 #include <set>
@@ -17,8 +18,42 @@ bool traceDynamicMatrixEnabled() {
 }
 }
 
+void Projectable::normalizeUV(void* dataPointer) {
+    auto& data = *static_cast<MeshData*>(dataPointer);
+    data.uvs.resize(data.vertices.size());
+    if (data.uvs.empty()) return;
+    const auto firstVertex = data.vertices[0].toVector();
+    float minX = firstVertex.x, maxX = minX;
+    float minY = firstVertex.y, maxY = minY;
+    for (std::size_t i = 1; i < data.vertices.size(); ++i) {
+        const auto vertex = data.vertices[i].toVector();
+        minX = std::min(minX, vertex.x); maxX = std::max(maxX, vertex.x);
+        minY = std::min(minY, vertex.y); maxY = std::max(maxY, vertex.y);
+    }
+    float width = maxX - minX, height = maxY - minY;
+    // The native absent bounds represent the source's initial NaN bounds.
+    if (autoResizedMesh && bounds) {
+        const float boundsWidth = (*bounds)[2] - (*bounds)[0];
+        const float boundsHeight = (*bounds)[3] - (*bounds)[1];
+        if (width < boundsWidth) width = boundsWidth;
+        if (height < boundsHeight) height = boundsHeight;
+    }
+    const float centerX = (minX + maxX) / 2.0f / width;
+    const float centerY = (minY + maxY) / 2.0f / height;
+    for (std::size_t i = 0; i < data.uvs.size(); ++i) {
+        const auto vertex = data.vertices[i].toVector();
+        data.uvs[i].x = vertex.x / width; data.uvs[i].y = vertex.y / height;
+        data.uvs[i].x += 0.5f - centerX; data.uvs[i].y += 0.5f - centerY;
+    }
+}
+
+void ngAdvanceProjectableFrameSource() {
+    ++gProjectableFrameCounter;
+}
+
 std::size_t advanceProjectableFrame() {
-    return ++gProjectableFrameCounter;
+    ngAdvanceProjectableFrameSource();
+    return gProjectableFrameCounter;
 }
 
 std::size_t currentProjectableFrame() {
@@ -76,7 +111,7 @@ void Projectable::scanParts() {
     boundsDirty = true;
 }
 
-void Projectable::scanSubParts(const std::vector<std::shared_ptr<Node>>& childNodes) {
+void Projectable::scanSubParts(Node::ChildArray childNodes) {
     subParts.clear();
     maskParts.clear();
     for (auto& child : childNodes) {
@@ -121,7 +156,7 @@ Transform Projectable::fullTransform() const {
     self->localTransform.update();
     self->offsetTransform.update();
     Transform base = self->localTransform.calcOffset(self->offsetTransform);
-    if (lockToRootValue()) {
+    if (self->lockToRootValue()) {
         if (auto pup = puppetRef()) {
             if (auto root = pup->root) {
                 return base * root->localTransform;
@@ -169,9 +204,9 @@ Vec4 Projectable::boundsFromMatrix(const std::shared_ptr<Part>& child, const Mat
     float tx = matrix[0][3];
     float ty = matrix[1][3];
     Vec4 bounds{tx, ty, tx, ty};
-    if (!child || child->vertices.size() == 0) return bounds;
-    for (std::size_t i = 0; i < child->vertices.size(); ++i) {
-        Vec2 local = child->vertices[i];
+    if (!child || child->getVertices().size() == 0) return bounds;
+    for (std::size_t i = 0; i < child->getVertices().size(); ++i) {
+        Vec2 local = child->getVertices()[i];
         if (i < child->deformation.size()) {
             auto d = child->deformation[i];
             local.x += d.x;
@@ -382,7 +417,7 @@ bool Projectable::createSimpleMesh() {
 
     if (resizing) {
         MeshData data;
-        data.vertices = vertexArray;
+        data.vertices.assign(vertexArray);
         data.uvs = {Vec2{0, 0}, Vec2{0, 1}, Vec2{1, 0}, Vec2{1, 1}};
         data.indices = {0, 1, 2, 2, 1, 3};
         data.origin = Vec2{0, 0};
@@ -400,7 +435,7 @@ bool Projectable::createSimpleMesh() {
                              std::abs(newTextureOffset.y - textureOffset.y) > TextureOffsetEpsilon;
         if (offsetChanged) {
             textureInvalidated = true;
-            mesh->vertices = vertexArray;
+            mesh->vertices.assign(vertexArray);
             mesh->indices = {0, 1, 2, 2, 1, 3};
             shouldUpdateVertices = true;
             autoResizedSize = Vec2{bounds.z - bounds.x, bounds.w - bounds.y};
@@ -512,9 +547,10 @@ bool Projectable::initTarget() {
     Vec2 minPos{};
     Vec2 maxPos{};
     bool first = true;
-    const std::size_t count = vertices.size();
+    const auto& meshVertices = getVertices();
+    const std::size_t count = meshVertices.size();
     for (std::size_t i = 0; i < count; ++i) {
-        Vec2 pos = vertices[i];
+        Vec2 pos = meshVertices[i];
         if (i < deformation.size()) {
             auto d = deformation[i];
             pos.x += d.x;
@@ -543,9 +579,13 @@ bool Projectable::initTarget() {
     textureOffset = Vec2{(b[0]+b[2])/2.0f, (b[1]+b[3])/2.0f};
     textureOffset.x += deformOffset.x - t.translation.x;
     textureOffset.y += deformOffset.y - t.translation.y;
-    textures = {};
-    textures[0] = std::make_shared<Texture>(static_cast<int>(texWidth), static_cast<int>(texHeight));
-    stencil = std::make_shared<Texture>(static_cast<int>(texWidth), static_cast<int>(texHeight), 1, true);
+    {
+        // Source constructs the full literal before replacing any existing fixed-array slot.
+        const auto replacement = Texture::createSource(static_cast<int>(texWidth), static_cast<int>(texHeight), 4, false, false);
+        [[maybe_unused]] const auto previous = textures;
+        textures = {replacement, nullptr, nullptr};
+    }
+    stencil = Texture::createSource(static_cast<int>(texWidth), static_cast<int>(texHeight), 1, true, false);
     if (prevTexture) prevTexture->dispose();
     if (prevStencil) prevStencil->dispose();
     if (offscreenSurface) {
@@ -777,6 +817,59 @@ void Projectable::renderNestedOffscreen(core::RenderContext& ctx) {
     dynamicRenderEnd(ctx);
 }
 
+void Projectable::registerRenderTasks(std::shared_ptr<core::TaskScheduler> scheduler) {
+    if (!scheduler) return;
+    const auto self = std::static_pointer_cast<Projectable>(shared_from_this());
+    scheduler->addTask(core::TaskOrder::Init, core::TaskKind::Init,
+        [self](core::RenderContext& ctx) { self->runBeginTask(ctx); });
+    scheduler->addTask(core::TaskOrder::PreProcess, core::TaskKind::PreProcess,
+        [self](core::RenderContext& ctx) { self->runPreProcessTask(ctx); });
+    scheduler->addTask(core::TaskOrder::Dynamic, core::TaskKind::Dynamic,
+        [self](core::RenderContext& ctx) { self->runDynamicTask(ctx); });
+    scheduler->addTask(core::TaskOrder::Post0, core::TaskKind::PostProcess,
+        [self](core::RenderContext& ctx) { self->runPostTask0(ctx); });
+    scheduler->addTask(core::TaskOrder::Post1, core::TaskKind::PostProcess,
+        [self](core::RenderContext& ctx) { self->runPostTask1(ctx); });
+    scheduler->addTask(core::TaskOrder::Post2, core::TaskKind::PostProcess,
+        [self](core::RenderContext& ctx) { self->runPostTask2(ctx); });
+    const bool allowRenderTasks = !hasProjectableAncestor(self);
+    if (allowRenderTasks) {
+        scheduler->addTask(core::TaskOrder::RenderBegin, core::TaskKind::Render,
+            [self](core::RenderContext& ctx) { self->runRenderBeginTask(ctx); });
+        scheduler->addTask(core::TaskOrder::Render, core::TaskKind::Render,
+            [self](core::RenderContext& ctx) { self->runRenderTask(ctx); });
+    }
+    scheduler->addTask(core::TaskOrder::Final, core::TaskKind::Finalize,
+        [self](core::RenderContext& ctx) { self->runFinalTask(ctx); });
+    auto orderedChildren = children.duplicate();
+    if (orderedChildren.size() > 1) node_task_sort::sort(orderedChildren);
+    for (auto child : orderedChildren)
+        core::d_runtime::ngRequireObject(child)->registerRenderTasks(scheduler);
+    if (allowRenderTasks) {
+        scheduler->addTask(core::TaskOrder::RenderEnd, core::TaskKind::Render,
+            [self](core::RenderContext& ctx) { self->runRenderEndTask(ctx); });
+    }
+}
+
+void Projectable::registerDelegatedTasks(std::shared_ptr<core::TaskScheduler> scheduler) {
+    if (!scheduler) return;
+    const auto self = std::static_pointer_cast<Projectable>(shared_from_this());
+    scheduler->addTask(core::TaskOrder::Init, core::TaskKind::Init,
+        [self](core::RenderContext& ctx) { self->runBeginTask(ctx); });
+    scheduler->addTask(core::TaskOrder::PreProcess, core::TaskKind::PreProcess,
+        [self](core::RenderContext& ctx) { self->runPreProcessTask(ctx); });
+    scheduler->addTask(core::TaskOrder::Dynamic, core::TaskKind::Dynamic,
+        [self](core::RenderContext& ctx) { self->runDynamicTask(ctx); });
+    scheduler->addTask(core::TaskOrder::Post0, core::TaskKind::PostProcess,
+        [self](core::RenderContext& ctx) { self->runPostTask0(ctx); });
+    scheduler->addTask(core::TaskOrder::Post1, core::TaskKind::PostProcess,
+        [self](core::RenderContext& ctx) { self->runPostTask1(ctx); });
+    scheduler->addTask(core::TaskOrder::Post2, core::TaskKind::PostProcess,
+        [self](core::RenderContext& ctx) { self->runPostTask2(ctx); });
+    scheduler->addTask(core::TaskOrder::Final, core::TaskKind::Finalize,
+        [self](core::RenderContext& ctx) { self->runFinalTask(ctx); });
+}
+
 void Projectable::registerRenderTasks(core::TaskScheduler& scheduler) {
     scheduler.addTask(core::TaskOrder::Init, core::TaskKind::Init, [this](core::RenderContext& ctx) { runBeginTask(ctx); });
     scheduler.addTask(core::TaskOrder::PreProcess, core::TaskKind::PreProcess, [this](core::RenderContext& ctx) { runPreProcessTask(ctx); });
@@ -793,11 +886,13 @@ void Projectable::registerRenderTasks(core::TaskScheduler& scheduler) {
 
     scheduler.addTask(core::TaskOrder::Final, core::TaskKind::Finalize, [this](core::RenderContext& ctx) { runFinalTask(ctx); });
 
-    auto orderedChildren = childrenRef();
-    std::sort(orderedChildren.begin(), orderedChildren.end(), [](const std::shared_ptr<Node>& a, const std::shared_ptr<Node>& b) {
-        if (!a || !b) return false;
-        return a->zSort() > b->zSort();
-    });
+    auto orderedChildren = childrenRef().duplicate();
+    if (orderedChildren.size() > 1) {
+        std::sort(orderedChildren.begin(), orderedChildren.end(), [](const std::shared_ptr<Node>& a, const std::shared_ptr<Node>& b) {
+            if (!a || !b) return false;
+            return a->zSort() > b->zSort();
+        });
+    }
     for (auto& child : orderedChildren) {
         if (child) child->registerRenderTasks(scheduler);
     }
@@ -945,6 +1040,30 @@ void Projectable::rebuffer(const MeshData& data) {
     notifyChange(shared_from_this(), NotifyReason::Transformed);
 }
 
+void Projectable::copyFrom(const Node& src, bool clone, bool deepCopy) {
+    Part::copyFrom(src, clone, deepCopy);
+    normalizeUV(&Drawable::getMesh());
+    rebuffer(Drawable::getMesh());
+    textures = {nullptr, nullptr, nullptr};
+    initialized = false;
+    if (const auto* projectable = dynamic_cast<const Projectable*>(&src)) {
+        autoResizedMesh = projectable->autoResizedMesh;
+        if (autoResizedMesh) {
+            createSimpleMesh();
+            updateBounds();
+            boundsDirty = false;
+        }
+    } else {
+        autoResizedMesh = false;
+        if (Drawable::getMesh().vertices.empty()) {
+            autoResizedMesh = true;
+            createSimpleMesh();
+            updateBounds();
+            boundsDirty = false;
+        }
+    }
+}
+
 bool Projectable::setupChild(const std::shared_ptr<Node>& child) {
     setIgnorePuppetRecurse(child, true);
     scanSubParts(childrenRef());
@@ -957,7 +1076,7 @@ bool Projectable::setupChild(const std::shared_ptr<Node>& child) {
 
 bool Projectable::releaseChild(const std::shared_ptr<Node>& child) {
     setIgnorePuppetRecurse(child, false);
-    auto remaining = childrenRef();
+    auto remaining = childrenRef().duplicate();
     remaining.erase(std::remove_if(remaining.begin(), remaining.end(), [&](const std::shared_ptr<Node>& node) {
         return node == child;
     }), remaining.end());

@@ -1,3 +1,4 @@
+#include <span>
 // unity_native: C API bridging for Unity plugin (queue backend path)
 
 #include "unity_native.hpp"
@@ -331,15 +332,15 @@ static void packVec2Array(const ::nicxlive::core::nodes::Vec2Array& src, std::ve
     }
 }
 
-static const std::vector<uint16_t>* resolvePacketIndices(const RendererCtx& ctx, const nodes::PartDrawPacket& packet) {
+static std::span<const uint16_t> resolvePacketIndices(const RendererCtx& ctx, const nodes::PartDrawPacket& packet) {
     if (auto idxBuf = ctx.backend->getDrawableIndices(packet.indexBuffer); idxBuf && !idxBuf->empty()) {
-        return idxBuf;
+        return *idxBuf;
     }
     auto node = packet.node.lock();
     if (!node || node->mesh->indices.empty()) {
-        return nullptr;
+        return {};
     }
-    return &node->mesh->indices;
+    return {node->mesh->indices.data(), node->mesh->indices.size()};
 }
 
 static size_t resolvePacketTextureHandle(const RendererCtx& ctx, const nodes::PartDrawPacket& packet, std::size_t textureIndex) {
@@ -418,9 +419,9 @@ static void packPartPacket(RendererCtx& ctx, const nodes::PartDrawPacket& src, N
     dst.deformAtlasStride = src.deformAtlasStride;
     dst.indexHandle = src.indexBuffer;
 
-    if (const auto* indices = resolvePacketIndices(ctx, src); indices && !indices->empty()) {
-        dst.indexCount = (std::min<std::size_t>)(src.indexCount, indices->size());
-        dst.indices = indices->data();
+    if (const auto indices = resolvePacketIndices(ctx, src); !indices.empty()) {
+        dst.indexCount = (std::min<std::size_t>)(src.indexCount, indices.size());
+        dst.indices = indices.data();
     } else {
         dst.indexCount = 0;
         dst.indices = nullptr;
@@ -793,7 +794,7 @@ NjgResult njgGetPuppetExtData(void* puppetHandle, const char* key, const uint8_t
     auto found = pup->extData.find(key);
     if (found == pup->extData.end() || found->second.empty()) return NjgResult::Failure;
     thread_local std::vector<uint8_t> extScratch;
-    extScratch = found->second;
+    extScratch.assign(found->second.begin(), found->second.end());
     *outData = extScratch.data();
     *outLength = extScratch.size();
     return NjgResult::Ok;
@@ -1139,11 +1140,6 @@ void njgFlushCommandBuffer(void* renderer) {
     auto it = gRenderers.find(renderer);
     if (it == gRenderers.end()) return;
     it->second->queued.clear();
-}
-
-size_t njgGetGcHeapSize() {
-    // D exposes GC.usedSize; C++ runtime has no equivalent GC heap metric.
-    return 0;
 }
 
 TextureStats njgGetTextureStats(void* renderer) {

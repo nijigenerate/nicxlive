@@ -2,12 +2,13 @@
 
 #include "../nodes/common.hpp"
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 
 namespace nicxlive::core::nodes {
 
-using RenderResourceHandle = uint32_t;
+using RenderResourceHandle = std::size_t;
 
 struct PartDrawPacket {
     Mat4 modelMatrix{Mat4::identity()};
@@ -36,6 +37,7 @@ struct PartDrawPacket {
     uint32_t indexCount{0};
     RenderResourceHandle indexBuffer{0};
     uint32_t textureUUIDs[3]{};
+    uint32_t textureCount{0};
     uint32_t textureBackendIds[3]{};
     std::weak_ptr<class Part> node{};
 };
@@ -44,10 +46,10 @@ struct MaskDrawPacket {
     Mat4 modelMatrix{Mat4::identity()};
     Mat4 mvp{Mat4::identity()};
     Vec2 origin{};
-    uint32_t vertexOffset{0};
-    uint32_t vertexAtlasStride{0};
-    uint32_t deformOffset{0};
-    uint32_t deformAtlasStride{0};
+    std::size_t vertexOffset{0};
+    std::size_t vertexAtlasStride{0};
+    std::size_t deformOffset{0};
+    std::size_t deformAtlasStride{0};
     uint32_t vertexCount{0};
     uint32_t indexCount{0};
     RenderResourceHandle indexBuffer{0};

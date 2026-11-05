@@ -3,6 +3,8 @@
 #include "../nodes/common.hpp"
 
 #include <vector>
+#include "../common/shared_array.hpp"
+#include <memory>
 
 namespace nicxlive::core::nodes {
 struct MeshData;
@@ -32,5 +34,22 @@ bool nlCalculateTransformInTriangle(const ::nicxlive::core::nodes::Vec2Array& ve
                                     ::nicxlive::core::nodes::Vec2& targetPrime,
                                     float& rotVert,
                                     float& rotHorz);
+// Actual Source descriptor entry points; legacy vector APIs above remain available.
+bool ngIsPointInTriangleSource(::nicxlive::core::nodes::Vec2 point,
+    const ::nicxlive::core::nodes::Vec2Array triangle);
+::nicxlive::core::common::SharedArray<int> ngFindSurroundingTriangleSource(
+    ::nicxlive::core::nodes::Vec2 point, ::nicxlive::core::nodes::MeshData& mesh);
+::nicxlive::core::nodes::Vec2 ngCalcOffsetInTriangleCoordsSource(
+    ::nicxlive::core::nodes::Vec2 point,
+    ::nicxlive::core::nodes::MeshData& mesh,
+    ::nicxlive::core::common::SharedArray<int>& triangle);
+::nicxlive::core::common::SharedArray<int> findSurroundingTriangle(
+    ::nicxlive::core::nodes::Vec2 point,
+    std::shared_ptr<::nicxlive::core::nodes::MeshData> mesh);
+bool nlCalculateTransformInTriangle(::nicxlive::core::nodes::Vec2Array vertices,
+    ::nicxlive::core::common::SharedArray<int> triangle,
+    ::nicxlive::core::nodes::Vec2Array deformation,
+    ::nicxlive::core::nodes::Vec2 target,
+    ::nicxlive::core::nodes::Vec2& targetPrime, float& rotationVertical, float& rotationHorizontal);
 
 } // namespace nicxlive::core::math

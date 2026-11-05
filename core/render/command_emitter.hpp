@@ -25,8 +25,8 @@ public:
     void beginMaskContent() override;
     void endMask() override;
     void drawPartPacket(const PartDrawPacket& packet) override;
-    void beginDynamicComposite(const std::shared_ptr<::nicxlive::core::nodes::Projectable>& composite, const DynamicCompositePass& pass) override;
-    void endDynamicComposite(const std::shared_ptr<::nicxlive::core::nodes::Projectable>& composite, const DynamicCompositePass& pass) override;
+    void beginDynamicComposite(const std::shared_ptr<::nicxlive::core::nodes::Projectable>& composite, DynamicCompositePass& pass) override;
+    void endDynamicComposite(const std::shared_ptr<::nicxlive::core::nodes::Projectable>& composite, DynamicCompositePass& pass) override;
 
 private:
     bool tryMakeMaskApplyPacket(const std::shared_ptr<::nicxlive::core::nodes::Drawable>& drawable, bool isDodge, RenderBackend::MaskApplyPacket& packet);

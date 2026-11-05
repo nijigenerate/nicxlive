@@ -15,6 +15,13 @@ void QueueRenderBackend::disposeDrawableBuffers(RenderResourceHandle id) {
     lastDraw.erase(id);
 }
 void QueueRenderBackend::uploadDrawableIndices(RenderResourceHandle id, const std::vector<uint16_t>& indices) { indexBuffers[id] = indices; }
+void QueueRenderBackend::uploadDrawableIndices(RenderResourceHandle id,
+        common::SharedArray<std::uint16_t> indices) {
+    // Materialize the independent queue-owned copy at this authored producer.
+    std::vector<std::uint16_t> copy;
+    if (!indices.empty()) copy.assign(indices.begin(), indices.end());
+    indexBuffers[id] = std::move(copy);
+}
 void QueueRenderBackend::uploadSharedVertexBuffer(const ::nicxlive::core::nodes::Vec2Array& v) { sharedVertices = v.dup(); }
 void QueueRenderBackend::uploadSharedUvBuffer(const ::nicxlive::core::nodes::Vec2Array& u) { sharedUvs = u.dup(); }
 void QueueRenderBackend::uploadSharedDeformBuffer(const ::nicxlive::core::nodes::Vec2Array& d) { sharedDeform = d.dup(); }
@@ -27,6 +34,12 @@ void QueueRenderBackend::uploadDebugBuffer(const std::vector<nodes::Vec3>& posit
 }
 void QueueRenderBackend::drawDebugPoints(const nodes::Vec4&, const nodes::Mat4&) {}
 void QueueRenderBackend::drawDebugLines(const nodes::Vec4&, const nodes::Mat4&) {}
+// The Source Queue debug operations intentionally do nothing.
+void QueueRenderBackend::initDebugRenderer() {}
+void QueueRenderBackend::setDebugPointSizeSource(float) {}
+void QueueRenderBackend::setDebugLineWidthSource(float) {}
+void QueueRenderBackend::uploadDebugBuffer(math::Vec3Array, common::SharedArray<std::uint16_t>) {}
+void QueueRenderBackend::setDebugExternalBuffer(RenderResourceHandle, RenderResourceHandle, int) {}
 void QueueRenderBackend::beginMask(bool useStencil) {
     QueuedCommand cmd;
     cmd.kind = RenderCommandKind::BeginMask;
@@ -49,7 +62,7 @@ void QueueRenderBackend::endMask() {
     cmd.kind = RenderCommandKind::EndMask;
     queue.push_back(cmd);
 }
-void QueueRenderBackend::beginDynamicComposite(const ::nicxlive::core::DynamicCompositePass& pass) {
+void QueueRenderBackend::beginDynamicComposite(::nicxlive::core::DynamicCompositePass& pass) {
     auto passCopy = pass;
     passCopy.origBuffer = framebufferHandle();
     int vw = 0;
@@ -66,7 +79,7 @@ void QueueRenderBackend::beginDynamicComposite(const ::nicxlive::core::DynamicCo
     cmd.dynamicPass = passCopy;
     queue.push_back(cmd);
 }
-void QueueRenderBackend::endDynamicComposite(const ::nicxlive::core::DynamicCompositePass& pass) {
+void QueueRenderBackend::endDynamicComposite(::nicxlive::core::DynamicCompositePass& pass) {
     auto passCopy = pass;
     if (!dynamicStack.empty()) {
         passCopy = dynamicStack.back();
@@ -172,6 +185,46 @@ void QueueRenderBackend::updateTexture(uint32_t id, const std::vector<uint8_t>& 
     cmd.data = it->second.data;
     resourceQueue.push_back(std::move(cmd));
 }
+
+void QueueRenderBackend::readTextureData(uint32_t id, int, bool, std::vector<uint8_t>& buffer) {
+    const auto it = textures.find(id);
+    if (it == textures.end() || buffer.empty()) return;
+    const auto count = std::min(buffer.size(), it->second.data.size());
+    std::copy_n(it->second.data.begin(), count, buffer.begin());
+    std::fill(buffer.begin() + static_cast<std::ptrdiff_t>(count), buffer.end(), uint8_t{0});
+}
+
+void QueueRenderBackend::uploadTextureData(uint32_t id, int width, int height, int inChannels,
+    int outChannels, bool stencil, const std::vector<uint8_t>& data) {
+    const auto it = textures.find(id);
+    if (it == textures.end()) throw std::invalid_argument("Texture handle is not available");
+    auto& texture = it->second;
+    texture.width = width;
+    texture.height = height;
+    texture.inChannels = inChannels;
+    texture.outChannels = outChannels;
+    texture.stencil = stencil;
+    const auto expected = static_cast<std::size_t>(std::max(0, width))
+        * static_cast<std::size_t>(std::max(0, height)) * static_cast<std::size_t>(std::max(0, outChannels));
+    texture.data.resize(expected);
+    if (!expected) return;
+    const auto count = std::min(expected, data.size());
+    std::copy_n(data.begin(), count, texture.data.begin());
+    std::fill(texture.data.begin() + static_cast<std::ptrdiff_t>(count), texture.data.end(), uint8_t{0});
+    TextureCommand command;
+    command.kind = TextureCommandKind::Update;
+    command.id = id;
+    command.width = width;
+    command.height = height;
+    command.inChannels = inChannels;
+    command.outChannels = outChannels;
+    command.stencil = stencil;
+    command.data = texture.data;
+    resourceQueue.push_back(std::move(command));
+}
+
+// The D queue backend intentionally does not generate mipmaps.
+void QueueRenderBackend::generateTextureMipmap(uint32_t) {}
 
 void QueueRenderBackend::setTextureParams(uint32_t id, ::nicxlive::core::Filtering filtering, ::nicxlive::core::Wrapping wrapping, float anisotropy) {
     auto it = textures.find(id);

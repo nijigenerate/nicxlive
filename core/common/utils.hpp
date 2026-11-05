@@ -1,8 +1,11 @@
 #pragma once
+#include <limits>
 
 #include "../nodes/common.hpp"
+#include "../math/veca_ops.hpp"
 
 #include <algorithm>
+#include <array>
 #include <vector>
 
 namespace nicxlive::core::common {
@@ -45,8 +48,10 @@ enum class InterpolateMode {
     Nearest = 0,
     Linear = 1,
     Step = 2,
+    Stepped = Step,
     Cubic = 3,
     Bezier = 4,
+    COUNT = 5,
 };
 
 inline Vec2Array gatherVec2(const Vec2Array& data, const std::vector<std::size_t>& indices) {
@@ -75,51 +80,17 @@ inline void scatterAddVec2(const Vec2Array& src, const std::vector<std::size_t>&
     }
 }
 
-inline void transformAssign(Vec2Array& dst, const Vec2Array& src, const nodes::Mat4& mat) {
-    dst.resize(src.size());
-    for (std::size_t i = 0; i < src.size(); ++i) {
-        auto sv = src.at(i);
-        nodes::Vec3 v{sv.x, sv.y, 0.0f};
-        auto tv = mat.transformPoint(v);
-        dst.set(i, nodes::Vec2{tv.x, tv.y});
-    }
+// Existing native entry points consume the one canonical veca_ops Source body.
+inline void transformAssign(Vec2Array& destination, Vec2Array source, const nodes::Mat4& matrix) {
+    math::ngTransformAssignSource(destination, source, matrix);
 }
-
-inline void transformAdd(Vec2Array& dst, const Vec2Array& src, const nodes::Mat4& mat) {
-    if (dst.size() == 0 || src.size() == 0) return;
-    const std::size_t len = std::min(dst.size(), src.size());
-    const float m00 = mat[0][0];
-    const float m01 = mat[0][1];
-    const float m10 = mat[1][0];
-    const float m11 = mat[1][1];
-    for (std::size_t i = 0; i < len; ++i) {
-        auto sv = src.at(i);
-        auto dv = dst.at(i);
-        dst.set(i, nodes::Vec2{
-            dv.x + (sv.x * m00 + sv.y * m01),
-            dv.y + (sv.x * m10 + sv.y * m11),
-        });
-    }
+inline void transformAdd(Vec2Array& destination, Vec2Array source, const nodes::Mat4& matrix,
+        std::size_t count) {
+    math::ngTransformAddSource(destination, source, matrix, count);
 }
-
-inline void transformAdd(Vec2Array& dst, const Vec2Array& src, const nodes::Mat4& mat, std::size_t count) {
-    if (dst.size() == 0 || src.size() == 0) return;
-    const std::size_t len = std::min(count, std::min(dst.size(), src.size()));
-    if (len == 0) return;
-    const float m00 = mat[0][0];
-    const float m01 = mat[0][1];
-    const float m10 = mat[1][0];
-    const float m11 = mat[1][1];
-    for (std::size_t i = 0; i < len; ++i) {
-        auto sv = src.at(i);
-        auto dv = dst.at(i);
-        dst.set(i, nodes::Vec2{
-            dv.x + (sv.x * m00 + sv.y * m01),
-            dv.y + (sv.x * m10 + sv.y * m11),
-        });
-    }
+inline void transformAdd(Vec2Array& destination, Vec2Array source, const nodes::Mat4& matrix) {
+    math::ngTransformAddSource(destination, source, matrix);
 }
-
 inline Vec2Array makeZeroVecArray(std::size_t n) {
     return Vec2Array(n);
 }

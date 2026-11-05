@@ -1,6 +1,9 @@
 #pragma once
 
 #include "projectable.hpp"
+#include "../compat/source_allocator.hpp"
+#include <functional>
+#include <utility>
 
 namespace nicxlive::core::nodes {
 
@@ -9,14 +12,25 @@ struct OffscreenState {
 };
 
 class Composite : public Projectable {
+    template<class> friend struct d_runtime::SourceAllocator;
+    static std::shared_ptr<Composite> allocateSourceCompositeReceiver();
 public:
     bool propagateMeshGroup{true};
     OffscreenState offscreen{};
 
     Composite() = default;
+    using Node::create;
+    static std::shared_ptr<Composite> create(const std::shared_ptr<Node>& parent = {});
+    template<class ParentProducer>
+    static std::shared_ptr<Composite> createSourceDeferred(ParentProducer&& makeParent) {
+        auto result = allocateSourceCompositeReceiver();
+        std::shared_ptr<Node> parent = std::invoke(std::forward<ParentProducer>(makeParent));
+        result->constructCompositeOwned(parent);
+        return result;
+    }
     explicit Composite(const MeshData& data, uint32_t uuidVal = 0);
 
-    const std::string& typeId() const override;
+    common::NullableString typeId() const override;
 
     bool propagateMeshGroupEnabled() const;
     void setPropagateMeshGroup(bool value);
@@ -37,6 +51,15 @@ public:
     void dynamicRenderBegin(core::RenderContext& ctx) override;
     void fillDrawPacket(const Node& header, PartDrawPacket& packet, bool isMask = false) const override;
     void rebuffer(const MeshData& data) override;
+
+    void copyFrom(const Node& src, bool clone = false, bool deepCopy = true) override;
+
+protected:
+    explicit Composite(DeferredConstruction) : Projectable(DeferredConstruction{}) {}
+    void constructCompositeOwned(std::shared_ptr<Node> parent) {
+        constructProjectableOwned(parent);
+        autoResizedMesh = true;
+    }
 
 private:
     Vec2 deformationTranslationOffsetLocal() const;

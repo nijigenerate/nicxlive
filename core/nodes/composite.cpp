@@ -7,6 +7,20 @@
 
 namespace nicxlive::core::nodes {
 
+std::shared_ptr<Composite> Composite::allocateSourceCompositeReceiver() {
+    ngRegisterModelResourceClassNames();
+    return std::allocate_shared<Composite>(
+        d_runtime::SourceAllocator<Composite>{}, DeferredConstruction{});
+}
+
+std::shared_ptr<Composite> Composite::create(const std::shared_ptr<Node>& parent) {
+    const auto actualParent = parent;
+    ngRegisterModelResourceClassNames();
+    auto result = std::shared_ptr<Composite>(new Composite(DeferredConstruction{}));
+    result->constructCompositeOwned(actualParent);
+    return result;
+}
+
 constexpr uint64_t MaxBoundsResetInterval = 120;
 
 static bool hasProjectableAncestorNode(const Composite* self) {
@@ -25,9 +39,8 @@ Composite::Composite(const MeshData& data, uint32_t uuidVal) : Projectable() {
     autoResizedMesh = true;
 }
 
-const std::string& Composite::typeId() const {
-    static const std::string k = "Composite";
-    return k;
+common::NullableString Composite::typeId() const {
+    return common::NullableString::fromStaticLiteral("Composite");
 }
 
 bool Composite::propagateMeshGroupEnabled() const { return propagateMeshGroup; }
@@ -41,6 +54,11 @@ Transform Composite::transform() const { return Part::transform(); }
 
 void Composite::rebuffer(const MeshData& data) {
     Projectable::rebuffer(data);
+    autoResizedMesh = true;
+}
+
+void Composite::copyFrom(const Node& src, bool clone, bool deepCopy) {
+    Projectable::copyFrom(src, clone, deepCopy);
     autoResizedMesh = true;
 }
 
@@ -179,10 +197,10 @@ Vec4 Composite::localBoundsFromMatrix(const std::shared_ptr<Part>& child, const 
     float tx = matrix[0][3];
     float ty = matrix[1][3];
     Vec4 bounds{tx, ty, tx, ty};
-    if (!child || child->vertices.size() == 0) return bounds;
+    if (!child || child->getVertices().size() == 0) return bounds;
     auto deform = child->deformation;
-    for (std::size_t i = 0; i < child->vertices.size(); ++i) {
-        Vec2 localVertex = child->vertices[i];
+    for (std::size_t i = 0; i < child->getVertices().size(); ++i) {
+        Vec2 localVertex = child->getVertices()[i];
         if (i < deform.size()) {
             auto d = deform[i];
             localVertex.x += d.x;
@@ -367,7 +385,7 @@ bool Composite::createSimpleMesh() {
 
     if (resizing) {
         MeshData data;
-        data.vertices = vertexArray;
+        data.vertices.assign(vertexArray);
         data.uvs = {Vec2{0, 0}, Vec2{0, 1}, Vec2{1, 0}, Vec2{1, 1}};
         data.indices = {0, 1, 2, 2, 1, 3};
         data.origin = Vec2{0, 0};
@@ -385,7 +403,7 @@ bool Composite::createSimpleMesh() {
                              std::abs(newTextureOffset.y - textureOffset.y) > TextureOffsetEpsilon;
         if (offsetChanged) {
             textureInvalidated = true;
-            mesh->vertices = vertexArray;
+            mesh->vertices.assign(vertexArray);
             mesh->indices = {0, 1, 2, 2, 1, 3};
             shouldUpdateVertices = true;
             autoResizedSize = Vec2{bounds.z - bounds.x, bounds.w - bounds.y};

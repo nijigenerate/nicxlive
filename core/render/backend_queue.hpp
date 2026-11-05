@@ -58,12 +58,14 @@ struct TextureCommand {
 
 class QueueRenderBackend : public RenderBackend {
 public:
+    std::size_t textureNativeHandle(std::uint32_t texture) override { return texture; }
     void clear();
     void initializeDrawableResources() override;
     void bindDrawableVao() override;
     void createDrawableBuffers(RenderResourceHandle& outHandle) override;
     void disposeDrawableBuffers(RenderResourceHandle id) override;
     void uploadDrawableIndices(RenderResourceHandle id, const std::vector<uint16_t>& indices) override;
+    void uploadDrawableIndices(RenderResourceHandle id, common::SharedArray<std::uint16_t> indices) override;
     void uploadSharedVertexBuffer(const ::nicxlive::core::common::Vec2Array& v) override;
     void uploadSharedUvBuffer(const ::nicxlive::core::common::Vec2Array& u) override;
     void uploadSharedDeformBuffer(const ::nicxlive::core::common::Vec2Array& d) override;
@@ -73,12 +75,17 @@ public:
     void uploadDebugBuffer(const std::vector<Vec3>& positions, const std::vector<uint16_t>& indices) override;
     void drawDebugPoints(const Vec4&, const Mat4&) override;
     void drawDebugLines(const Vec4&, const Mat4&) override;
+    void initDebugRenderer() override;
+    void setDebugPointSizeSource(float) override;
+    void setDebugLineWidthSource(float) override;
+    void uploadDebugBuffer(math::Vec3Array, common::SharedArray<std::uint16_t>) override;
+    void setDebugExternalBuffer(RenderResourceHandle, RenderResourceHandle, int) override;
     void beginMask(bool useStencil) override;
     void applyMask(const MaskApplyPacket& packet) override;
     void beginMaskContent() override;
     void endMask() override;
-    void beginDynamicComposite(const ::nicxlive::core::DynamicCompositePass& pass) override;
-    void endDynamicComposite(const ::nicxlive::core::DynamicCompositePass& pass) override;
+    void beginDynamicComposite(::nicxlive::core::DynamicCompositePass& pass) override;
+    void endDynamicComposite(::nicxlive::core::DynamicCompositePass& pass) override;
     void destroyDynamicComposite(const std::shared_ptr<::nicxlive::core::DynamicCompositeSurface>&) override;
     void drawPartPacket(const PartDrawPacket& packet) override;
     void resizeViewportTargets(int width, int height) override;
@@ -105,6 +112,10 @@ public:
     uint32_t createTexture(const std::vector<uint8_t>& data, int width, int height, int channels, bool stencil) override;
     void updateTexture(uint32_t id, const std::vector<uint8_t>& data, int width, int height, int channels) override;
     void setTextureParams(uint32_t id, ::nicxlive::core::Filtering filtering, ::nicxlive::core::Wrapping wrapping, float anisotropy) override;
+    void readTextureData(uint32_t id, int channels, bool stencil, std::vector<uint8_t>& buffer) override;
+    void uploadTextureData(uint32_t id, int width, int height, int inChannels,
+        int outChannels, bool stencil, const std::vector<uint8_t>& data) override;
+    void generateTextureMipmap(uint32_t id) override;
     void disposeTexture(uint32_t id) override;
     bool hasTexture(uint32_t id) const;
     const TextureHandle* getTexture(uint32_t id) const;
@@ -118,12 +129,12 @@ public:
         compositeTargetHandle = compositeHandle;
     }
 
-    const std::vector<uint16_t>* getDrawableIndices(uint32_t id) const {
+    const std::vector<uint16_t>* getDrawableIndices(RenderResourceHandle id) const {
         auto it = indexBuffers.find(id);
         if (it == indexBuffers.end()) return nullptr;
         return &it->second;
     }
-    bool hasDrawableIndices(uint32_t id) const {
+    bool hasDrawableIndices(RenderResourceHandle id) const {
         return indexBuffers.find(id) != indexBuffers.end();
     }
     std::size_t drawableIndexBufferCount() const {

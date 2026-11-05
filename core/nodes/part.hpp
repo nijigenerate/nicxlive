@@ -1,13 +1,16 @@
 #pragma once
+#include "../common/class_reference.hpp"
 
 #include "drawable.hpp"
 #include "../serde.hpp"
 #include "../texture.hpp"
 
 #include <array>
+#include <cstddef>
 #include <cmath>
 #include <functional>
 #include <limits>
+#include <utility>
 
 namespace nicxlive::core {
 class RenderCommandEmitter;
@@ -15,17 +18,7 @@ class RenderCommandEmitter;
 
 namespace nicxlive::core::nodes {
 
-enum class MaskingMode {
-    Mask,
-    DodgeMask,
-};
-
-struct MaskBinding {
-    NodeId maskSrcUUID{0};
-    // The puppet hierarchy owns mask nodes; masks may reference ancestors.
-    std::weak_ptr<Drawable> maskSrc{};
-    MaskingMode mode{MaskingMode::Mask};
-};
+enum class TextureUsage : std::size_t { Albedo, Emissive, Bumpmap, COUNT };
 
 struct RenderSpace {
     Mat4 matrix{Mat4::identity()};
@@ -48,8 +41,8 @@ inline bool useMultistageBlend(BlendMode mode) {
 class Part : public Drawable {
 public:
     std::array<std::shared_ptr<::nicxlive::core::Texture>, 3> textures{};
-    std::vector<int32_t> textureIds{};
-    std::vector<MaskBinding> masks{};
+    common::SharedArray<int32_t> textureIds{};
+    common::SharedArray<MaskBinding> masks{};
     BlendMode blendMode{BlendMode::Normal};
     float maskAlphaThreshold{0.5f};
     float opacity{1.0f};
@@ -73,10 +66,32 @@ public:
     Mat4 offscreenRenderMatrix{Mat4::identity()};
 
     Part();
+    using Node::create;
+    static std::shared_ptr<Part> create(const std::shared_ptr<Node>& parent = {});
+    template<class ParentProducer>
+    static std::shared_ptr<Part> createSourceDeferred(ParentProducer&& makeParent) {
+        auto result = allocateSourcePartReceiver();
+        std::shared_ptr<Node> parent = std::invoke(std::forward<ParentProducer>(makeParent));
+        result->constructPartOwned(parent);
+        return result;
+    }
+    // Evaluate Source constructor arguments only after the exact Part owner exists.
+    template<class DataProducer, class TexturesProducer, class IdProducer, class ParentProducer>
+    static std::shared_ptr<Part> createDataSourceDeferred(DataProducer&& makeData,
+        TexturesProducer&& makeTextures, IdProducer&& makeId, ParentProducer&& makeParent) {
+        auto result = allocateSourcePartReceiver();
+        MeshData data = std::invoke(std::forward<DataProducer>(makeData));
+        common::SharedArray<std::shared_ptr<::nicxlive::core::Texture>> inputTextures =
+            std::invoke(std::forward<TexturesProducer>(makeTextures));
+        std::uint32_t id = std::invoke(std::forward<IdProducer>(makeId));
+        std::shared_ptr<Node> parent = std::invoke(std::forward<ParentProducer>(makeParent));
+        result->constructPartDataOwned(data, inputTextures, id, parent);
+        return result;
+    }
     Part(const MeshData& data, const std::array<std::shared_ptr<::nicxlive::core::Texture>, 3>& tex = {}, uint32_t uuidVal = 0);
     Part(const MeshData& data, const std::vector<std::shared_ptr<::nicxlive::core::Texture>>& tex, uint32_t uuidVal = 0);
 
-    const std::string& typeId() const override;
+    common::NullableString typeId() const override;
 
     void initPartTasks();
 
@@ -87,9 +102,20 @@ public:
     static std::shared_ptr<Part> createSimple(const std::shared_ptr<::nicxlive::core::Texture>& tex, const std::string& name = "New Part");
     static std::shared_ptr<Part> createSimpleFromFile(const std::string& path, const std::string& name = "New Part");
     static std::shared_ptr<Part> createSimpleFromShallow(const ::nicxlive::core::ShallowTexture& tex, const std::string& name = "New Part");
+    // Canonical source string entries retain the actual immutable name descriptor.
+    static std::shared_ptr<Part> createSimpleRetained(const std::shared_ptr<::nicxlive::core::Texture>& tex,
+        common::NullableString name);
+    static std::shared_ptr<Part> createSimpleFromFileRetained(const std::string& path,
+        common::NullableString name);
+    static std::shared_ptr<Part> createSimpleFromShallowRetained(const ::nicxlive::core::ShallowTexture& tex,
+        common::NullableString name);
     std::size_t maskCount() const;
     std::size_t dodgeCount() const;
 
+    void serializeSelfImpl(::nicxlive::core::serde::TypedJsonWriter& serializer, bool recursive = true,
+        SerializeNodeFlags flags = SerializeNodeFlags::All) const override;
+    ::nicxlive::core::serde::ReadError deserializeFromFghj(::nicxlive::core::serde::TypedJsonView data) override;
+    void serializePartial(::nicxlive::core::serde::TypedJsonWriter& serializer, bool recursive = true) const override;
     void serializeSelfImpl(::nicxlive::core::serde::InochiSerializer& serializer, bool recursive, SerializeNodeFlags flags) const override;
 
     ::nicxlive::core::serde::SerdeException deserializeFromFghj(const ::nicxlive::core::serde::Fghj& data) override;
@@ -114,7 +140,7 @@ public:
 
     void runBeginTask(core::RenderContext& ctx) override;
 
-    virtual void rebuffer(const MeshData& data);
+    void rebuffer(const MeshData& data) override;
     void setTexture(std::size_t slot, const std::shared_ptr<::nicxlive::core::Texture>& tex);
     std::shared_ptr<::nicxlive::core::Texture> getTexture(std::size_t slot) const;
     void markTextureDirty(std::size_t slot);
@@ -140,6 +166,26 @@ public:
     void setOneTimeTransform(const std::shared_ptr<Mat4>& transform);
     void normalizeUV(void* data) override;
     void copyFrom(const Node& src, bool clone = false, bool deepCopy = true) override;
+
+    // Source mutable virtual lookup reads actual mask receivers and virtual UUIDs.
+    virtual std::ptrdiff_t getMaskIdx(std::shared_ptr<Drawable> drawable);
+    virtual std::ptrdiff_t getMaskIdx(uint32_t uuid);
+
+    bool hasParamSource(d_runtime::RetainedString sourceKey) override;
+    float getDefaultValueSource(d_runtime::RetainedString sourceKey) override;
+    bool setValueSource(d_runtime::RetainedString sourceKey, float value) override;
+    float getValueSource(d_runtime::RetainedString sourceKey) override;
+
+private:
+    static std::shared_ptr<Part> allocateSourcePartReceiver();
+protected:
+    explicit Part(DeferredConstruction) : Drawable(DeferredConstruction{}) {}
+    void constructPartOwned(std::shared_ptr<Node> parent);
+    void constructPartDataOwned(MeshData data, std::uint32_t id, std::shared_ptr<Node> parent);
+    void constructPartDataOwned(MeshData data,
+        common::SharedArray<std::shared_ptr<::nicxlive::core::Texture>> inputTextures,
+        std::uint32_t id, std::shared_ptr<Node> parent);
 };
 
 } // namespace nicxlive::core::nodes
+

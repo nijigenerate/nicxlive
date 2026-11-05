@@ -1,6 +1,10 @@
 #include "grid_deformer.hpp"
+#include "grid_axis_sort.hpp"
+#include "../compat/array_range_error.hpp"
+#include "../compat/static_error.hpp"
 
 #include "../common/utils.hpp"
+#include "../common/object_key_policy.hpp"
 #include "../param/parameter.hpp"
 #include "../puppet.hpp"
 #include "../render.hpp"
@@ -10,6 +14,9 @@
 #include "composite.hpp"
 
 #include <algorithm>
+#include <bit>
+#include <span>
+#include "../compat/assert_error.hpp"
 #include <cctype>
 #include <cmath>
 #include <functional>
@@ -27,6 +34,16 @@ constexpr float kAxisTolerance = 1e-4f;
 constexpr float kBoundaryTolerance = 1e-4f;
 constexpr int kGridFilterStage = 1;
 
+// Same float criterion as Source isClose(a,b,AxisTolerance,AxisTolerance).
+bool isCloseAxisValue(float a, float b) {
+    if (a == b) return true;
+    if (std::isinf(a) || std::isinf(b)) return false;
+    const float diff = std::fabs(a - b);
+    return diff <= kAxisTolerance * std::fabs(a)
+        || diff <= kAxisTolerance * std::fabs(b)
+        || diff <= kAxisTolerance;
+}
+
 bool isFiniteMatrix(const Mat4& m) {
     for (int r = 0; r < 4; ++r) {
         for (int c = 0; c < 4; ++c) {
@@ -38,41 +55,101 @@ bool isFiniteMatrix(const Mat4& m) {
 
 } // namespace
 
-GridDeformer::GridDeformer() {
-    axisX.assign(kDefaultAxis.begin(), kDefaultAxis.end());
-    axisY.assign(kDefaultAxis.begin(), kDefaultAxis.end());
-    setGridAxes(axisX, axisY);
-    requirePreProcessTask();
-}
-
-void GridDeformer::setGridAxes(const std::vector<float>& xs, const std::vector<float>& ys) {
+void GridDeformer::setGridAxes(Axis xs, Axis ys) {
     axisX = normalizeAxis(xs);
     axisY = normalizeAxis(ys);
-    if (axisX.size() < 2) axisX.assign(kDefaultAxis.begin(), kDefaultAxis.end());
-    if (axisY.size() < 2) axisY.assign(kDefaultAxis.begin(), kDefaultAxis.end());
-    vertices.resize(axisX.size() * axisY.size());
-    deformation.resize(vertices.size());
-    for (std::size_t y = 0; y < axisY.size(); ++y) {
-        for (std::size_t x = 0; x < axisX.size(); ++x) {
-            auto idx = y * axisX.size() + x;
-            vertices.xAt(idx) = axisX[x];
-            vertices.yAt(idx) = axisY[y];
-            deformation.set(idx, Vec2{0.0f, 0.0f});
+    rebuildBuffers();
+}
+
+void GridDeformer::rebuildVertices() { rebuildBuffers(); }
+
+void GridDeformer::rebuildBuffers() {
+    if (axisX.size() < 2) axisX = Axis{kDefaultAxis[0], kDefaultAxis[1]};
+    if (axisY.size() < 2) axisY = Axis{kDefaultAxis[0], kDefaultAxis[1]};
+    vertices.resize(cols() * rows());
+    const auto vertexCount = vertices.size();
+    getDeformation().resize(vertexCount);
+    auto offsets = getDeformation();
+    const auto offsetCount = offsets.size();
+    for (std::size_t i = 0; i < offsetCount; ++i) offsets[i] = Vec2{0, 0};
+    const auto rowCount = rows();
+    for (std::size_t y = 0; y < rowCount; ++y) {
+        const auto columnCount = cols();
+        for (std::size_t x = 0; x < columnCount; ++x) {
+            const auto index = gridIndex(x, y);
+            const Vec2 point{sourceGridAt(axisX, x, 424), sourceGridAt(axisY, y, 424)};
+            vertices[index] = point;
         }
     }
 }
 
-void GridDeformer::switchDynamic(bool value) {
-    dynamic = value;
-    for (auto& c : childrenRef()) {
-        setupChildNoRecurse(c);
+namespace {
+Node::FilterArray gridSourceRemoveFilter(Node::FilterArray filters, const Node::FilterHook& value) {
+    for (std::size_t i = 0; i < filters.size(); ++i) {
+        const auto current = filters[i];
+        if (current.stage == value.stage && current.func == value.func) return filters.removed(i);
     }
+    return filters;
+}
+
+Node::FilterArray gridSourceUpsertFilter(Node::FilterArray filters, const Node::FilterHook& value, bool prepend) {
+    for (const auto current : filters)
+        if (current.stage == value.stage && current.func == value.func) return filters;
+    if (prepend) filters.insertValue(0, value);
+    else filters.push_back(value);
+    return filters;
+}
+}
+
+GridDeformer::GridDeformer() {
+    requirePreProcessTask();
+    axisX = Axis{kDefaultAxis[0], kDefaultAxis[1]};
+    axisY = Axis{kDefaultAxis[0], kDefaultAxis[1]};
+    setGridAxes(axisX, axisY);
+}
+
+std::shared_ptr<GridDeformer> GridDeformer::create(std::shared_ptr<Node> parent) {
+    ngRegisterModelResourceClassNames();
+    auto result = std::shared_ptr<GridDeformer>(new GridDeformer(DeferredConstruction{}));
+    result->constructGridOwned(parent);
+    return result;
+}
+
+std::shared_ptr<GridDeformer> GridDeformer::allocateSourceGridReceiver() {
+    ngRegisterModelResourceClassNames();
+    return std::allocate_shared<GridDeformer>(
+        d_runtime::SourceAllocator<GridDeformer>{}, DeferredConstruction{});
+}
+
+void GridDeformer::constructGridOwned(std::shared_ptr<Node> parent) {
+    [[maybe_unused]] const auto lifetime = weak_from_this().lock();
+    constructDeformableOwned(parent);
+    requirePreProcessTask();
+    axisX = Axis{kDefaultAxis[0], kDefaultAxis[1]};
+    axisY = Axis{kDefaultAxis[0], kDefaultAxis[1]};
+    setGridAxes(axisX, axisY);
+}
+
+void GridDeformer::setGridAxes(const std::vector<float>& xs, const std::vector<float>& ys) {
+    Axis xValues(xs.size(), std::numeric_limits<float>::quiet_NaN());
+    std::copy(xs.begin(), xs.end(), xValues.begin());
+    Axis yValues(ys.size(), std::numeric_limits<float>::quiet_NaN());
+    std::copy(ys.begin(), ys.end(), yValues.begin());
+    setGridAxes(xValues, yValues);
+}
+
+void GridDeformer::switchDynamic(bool value) {
+    [[maybe_unused]] const auto lifetime = weak_from_this().lock();
+    dynamic = value;
+    const auto children = childrenRef();
+    for (auto child : children) setupChildNoRecurse(child);
 }
 
 void GridDeformer::rebuffer(const Vec2Array& gridPoints) {
-    if (gridPoints.size() == 0 || !adoptFromVertices(gridPoints, false)) {
-        adoptGridFromAxes(std::vector<float>(kDefaultAxis.begin(), kDefaultAxis.end()),
-                          std::vector<float>(kDefaultAxis.begin(), kDefaultAxis.end()));
+    [[maybe_unused]] const auto lifetime = weak_from_this().lock();
+    auto points = gridPoints;
+    if (points.empty() || !adoptFromVertices(points, false)) {
+        adoptGridFromAxes(Axis{kDefaultAxis[0], kDefaultAxis[1]}, Axis{kDefaultAxis[0], kDefaultAxis[1]});
     }
     clearCache();
 }
@@ -86,8 +163,8 @@ GridDeformer::GridCellCache GridDeformer::computeCache(float localX, float local
         if (v > max) return max;
         return v;
     };
-    float clampedX = clampVal(localX, axisX.front(), axisX.back());
-    float clampedY = clampVal(localY, axisY.front(), axisY.back());
+    float clampedX = clampVal(localX, axisX[0], axisX[axisX.size() - 1]);
+    float clampedY = clampVal(localY, axisY[0], axisY[axisY.size() - 1]);
 
     auto rx = locateInterval(axisX, clampedX);
     auto ry = locateInterval(axisY, clampedY);
@@ -197,6 +274,118 @@ void GridDeformer::sampleGridPoints(Vec2Array& dst, const std::vector<GridCellCa
     }
 }
 
+void GridDeformer::sampleGridPointsSource(Vec2Array& dst,
+    const std::vector<GridCellCache>& caches, bool includeDeformation) const {
+    dst.resize(caches.size());
+    if (caches.empty()) return;
+    // Preserve Source lane capture order before virtual property callbacks.
+    const auto base = vertices;
+    const auto deformationX = getDeformation();
+    const auto deformationY = getDeformation();
+    const auto cols = axisX.size();
+    const auto read = [](const Vec2Array& values, std::size_t index, bool y, std::size_t line) {
+        if (index >= values.size()) throw d_runtime::ngStaticError<d_runtime::ArrayIndexError>(
+            index, values.size(), d_runtime::RetainedString::fromStaticLiteral(
+                "source/nijilive/core/nodes/deformer/grid.d"), line);
+        return y ? values.yAt(index) : values.xAt(index);
+    };
+    const auto sample = [&](const GridCellCache& cache, float* weights, float* xs, float* ys,
+                            std::size_t baseLine, std::size_t deformLine) {
+        const float u = cache.u, v = cache.v;
+        const float wu0 = 1 - u, wv0 = 1 - v;
+        weights[0] = wu0 * wv0; weights[1] = u * wv0;
+        weights[2] = wu0 * v; weights[3] = u * v;
+        const std::size_t indices[]{cache.cellY * cols + cache.cellX,
+            cache.cellY * cols + cache.cellX + 1,
+            (cache.cellY + 1) * cols + cache.cellX,
+            (cache.cellY + 1) * cols + cache.cellX + 1};
+        for (std::size_t corner = 0; corner < 4; ++corner) {
+            xs[corner] = read(base, indices[corner], false, baseLine + corner * 2);
+            ys[corner] = read(base, indices[corner], true, baseLine + corner * 2 + 1);
+        }
+        if (includeDeformation) for (std::size_t corner = 0; corner < 4; ++corner) {
+            xs[corner] += read(deformationX, indices[corner], false, deformLine + corner * 2);
+            ys[corner] += read(deformationY, indices[corner], true, deformLine + corner * 2 + 1);
+        }
+    };
+    const auto blend = [](const float* weights, const float* values) {
+        return weights[0] * values[0] + weights[1] * values[1]
+            + weights[2] * values[2] + weights[3] * values[3];
+    };
+    std::size_t i = 0;
+    for (; i + 4 <= caches.size(); i += 4) {
+        float weights[4][4], xs[4][4], ys[4][4];
+        for (std::size_t lane = 0; lane < 4; ++lane) {
+            // Source SimdRepr's float vector defaults to float.init, including
+            // lanes skipped by the invalid-cache branch before the final blend.
+            std::fill_n(weights[lane], 4, std::numeric_limits<float>::quiet_NaN());
+            std::fill_n(xs[lane], 4, std::numeric_limits<float>::quiet_NaN());
+            std::fill_n(ys[lane], 4, std::numeric_limits<float>::quiet_NaN());
+            if (caches[i + lane].valid)
+                sample(caches[i + lane], weights[lane], xs[lane], ys[lane], 660, 670);
+        }
+        for (std::size_t lane = 0; lane < 4; ++lane) dst.xAt(i + lane) = blend(weights[lane], xs[lane]);
+        for (std::size_t lane = 0; lane < 4; ++lane) dst.yAt(i + lane) = blend(weights[lane], ys[lane]);
+    }
+    for (; i < caches.size(); ++i) {
+        if (!caches[i].valid) { dst.xAt(i) = 0; dst.yAt(i) = 0; continue; }
+        float weights[4], xs[4], ys[4];
+        sample(caches[i], weights, xs, ys, 717, 727);
+        dst.xAt(i) = blend(weights, xs);
+        dst.yAt(i) = blend(weights, ys);
+    }
+}
+
+SourceDeformResult GridDeformer::deformChildrenSource(std::shared_ptr<Node> target,
+    Vec2Array origVertices, Vec2Array origDeformation, Mat4* origTransform) {
+    [[maybe_unused]] const auto receiverLifetime = weak_from_this().lock();
+    if (!hasValidGrid()) return {Vec2Array{}, nullptr, false};
+    if (auto path = std::dynamic_pointer_cast<PathDeformer>(target)) {
+        if (!path->physicsEnabled()) return {Vec2Array{}, nullptr, false};
+    }
+    [[maybe_unused]] const auto targetName = target ? target->getName()
+        : common::NullableString::fromStaticLiteral("(null)");
+    if (!matrixIsFinite(inverseMatrix)) return {Vec2Array{}, nullptr, false};
+    if (!origTransform) return {Vec2Array{}, nullptr, false};
+    if (!matrixIsFinite(*origTransform)) return {Vec2Array{}, nullptr, false};
+    const Mat4 centerMatrix = Mat4::multiply(inverseMatrix, *origTransform);
+    std::vector<GridCellCache> caches(origVertices.size());
+    Vec2Array samplePoints;
+    bool anyChanged = false;
+    if (!matrixIsFinite(centerMatrix)) return {Vec2Array{}, nullptr, false};
+    transformAssign(samplePoints, origVertices, centerMatrix);
+    if (dynamic && !origDeformation.empty() && !samplePoints.empty()) {
+        const auto overlap = std::min(origDeformation.size(), samplePoints.size());
+        transformAdd(samplePoints, origDeformation, centerMatrix, overlap);
+    }
+    bool invalidSamples = false;
+    for (std::size_t i = 0; i < samplePoints.size(); ++i) {
+        const auto x = samplePoints.xAt(i), y = samplePoints.yAt(i);
+        if (!std::isfinite(x) || !std::isfinite(y)) { invalidSamples = true; break; }
+        auto cache = computeCache(x, y);
+        cache.cellX = static_cast<std::uint16_t>(cache.cellX);
+        cache.cellY = static_cast<std::uint16_t>(cache.cellY);
+        caches[i] = cache;
+    }
+    if (invalidSamples) return {Vec2Array{}, nullptr, false};
+    Vec2Array originalSample, targetSample;
+    sampleGridPointsSource(originalSample, caches, false);
+    sampleGridPointsSource(targetSample, caches, true);
+    auto offsetLocal = targetSample.dup();
+    offsetLocal -= originalSample;
+    for (std::size_t i = 0; i < offsetLocal.size(); ++i) {
+        if (!caches[i].valid || !std::isfinite(offsetLocal.xAt(i)) || !std::isfinite(offsetLocal.yAt(i))) {
+            offsetLocal.xAt(i) = 0; offsetLocal.yAt(i) = 0; continue;
+        }
+        if (offsetLocal.xAt(i) != 0 || offsetLocal.yAt(i) != 0) anyChanged = true;
+    }
+    if (!anyChanged) return {origDeformation, nullptr, false};
+    auto inverse = centerMatrix.inverse();
+    inverse[0][3] = 0; inverse[1][3] = 0; inverse[2][3] = 0;
+    transformAdd(origDeformation, offsetLocal, inverse, offsetLocal.size());
+    return {origDeformation, nullptr, anyChanged};
+}
+
 DeformResult GridDeformer::deformChildren(const std::shared_ptr<Node>& target,
                                           const Vec2Array& origVertices,
                                           Vec2Array& origDeformation,
@@ -273,130 +462,145 @@ void GridDeformer::runRenderTask(core::RenderContext&) {
 }
 
 bool GridDeformer::setupChild(const std::shared_ptr<Node>& child) {
-    Deformable::setupChild(child);
-    if (!child || !hasValidGrid()) return false;
-    setupChildNoRecurse(child);
-    if (child->mustPropagate()) {
-        for (auto& c : child->childrenRef()) setupChild(c);
-    }
+    [[maybe_unused]] const auto lifetime = weak_from_this().lock();
+    const auto target = child;
+    Deformable::setupChild(target);
+    auto setGroup = [&](auto&& recurse, std::shared_ptr<Node> current) -> void {
+        const bool propagate = d_runtime::ngRequireObject(current)->mustPropagate();
+        setupChildNoRecurse(current);
+        if (propagate) {
+            const auto children = current->childrenList();
+            for (auto descendant : children) recurse(recurse, descendant);
+        }
+    };
+    if (hasValidGrid()) setGroup(setGroup, target);
     return false;
 }
 
 bool GridDeformer::releaseChild(const std::shared_ptr<Node>& child) {
-    releaseChildNoRecurse(child);
-    if (child && child->mustPropagate()) {
-        for (auto& c : child->childrenRef()) releaseChild(c);
-    }
-    Deformable::releaseChild(child);
+    [[maybe_unused]] const auto lifetime = weak_from_this().lock();
+    const auto target = child;
+    auto unsetGroup = [&](auto&& recurse, std::shared_ptr<Node> current) -> void {
+        releaseChildNoRecurse(current);
+        const bool propagate = d_runtime::ngRequireObject(current)->mustPropagate();
+        if (propagate) {
+            const auto children = current->childrenList();
+            for (auto descendant : children) recurse(recurse, descendant);
+        }
+    };
+    unsetGroup(unsetGroup, target);
+    Deformable::releaseChild(target);
     return false;
 }
 
 void GridDeformer::captureTarget(const std::shared_ptr<Node>& target) {
-    childrenRef().push_back(target);
-    setupChildNoRecurse(target, true);
+    [[maybe_unused]] const auto lifetime = weak_from_this().lock();
+    const auto value = target;
+    childrenRef().push_back(value);
+    setupChildNoRecurse(value, true);
 }
 
 void GridDeformer::releaseTarget(const std::shared_ptr<Node>& target) {
-    releaseChildNoRecurse(target);
-    auto& ch = childrenRef();
-    ch.erase(std::remove(ch.begin(), ch.end(), target), ch.end());
+    [[maybe_unused]] const auto lifetime = weak_from_this().lock();
+    const auto value = target;
+    releaseChildNoRecurse(value);
+    const auto range = childrenRef();
+    std::ptrdiff_t found = -1;
+    for (std::size_t i = 0; i < range.size(); ++i) {
+        if (common::ngClassObjectEquals(range[i], value, ngRegisterModelResourceClassNames)) {
+            found = static_cast<std::ptrdiff_t>(i);
+            break;
+        }
+    }
+    childrenRef() = found < 0 ? range : range.removed(static_cast<std::size_t>(found));
 }
 
 void GridDeformer::clearCache() {
     // no extra caches yet
 }
 
+void GridDeformer::dispose() {
+    const auto lifetime = weak_from_this().lock();
+    const auto range = children;
+    for (auto child : range) releaseChild(child);
+    childrenRef().resize(0);
+}
+
 void GridDeformer::build(bool force) {
-    for (auto& c : children) setupChild(c);
+    [[maybe_unused]] const auto lifetime = weak_from_this().lock();
+    const auto range = childrenList();
+    for (auto child : range) setupChild(child);
     setupSelf();
-    Node::build(force);
+    Deformable::build(force);
 }
 
 void GridDeformer::setupChildNoRecurse(const std::shared_ptr<Node>& node, bool prepend) {
-    if (!node) return;
-    if (auto comp = std::dynamic_pointer_cast<Composite>(node)) {
-        if (comp->propagateMeshGroupEnabled()) {
-            releaseChildNoRecurse(node);
+    [[maybe_unused]] const auto lifetime = weak_from_this().lock();
+    const auto target = node;
+    if (auto composite = std::dynamic_pointer_cast<Composite>(target)) {
+        if (composite->propagateMeshGroupEnabled()) {
+            releaseChildNoRecurse(target);
             return;
         }
     }
-    auto projectable = std::dynamic_pointer_cast<Projectable>(node);
-    auto deformable = std::dynamic_pointer_cast<Deformable>(node);
-    bool isDeformable = static_cast<bool>(deformable);
-    bool useNodeFilter = static_cast<bool>(projectable) && projectable->autoResizedMesh;
-    auto& pre = node->preProcessFilters;
-    auto& post = node->postProcessFilters;
-    const auto tag = reinterpret_cast<std::uintptr_t>(this);
-    pre.erase(std::remove_if(pre.begin(), pre.end(), [&](const auto& h) { return h.stage == kGridFilterStage && h.tag == tag; }), pre.end());
-    post.erase(std::remove_if(post.begin(), post.end(), [&](const auto& h) { return h.stage == kGridFilterStage && h.tag == tag; }), post.end());
-    if (deformable) {
-        deformable->removeDeformPreProcessFilter(kGridFilterStage, tag);
-        deformable->removeDeformPostProcessFilter(kGridFilterStage, tag);
-    }
-    if (deformable && !useNodeFilter) {
-        Node::DeformFilterHook deformHook;
-        deformHook.stage = kGridFilterStage;
-        deformHook.tag = tag;
-        deformHook.func = [this](std::shared_ptr<Node> t,
-                                 const Vec2Array& v,
-                                 Vec2Array& d,
-                                 const Mat4* mat) {
-            return deformChildren(t, v, d, mat);
-        };
+    const auto drawable = std::dynamic_pointer_cast<Deformable>(target);
+    const auto self = std::static_pointer_cast<GridDeformer>(shared_from_this());
+    Node::FilterHook hook;
+    hook.stage = 1;
+    hook.func = Node::FilterHook::Func::fromMethod<&SourceDeformation::deformChildrenSource>(self);
+    if (drawable) {
         if (dynamic) {
-            deformable->upsertDeformPostProcessFilter(std::move(deformHook), prepend);
+            auto post = d_runtime::ngRequireObject(target)->postProcessFilters;
+            target->postProcessFilters = gridSourceUpsertFilter(post, hook, prepend);
+            auto pre = target->preProcessFilters;
+            target->preProcessFilters = gridSourceRemoveFilter(pre, hook);
         } else {
-            deformable->upsertDeformPreProcessFilter(std::move(deformHook), prepend);
+            auto pre = d_runtime::ngRequireObject(target)->preProcessFilters;
+            target->preProcessFilters = gridSourceUpsertFilter(pre, hook, prepend);
+            auto post = target->postProcessFilters;
+            target->postProcessFilters = gridSourceRemoveFilter(post, hook);
         }
-    } else if (translateChildren || isDeformable) {
-        Node::FilterHook hook;
-        hook.stage = kGridFilterStage;
-        hook.tag = tag;
-        hook.func = [this](std::shared_ptr<Node> t,
-                           const Vec2Array& v,
-                           Vec2Array d,
-                           const Mat4* mat) {
-            auto result = deformChildren(t, v, d, mat);
-            return std::make_tuple(result.changed ? d : Vec2Array{}, static_cast<Mat4*>(nullptr), result.changed);
-        };
-        if (prepend) pre.insert(pre.begin(), hook); else pre.push_back(hook);
-    } else {
-        releaseChildNoRecurse(node);
-    }
+    } else if (translateChildren) {
+        auto pre = d_runtime::ngRequireObject(target)->preProcessFilters;
+        target->preProcessFilters = gridSourceUpsertFilter(pre, hook, prepend);
+        auto post = target->postProcessFilters;
+        target->postProcessFilters = gridSourceRemoveFilter(post, hook);
+    } else releaseChildNoRecurse(target);
 }
 
 void GridDeformer::releaseChildNoRecurse(const std::shared_ptr<Node>& node) {
-    if (!node) return;
-    auto& pre = node->preProcessFilters;
-    auto& post = node->postProcessFilters;
-    const auto tag = reinterpret_cast<std::uintptr_t>(this);
-    pre.erase(std::remove_if(pre.begin(), pre.end(), [&](const auto& h) { return h.stage == kGridFilterStage && h.tag == tag; }), pre.end());
-    post.erase(std::remove_if(post.begin(), post.end(), [&](const auto& h) { return h.stage == kGridFilterStage && h.tag == tag; }), post.end());
-    if (auto deformable = std::dynamic_pointer_cast<Deformable>(node)) {
-        deformable->removeDeformPreProcessFilter(kGridFilterStage, tag);
-        deformable->removeDeformPostProcessFilter(kGridFilterStage, tag);
-    }
+    [[maybe_unused]] const auto lifetime = weak_from_this().lock();
+    const auto target = node;
+    const auto self = std::static_pointer_cast<GridDeformer>(shared_from_this());
+    Node::FilterHook hook;
+    hook.stage = 1;
+    hook.func = Node::FilterHook::Func::fromMethod<&SourceDeformation::deformChildrenSource>(self);
+    auto pre = d_runtime::ngRequireObject(target)->preProcessFilters;
+    target->preProcessFilters = gridSourceRemoveFilter(pre, hook);
+    auto post = target->postProcessFilters;
+    target->postProcessFilters = gridSourceRemoveFilter(post, hook);
 }
 
-void GridDeformer::applyDeformToChildren(const std::vector<std::shared_ptr<core::param::Parameter>>& params, bool recursive) {
+void GridDeformer::applyDeformToChildren(common::SharedArray<std::shared_ptr<core::param::Parameter>> params,
+    bool recursive) {
+    const auto self = std::static_pointer_cast<GridDeformer>(shared_from_this());
+    auto update = [self](Vec2Array values) {
+        if (values.size() != self->getDeformation().size()) return;
+        const auto count = values.size();
+        for (std::size_t i = 0; i < count; ++i) {
+            auto value = values[i];
+            self->getDeformation()[i] = value;
+        }
+    };
+    auto transfer = [self] { return self->translateChildren; };
     localTransform.update();
     transform();
     inverseMatrix = globalTransform.toMat4().inverse();
-    auto update = [&](const Vec2Array& deformationValues) {
-        if (deformationValues.size() == deformation.size()) {
-            deformation = deformationValues;
-        }
-    };
-
-    applyDeformToChildrenInternal(
-        std::dynamic_pointer_cast<Node>(shared_from_this()),
-        [this](std::shared_ptr<Node> target, const Vec2Array& verticesIn, Vec2Array& deformationIn, const Mat4* transformIn) {
-            return deformChildren(target, verticesIn, deformationIn, transformIn);
-        },
-        update,
-        [this]() { return translateChildren; },
-        params,
-        recursive);
+    Node::FilterHook hook;
+    hook.stage = 1;
+    hook.func = Node::FilterHook::Func::fromMethod<&SourceDeformation::deformChildrenSource>(self);
+    _applyDeformToChildren(hook, NodeFilter::SourceUpdate(update),
+        NodeFilter::SourceTransferCondition(transfer), params, recursive);
 }
 
 void GridDeformer::serializeSelfImpl(::nicxlive::core::serde::InochiSerializer& serializer, bool recursive, SerializeNodeFlags flags) const {
@@ -469,112 +673,46 @@ std::optional<GridDeformer::GridCellCache> GridDeformer::locate(float x, float y
     return cache;
 }
 
-std::vector<float> GridDeformer::normalizeAxis(const std::vector<float>& values) const {
-    if (values.empty()) return values;
-    std::vector<float> sorted = values;
-    std::sort(sorted.begin(), sorted.end());
-    sorted.erase(std::unique(sorted.begin(), sorted.end(), [](float a, float b) {
-        return std::fabs(a - b) < kAxisTolerance;
-    }), sorted.end());
+GridDeformer::Axis GridDeformer::normalizeAxis(Axis values) {
+    auto sorted = values.duplicate();
+    if (sorted.empty()) return sorted;
+    grid_axis_detail::sort(std::span<float>(sorted.data(), sorted.size()));
+    std::size_t write = 1;
+    const auto count = sorted.size();
+    for (std::size_t i = 1; i < count; ++i) {
+        if (!isCloseAxisValue(sourceGridAt(sorted, write - 1, 391), sourceGridAt(sorted, i, 391))) {
+            sourceGridAt(sorted, write, 392) = sourceGridAt(sorted, i, 392);
+            ++write;
+        }
+    }
+    sorted.resize(write);
     return sorted;
 }
 
-int GridDeformer::axisIndexOfValue(const std::vector<float>& axis, float value) const {
+int GridDeformer::axisIndexOfValue(Axis axis, float value) const {
     for (std::size_t i = 0; i < axis.size(); ++i) {
-        if (std::fabs(axis[i] - value) < kAxisTolerance) {
-            return static_cast<int>(i);
-        }
+        if (isCloseAxisValue(axis[i], value))
+            return std::bit_cast<std::int32_t>(static_cast<std::uint32_t>(i));
     }
     return -1;
 }
+void GridDeformer::adoptGridFromAxes(Axis xs, Axis ys) { setGridAxes(xs, ys); }
 
-bool GridDeformer::deriveAxes(const Vec2Array& points, std::vector<float>& xs, std::vector<float>& ys) const {
-    if (points.size() < 4) return false;
-    xs.clear();
-    ys.clear();
-    xs.reserve(points.size());
-    ys.reserve(points.size());
-    for (std::size_t i = 0; i < points.size(); ++i) {
-        xs.push_back(points.xAt(i));
-        ys.push_back(points.yAt(i));
+GridDeformer::IntervalResult GridDeformer::locateInterval(Axis axis, float value) const {
+    IntervalResult result;
+    if (axis.size() < 2) return result;
+    if (value < axis[0] || value > axis[axis.size() - 1]) return result;
+    std::size_t index = axis.size() - 2;
+    const auto count = axis.size() - 1;
+    for (std::size_t i = 0; i < count; ++i) {
+        if (value <= axis[i + 1]) { index = i; break; }
     }
-    xs = normalizeAxis(xs);
-    ys = normalizeAxis(ys);
-    if (xs.size() < 2 || ys.size() < 2) return false;
-    if (xs.size() * ys.size() != points.size()) return false;
-
-    std::vector<bool> seen(xs.size() * ys.size(), false);
-    for (std::size_t i = 0; i < points.size(); ++i) {
-        int xi = axisIndexOfValue(xs, points.xAt(i));
-        int yi = axisIndexOfValue(ys, points.yAt(i));
-        if (xi < 0 || yi < 0) return false;
-        auto idx = static_cast<std::size_t>(yi) * xs.size() + static_cast<std::size_t>(xi);
-        seen[idx] = true;
-    }
-    for (bool f : seen) if (!f) return false;
-    return true;
-}
-
-bool GridDeformer::fillDeformationFromPositions(const Vec2Array& positions) {
-    if (positions.size() != deformation.size()) {
-        deformation.fill(Vec2{0.0f, 0.0f});
-        return false;
-    }
-    std::vector<bool> seen(deformation.size(), false);
-    for (std::size_t i = 0; i < positions.size(); ++i) {
-        int xi = axisIndexOfValue(axisX, positions.xAt(i));
-        int yi = axisIndexOfValue(axisY, positions.yAt(i));
-        if (xi < 0 || yi < 0) {
-            deformation.fill(Vec2{0.0f, 0.0f});
-            return false;
-        }
-        auto idx = gridIndex(static_cast<std::size_t>(xi), static_cast<std::size_t>(yi));
-        deformation.set(idx, Vec2{
-            positions.xAt(i) - vertices.xAt(idx),
-            positions.yAt(i) - vertices.yAt(idx),
-        });
-        seen[idx] = true;
-    }
-    for (bool f : seen) {
-        if (!f) {
-            deformation.fill(Vec2{0.0f, 0.0f});
-            return false;
-        }
-    }
-    return true;
-}
-
-bool GridDeformer::adoptFromVertices(const Vec2Array& points, bool preserveShape) {
-    std::vector<float> xs;
-    std::vector<float> ys;
-    if (!deriveAxes(points, xs, ys)) return false;
-    setGridAxes(xs, ys);
-    if (preserveShape) {
-        if (!fillDeformationFromPositions(points)) return false;
-    }
-    return true;
-}
-
-void GridDeformer::adoptGridFromAxes(const std::vector<float>& xs, const std::vector<float>& ys) {
-    setGridAxes(xs, ys);
-}
-
-GridDeformer::IntervalResult GridDeformer::locateInterval(const std::vector<float>& axis, float value) const {
-    IntervalResult r;
-    if (axis.size() < 2) return r;
-    if (value < axis.front() || value > axis.back()) return r;
-    std::size_t idx = axis.size() - 2;
-    for (std::size_t i = 0; i + 1 < axis.size(); ++i) {
-        if (value <= axis[i + 1]) {
-            idx = i;
-            break;
-        }
-    }
-    float span = axis[idx + 1] - axis[idx];
-    r.index = idx;
-    r.weight = span > 0 ? (value - axis[idx]) / span : 0.0f;
-    r.valid = true;
-    return r;
+    const float span = axis[index + 1] - axis[index];
+    const float weight = span > 0 ? (value - axis[index]) / span : 0;
+    result.index = index;
+    result.weight = weight;
+    result.valid = true;
+    return result;
 }
 
 bool GridDeformer::matrixIsFinite(const Mat4& m) const {
@@ -587,26 +725,85 @@ bool GridDeformer::matrixIsFinite(const Mat4& m) const {
 }
 
 void GridDeformer::copyFrom(const Node& src, bool clone, bool deepCopy) {
+    [[maybe_unused]] const auto lifetime = weak_from_this().lock();
+    [[maybe_unused]] const auto sourceLifetime = src.weak_from_this().lock();
+    auto& source = const_cast<Node&>(src);
     Deformable::copyFrom(src, clone, deepCopy);
-    if (auto g = dynamic_cast<const GridDeformer*>(&src)) {
-        axisX = g->axisX;
-        axisY = g->axisY;
-        formation = g->formation;
-        dynamic = g->dynamic;
-        translateChildren = g->translateChildren;
-        inverseMatrix = g->inverseMatrix;
-        setGridAxes(axisX, axisY);
-        deformation = g->deformation;
-    } else if (auto drawable = dynamic_cast<const Deformable*>(&src)) {
-        if (!adoptFromVertices(drawable->vertices, true)) {
-            adoptGridFromAxes(std::vector<float>(kDefaultAxis.begin(), kDefaultAxis.end()),
-                              std::vector<float>(kDefaultAxis.begin(), kDefaultAxis.end()));
-        }
-    } else {
-        adoptGridFromAxes(std::vector<float>(kDefaultAxis.begin(), kDefaultAxis.end()),
-                          std::vector<float>(kDefaultAxis.begin(), kDefaultAxis.end()));
+    bool initialized = false;
+    if (auto* grid = dynamic_cast<GridDeformer*>(&source)) {
+        adoptGridFromAxes(grid->axisX, grid->axisY);
+        formation = grid->formation;
+        dynamic = grid->dynamic;
+        const auto offsets = grid->getDeformation().dup();
+        getDeformation() = offsets;
+        translateChildren = grid->translateChildren;
+        initialized = true;
+    } else if (auto* drawable = dynamic_cast<Drawable*>(&source)) {
+        if (adoptFromVertices(drawable->getVertices(), true)) initialized = true;
+    } else if (auto* deformable = dynamic_cast<Deformable*>(&source)) {
+        if (adoptFromVertices(deformable->getVertices(), true)) initialized = true;
     }
+    if (!initialized)
+        adoptGridFromAxes(Axis{kDefaultAxis[0], kDefaultAxis[1]}, Axis{kDefaultAxis[0], kDefaultAxis[1]});
     clearCache();
 }
 
+void GridDeformer::serializeSelfImpl(serde::TypedJsonWriter& serializer,
+    bool recursive, SerializeNodeFlags flags) const {
+    Deformable::serializeSelfImpl(serializer, recursive, flags);
+    serializer.putKey(d_runtime::RetainedString::fromStaticLiteral("grid_axis_x"));
+    auto xsState = serializer.listBegin();
+    const auto xs = axisX;
+    for (auto value : xs) { serializer.elemBegin(); serializer.serializeValue(value); }
+    serializer.listEnd(xsState);
+    serializer.putKey(d_runtime::RetainedString::fromStaticLiteral("grid_axis_y"));
+    auto ysState = serializer.listBegin();
+    const auto ys = axisY;
+    for (auto value : ys) { serializer.elemBegin(); serializer.serializeValue(value); }
+    serializer.listEnd(ysState);
+    serializer.putKey(d_runtime::RetainedString::fromStaticLiteral("formation"));
+    if (formation != GridFormation::Bilinear)
+        d_runtime::ngAssertUnreachable("Assertion failure", "mir/serde.d", 522);
+    serializer.putValue(d_runtime::RetainedString::fromStaticLiteral("Bilinear"));
+    serializer.putKey(d_runtime::RetainedString::fromStaticLiteral("dynamic"));
+    serializer.serializeValue(dynamic);
+}
+
+} // namespace nicxlive::core::nodes
+
+namespace nicxlive::core::nodes {
+serde::ReadError GridDeformer::deserializeFromFghj(serde::TypedJsonView data) {
+    if (auto error = Deformable::deserializeFromFghj(data)) return error;
+    const auto readAxis = [&](std::string_view key, Axis& axis) -> serde::ReadError {
+        if (data.findFirst(key).isMissing()) return {};
+        axis.resize(0);
+        const auto elements = data.findFirst(key).byElement();
+        for (auto element : elements) {
+            float value = std::numeric_limits<float>::quiet_NaN();
+            if (auto error = serde::deserializeValue(element, value)) return error;
+            axis.push_back(value);
+        }
+        return {};
+    };
+    if (auto error = readAxis("grid_axis_x", axisX)) return error;
+    if (auto error = readAxis("grid_axis_y", axisY)) return error;
+    if (!data.findFirst("formation").isMissing()) {
+        const auto input = data.findFirst("formation");
+        const auto text = input.kind() == serde::JsonKind::String ? input.stringBytes() : std::string_view{};
+        if (text != "Bilinear") {
+            std::string message = "Unable to deserialize string '";
+            message.append(text);
+            message += "' to GridFormationAllowed keys:allowedKeys";
+            throw d_runtime::ThrowableException(d_runtime::RetainedString(std::move(message)),
+                d_runtime::RetainedString::fromStaticLiteral("fghj/serialization.d"), 2167);
+        }
+        formation = GridFormation::Bilinear;
+    }
+    if (!data.findFirst("dynamic").isMissing()) {
+        if (auto error = serde::deserializeValue(data.findFirst("dynamic"), dynamic)) return error;
+    }
+    setGridAxes(axisX, axisY);
+    clearCache();
+    return {};
+}
 } // namespace nicxlive::core::nodes

@@ -1,4 +1,6 @@
 #include "mesh_group.hpp"
+#include "dynamic_composite.hpp"
+#include "grid_axis_sort.hpp"
 
 #include "../puppet.hpp"
 #include "../render.hpp"
@@ -91,6 +93,20 @@ MeshGroup::MeshGroup() {
     requirePreProcessTask();
 }
 
+std::shared_ptr<MeshGroup> MeshGroup::allocateSourceMeshGroupReceiver() {
+    ngRegisterModelResourceClassNames();
+    return std::allocate_shared<MeshGroup>(
+        d_runtime::SourceAllocator<MeshGroup>{}, DeferredConstruction{});
+}
+
+std::shared_ptr<MeshGroup> MeshGroup::create(const std::shared_ptr<Node>& parent) {
+    const auto actualParent = parent;
+    ngRegisterModelResourceClassNames();
+    auto result = std::shared_ptr<MeshGroup>(new MeshGroup(DeferredConstruction{}));
+    result->constructMeshGroupOwned(actualParent);
+    return result;
+}
+
 MeshGroup::MeshGroup(const std::shared_ptr<Node>& parent) : MeshGroup() {
     if (parent) {
         setParent(parent);
@@ -105,7 +121,11 @@ void MeshGroup::releaseTarget(const std::shared_ptr<Node>& target) {
     members.erase(std::remove(members.begin(), members.end(), target->uuid), members.end());
 }
 
-void MeshGroup::applyDeformToChildren(const std::vector<std::shared_ptr<core::param::Parameter>>& params, bool recursive) {
+void MeshGroup::dispose() {
+    NodeFilter::dispose();
+}
+
+void MeshGroup::applyDeformToChildren(common::SharedArray<std::shared_ptr<core::param::Parameter>> params, bool recursive) {
     if (dynamic || mesh->indices.empty()) return;
     if (!precalculated) precalculate();
     transform();
@@ -113,8 +133,8 @@ void MeshGroup::applyDeformToChildren(const std::vector<std::shared_ptr<core::pa
     inverseMatrix = globalTransform.toMat4().inverse();
 
     auto update = [&](const Vec2Array& deformationValues) {
-        transformedVertices.resize(vertices.size());
-        transformedVertices = vertices;
+        transformedVertices.resize(getVertices().size());
+        transformedVertices = getVertices();
         transformedVertices += deformationValues;
         for (std::size_t index = 0; index < triangles.size(); ++index) {
             auto p1 = transformedVertices[mesh->indices[index * 3]];
@@ -174,7 +194,7 @@ void MeshGroup::runPreProcessTask(core::RenderContext& ctx) {
     if (mesh->indices.empty()) return;
     if (!precalculated) precalculate();
     // update transformedVertices and triangle matrices
-    transformedVertices = vertices;
+    transformedVertices = getVertices();
     transformedVertices += deformation;
     if (traceMeshGroupEffectEnabled()) {
         float deformMaxAbs = 0.0f;
@@ -184,7 +204,7 @@ void MeshGroup::runPreProcessTask(core::RenderContext& ctx) {
         NJCX_DBG_LOG("[nicxlive][MeshGroup][Pre] node=%s(%u) verts=%zu deform=%zu deformMaxAbs=%.6f precalc=%d\n",
                      name.c_str(),
                      uuid,
-                     vertices.size(),
+                     getVertices().size(),
                      deformation.size(),
                      deformMaxAbs,
                      precalculated ? 1 : 0);
@@ -414,7 +434,7 @@ void MeshGroup::precalculate() {
         return;
     }
 
-    auto getBounds = [](const std::vector<Vec2>& verts) {
+    auto getBounds = [](const Vec2Array& verts) {
         Vec4 b{std::numeric_limits<float>::max(),
                std::numeric_limits<float>::max(),
                -std::numeric_limits<float>::max(),
@@ -581,9 +601,9 @@ void MeshGroup::centralize() {
         center = Vec2{ct.x, ct.y};
     }
     Vec2 diff{center.x - localTransform.translation.x, center.y - localTransform.translation.y};
-    for (std::size_t i = 0; i < vertices.size(); ++i) {
-        vertices.xAt(i) -= diff.x;
-        vertices.yAt(i) -= diff.y;
+    for (std::size_t i = 0; i < getVertices().size(); ++i) {
+        getVertices().xAt(i) -= diff.x;
+        getVertices().yAt(i) -= diff.y;
     }
     localTransform.translation.x = center.x;
     localTransform.translation.y = center.y;
@@ -603,15 +623,63 @@ void MeshGroup::centralize() {
 void MeshGroup::copyFrom(const Node& src, bool clone, bool deepCopy) {
     Drawable::copyFrom(src, clone, deepCopy);
     if (auto mg = dynamic_cast<const MeshGroup*>(&src)) {
-        bitMask = mg->bitMask;
-        bounds = mg->bounds;
-        triangles = mg->triangles;
-        transformedVertices = mg->transformedVertices;
-        forwardMatrix = mg->forwardMatrix;
-        inverseMatrix = mg->inverseMatrix;
-        translateChildren = mg->translateChildren;
         dynamic = mg->dynamic;
-        precalculated = mg->precalculated;
+        translateChildren = mg->translateChildren;
+        clearCache();
+    } else if (dynamic_cast<const DynamicComposite*>(&src)) {
+        translateChildren = true;
+        clearCache();
+    } else if (const auto* grid = dynamic_cast<const GridDeformer*>(&src)) {
+        MeshData copied;
+        const auto points = const_cast<GridDeformer*>(grid)->getVertices();
+        if (points.size() >= 4) {
+            std::vector<float> xs;
+            std::vector<float> ys;
+            xs.reserve(points.size());
+            ys.reserve(points.size());
+            for (std::size_t i = 0; i < points.size(); ++i) {
+                const auto point = points[i];
+                xs.push_back(point.x);
+                ys.push_back(point.y);
+            }
+            grid_axis_detail::sort(grid_axis_detail::Range(xs));
+            grid_axis_detail::sort(grid_axis_detail::Range(ys));
+            const auto uniqueArray = [](const std::vector<float>& values) {
+                std::vector<float> result;
+                for (const auto value : values)
+                    if (result.empty() || !(result.back() == value)) result.push_back(value);
+                return result;
+            };
+            const auto xsUnique = uniqueArray(xs);
+            const auto ysUnique = uniqueArray(ys);
+            if (xsUnique.size() >= 2 && ysUnique.size() >= 2 &&
+                xsUnique.size() * ysUnique.size() == points.size()) {
+                copied.vertices = points.dup();
+                copied.gridAxes.push_back(common::SharedArray<float>(ysUnique));
+                copied.gridAxes.push_back(common::SharedArray<float>(xsUnique));
+                const auto rows = ysUnique.size();
+                const auto cols = xsUnique.size();
+                const auto reserveCount = (cols - 1) * (rows - 1) * 6;
+                std::vector<std::uint16_t> indices;
+                indices.reserve(reserveCount);
+                for (std::size_t x = 0; x < cols - 1; ++x) {
+                    for (std::size_t y = 0; y < rows - 1; ++y) {
+                        const auto a = static_cast<std::uint16_t>(y * cols + x);
+                        const auto b = static_cast<std::uint16_t>(y * cols + x + 1);
+                        const auto c = static_cast<std::uint16_t>((y + 1) * cols + x);
+                        const auto d = static_cast<std::uint16_t>((y + 1) * cols + x + 1);
+                        for (const auto index : {a, b, c, b, d, c}) indices.push_back(index);
+                    }
+                }
+                copied.indices = common::SharedArray<std::uint16_t>(std::move(indices));
+            } else copied.vertices = points.dup();
+        }
+        rebuffer(copied);
+        deformation.resize(grid->deformation.size());
+        deformation = grid->deformation.dup();
+        dynamic = grid->dynamic;
+        translateChildren = true;
+        clearCache();
     }
 }
 
@@ -753,6 +821,26 @@ bool MeshGroup::pointInTriangle(const Vec2& p, const Vec2& a, const Vec2& b, con
     const bool hasNeg = (d1 < 0.0f) || (d2 < 0.0f) || (d3 < 0.0f);
     const bool hasPos = (d1 > 0.0f) || (d2 > 0.0f) || (d3 > 0.0f);
     return !(hasNeg && hasPos);
+}
+
+void MeshGroup::serializeSelfImpl(::nicxlive::core::serde::TypedJsonWriter& serializer,
+    bool recursive, SerializeNodeFlags flags) const {
+    Drawable::serializeSelfImpl(serializer, recursive, flags);
+    if (has_flag(flags, SerializeNodeFlags::State)) {
+        serializer.putField("dynamic_deformation", dynamic);
+        serializer.putField("translate_children", translateChildren);
+    }
+}
+
+::nicxlive::core::serde::ReadError MeshGroup::deserializeFromFghj(::nicxlive::core::serde::TypedJsonView data) {
+    namespace serde = ::nicxlive::core::serde;
+    (void)Drawable::deserializeFromFghj(data);
+    const auto dynamicData = data.findFirst("dynamic_deformation");
+    if (!dynamicData.isMissing()) (void)serde::deserializeValue(dynamicData, dynamic);
+    translateChildren = false;
+    const auto translateData = data.findFirst("translate_children");
+    if (!translateData.isMissing()) (void)serde::deserializeValue(translateData, translateChildren);
+    return {};
 }
 
 } // namespace nicxlive::core::nodes

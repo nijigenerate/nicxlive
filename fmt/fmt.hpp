@@ -1,11 +1,10 @@
 #pragma once
 
-#include "../texture.hpp"
-#include "../puppet.hpp"
+#include <texture.hpp>
+#include <puppet.hpp>
 #include "binfmt.hpp"
 #include "io.hpp"
 #include "serialize.hpp"
-#include "../utils/stb_image_write.h"
 #include <algorithm>
 #include <cstdint>
 #include <filesystem>
@@ -45,7 +44,7 @@ inline std::vector<uint8_t> encodeTga(const std::vector<uint8_t>& data, int widt
 }
 
 inline bool& inpModeFlag() {
-    static bool flag = false;
+    static thread_local bool flag = false;
     return flag;
 }
 
@@ -69,11 +68,8 @@ std::shared_ptr<T> inLoadPuppetFromMemory(const std::vector<uint8_t>& data) {
     };
     auto readU32 = [&](std::size_t& offset) -> uint32_t {
         if (offset + 4 > data.size()) throw std::runtime_error("Unexpected EOF");
-        uint32_t v = (static_cast<uint32_t>(data[offset]) << 24) |
-                     (static_cast<uint32_t>(data[offset + 1]) << 16) |
-                     (static_cast<uint32_t>(data[offset + 2]) << 8) |
-                     (static_cast<uint32_t>(data[offset + 3]));
-        offset += 4;
+        uint32_t v;
+        offset += inInterpretDataFromBuffer(std::span<const uint8_t>(data.data() + offset, 4), v);
         return v;
     };
 
@@ -202,7 +198,7 @@ inline std::vector<uint8_t> inWriteINPPuppetMemory(const class Puppet& p) {
             const auto& name = kv.first;
             const auto& payload = kv.second;
             appendU32(static_cast<uint32_t>(name.size()));
-            app.insert(app.end(), name.begin(), name.end());
+            app.insert(app.end(), name.data(), name.data() + name.size());
             appendU32(static_cast<uint32_t>(payload.size()));
             app.insert(app.end(), payload.begin(), payload.end());
         }

@@ -260,7 +260,6 @@ NjgResult njgGetSharedBuffers(void* renderer, SharedBufferSnapshot* snapshot);
 NjgRenderTargets njgGetRenderTargets(void* renderer);
 void njgSetLogCallback(NjgLogFn callback, void* userData);
 void njgFlushCommandBuffer(void* renderer);
-size_t njgGetGcHeapSize();
 TextureStats njgGetTextureStats(void* renderer);
 NjgResult njgGetWasmLayout(NjgWasmLayout* outLayout);
 

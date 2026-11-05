@@ -27,7 +27,7 @@ option(NICXLIVE_ENABLE_AVX2 "Enable AVX2 code generation for Release/RelWithDebI
 # WASM (Emscripten) build toggle
 option(BUILD_WASM "Build nicxlive for WebAssembly via Emscripten" OFF)
 
-# Boost is used for property_tree and qvm (header-only)
+# Boost supplies property_tree/qvm headers and the typed JSON SAX parser.
 # Prefer a Config package (common on Windows/vcpkg) and fall back to FindBoost.
 # On MSVC we default to static, multithreaded runtime unless the user overrides.
 if(WIN32 AND NOT DEFINED Boost_USE_STATIC_LIBS)
@@ -37,9 +37,9 @@ if(NOT DEFINED Boost_USE_MULTITHREADED)
   set(Boost_USE_MULTITHREADED ON)
 endif()
 
-find_package(Boost 1.70 QUIET CONFIG)
+find_package(Boost 1.90 QUIET CONFIG COMPONENTS json)
 if(NOT Boost_FOUND)
-  find_package(Boost 1.70 REQUIRED)
+  find_package(Boost 1.90 REQUIRED COMPONENTS json)
 endif()
 
 if(TARGET Boost::headers)
@@ -124,12 +124,60 @@ function(nicxlive_apply_optimizations target_name)
   endif()
 endfunction()
 
+set_source_files_properties(core/automation/package.cpp core/animation/animation.cpp PROPERTIES
+    COMPILE_OPTIONS "$<$<CXX_COMPILER_ID:MSVC>:/fp:strict>;$<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-ffp-contract=off>")
+
+set_source_files_properties(core/animation/player.cpp PROPERTIES
+    COMPILE_OPTIONS "$<$<CXX_COMPILER_ID:MSVC>:/fp:strict>;$<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-ffp-contract=off>;$<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-fno-fast-math>")
+
+set_source_files_properties(core/nodes/drawable.cpp core/texture.cpp PROPERTIES
+    COMPILE_OPTIONS "$<$<CXX_COMPILER_ID:MSVC>:/fp:strict>;$<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-ffp-contract=off>;$<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-fno-fast-math>")
+
+# Source Node finite guards and ordered scalar/matrix arithmetic stay precise,
+# including when the optional native fast-math policy is enabled elsewhere.
+set_property(SOURCE core/nodes/node.cpp APPEND PROPERTY COMPILE_OPTIONS
+    "$<$<CXX_COMPILER_ID:MSVC>:/fp:strict>"
+    "$<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-ffp-contract=off>"
+    "$<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-fno-fast-math>")
+
+# Shapes keeps its authored scalar operation order in the normal source target.
+set_source_files_properties(core/nodes/shapes.cpp PROPERTIES
+    COMPILE_OPTIONS "$<$<CXX_COMPILER_ID:MSVC>:/fp:strict>;$<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-ffp-contract=off>;$<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-fno-fast-math>")
+
+# The complete veca_ops source kernels preserve scalar/SIMD operation order.
+set_source_files_properties(core/math/veca_ops.cpp PROPERTIES
+    COMPILE_OPTIONS "$<$<CXX_COMPILER_ID:MSVC>:/fp:strict>;$<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-ffp-contract=off>;$<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-fno-fast-math>")
+
+# Shared defstack scalar arithmetic preserves its authored operation order.
+set_source_files_properties(core/param/deformation_ops.cpp PROPERTIES
+    COMPILE_OPTIONS "$<$<CXX_COMPILER_ID:MSVC>:/fp:strict>;$<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-ffp-contract=off>;$<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-fno-fast-math>")
 set(NICXLIVE_SOURCES
+    core/param/deformation_ops.cpp
+    core/math/veca_ops.cpp
+    core/nodes/shapes.cpp
+    core/compat/phobos_file_read.hpp
+    core/compat/phobos_file_exception.hpp
+    core/compat/phobos_unicode_cursor.hpp
+    core/compat/scope_exit.hpp
+    core/common/unicode_lowercase.hpp
+    core/resource.hpp
+    core/common/nullable_string.hpp
+    core/nodes/node.hpp
+    core/nodes/common.cpp
+    core/nodes/initialization.cpp
     core/texture.cpp
+    core/texture_loading.cpp
     core/puppet.cpp
+    core/utils/snapshot.cpp
+    core/utils/snapshot.hpp
+    core/animation/animation.cpp
+    core/animation/player.cpp
     core/unity_native.cpp
     core/runtime_state.cpp
+    core/resource.cpp
     core/timing.cpp
+    core/serde_reader.cpp
+    core/automation/package.cpp
     core/math/camera.cpp
     utils/stb_image_impl.cpp
     utils/stb_image_write_impl.cpp
@@ -143,6 +191,7 @@ set(NICXLIVE_SOURCES
     core/render/immediate.cpp
     core/render/shared_deform_buffer.cpp
     core/render/commands.cpp
+    core/dbg.cpp
     core/nodes/node.cpp
     core/nodes/part.cpp
     core/nodes/mask.cpp
@@ -164,7 +213,47 @@ set(NICXLIVE_SOURCES
     # math/transform.hpp is header-only
 )
 
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/NicxliveCommon.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/NicxliveImagefmt.cmake")
 add_library(nicxlive STATIC ${NICXLIVE_SOURCES})
+target_sources(nicxlive PUBLIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/utils/snapshot.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/nodes/simple_physics_driver.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/nodes/simple_physics_values.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/nodes/simple_physics_systems.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/math/camera.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/serialization_interface.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/serialization_fields.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/source_attributes.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/serde_source_attributes.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/type_id.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/fmt/serialize.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/nodes/defstack.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/param/deformation_ops.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/math/veca_ops.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/math/veca.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/nodes/dynamic_composite.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/nodes/animated_part.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/nodes/shapes.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/math/serialization.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/param/parameter.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/param/binding.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/param/binding_impl.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/param/deformation_io.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/nodes/common.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/nodes/initialization.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/animation/player.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/render/immediate.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/runtime_state.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/puppet.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/resource.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/common/resource_key_map.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/common/string_key_map.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/serde_json.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/common/object_key_policy.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/shader.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/render/backend_handles.hpp")
+target_link_libraries(nicxlive PUBLIC nicxlive::common nicxlive::imagefmt)
 add_library(nicxlive::nicxlive ALIAS nicxlive)
 
 target_include_directories(nicxlive
@@ -179,6 +268,7 @@ endif()
 target_link_libraries(nicxlive
     PUBLIC
         ${NICXLIVE_BOOST_HEADERS_TARGET}
+        Boost::json
 )
 
 target_compile_features(nicxlive PUBLIC cxx_std_20)
@@ -189,6 +279,44 @@ nicxlive_apply_optimizations(nicxlive)
 
 if(NICXLIVE_BUILD_SHARED)
   add_library(nicxlive_shared SHARED ${NICXLIVE_SOURCES})
+  target_sources(nicxlive_shared PUBLIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/utils/snapshot.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/nodes/simple_physics_driver.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/nodes/simple_physics_values.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/nodes/simple_physics_systems.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/math/camera.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/serialization_interface.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/serialization_fields.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/source_attributes.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/serde_source_attributes.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/type_id.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/fmt/serialize.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/nodes/defstack.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/param/deformation_ops.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/math/veca_ops.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/math/veca.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/nodes/dynamic_composite.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/nodes/animated_part.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/nodes/shapes.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/math/serialization.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/param/parameter.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/param/binding.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/param/binding_impl.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/param/deformation_io.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/nodes/common.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/nodes/initialization.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/animation/player.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/render/immediate.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/runtime_state.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/puppet.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/resource.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/common/resource_key_map.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/common/string_key_map.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/serde_json.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/common/object_key_policy.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/shader.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/render/backend_handles.hpp")
+  target_link_libraries(nicxlive_shared PUBLIC nicxlive::common nicxlive::imagefmt)
   set_target_properties(nicxlive_shared PROPERTIES OUTPUT_NAME nicxlive)
   target_include_directories(nicxlive_shared
       PUBLIC
@@ -201,6 +329,7 @@ if(NICXLIVE_BUILD_SHARED)
   target_link_libraries(nicxlive_shared
       PUBLIC
           ${NICXLIVE_BOOST_HEADERS_TARGET}
+        Boost::json
   )
   target_compile_features(nicxlive_shared PUBLIC cxx_std_20)
   if(NICXLIVE_ENABLE_DEBUG_LOG)
@@ -220,7 +349,7 @@ if(BUILD_WASM)
     "SHELL:-sNO_EXIT_RUNTIME=1"
     "SHELL:-sALLOW_TABLE_GROWTH=1"
     "SHELL:-sFORCE_FILESYSTEM=1"
-    "SHELL:-sEXPORTED_FUNCTIONS=['_main','_malloc','_free','_njgRuntimeInit','_njgRuntimeTerm','_njgCreateRenderer','_njgDestroyRenderer','_njgLoadPuppet','_njgUnloadPuppet','_njgBeginFrame','_njgTickPuppet','_njgEmitCommands','_njgGetSharedBuffers','_njgGetRenderTargets','_njgSetLogCallback','_njgFlushCommandBuffer','_njgGetGcHeapSize','_njgGetTextureStats','_njgSetPuppetScale','_njgSetPuppetTranslation','_njgGetParameters','_njgQuery','_njgUpdateParameters','_njgGetPuppetExtData','_njgPlayAnimation','_njgPauseAnimation','_njgStopAnimation','_njgSeekAnimation','_njgGetWasmLayout']"
+    "SHELL:-sEXPORTED_FUNCTIONS=['_main','_malloc','_free','_njgRuntimeInit','_njgRuntimeTerm','_njgCreateRenderer','_njgDestroyRenderer','_njgLoadPuppet','_njgUnloadPuppet','_njgBeginFrame','_njgTickPuppet','_njgEmitCommands','_njgGetSharedBuffers','_njgGetRenderTargets','_njgSetLogCallback','_njgFlushCommandBuffer','_njgGetTextureStats','_njgSetPuppetScale','_njgSetPuppetTranslation','_njgGetParameters','_njgQuery','_njgUpdateParameters','_njgGetPuppetExtData','_njgPlayAnimation','_njgPauseAnimation','_njgStopAnimation','_njgSeekAnimation','_njgGetWasmLayout']"
     "SHELL:-sEXPORTED_RUNTIME_METHODS=['addFunction','removeFunction','ccall','cwrap','UTF8ToString','stringToUTF8','lengthBytesUTF8','FS_createPath','FS_createDataFile','FS_unlink','HEAP8','HEAPU8','HEAP16','HEAPU16','HEAP32','HEAPU32','HEAPF32','HEAPF64']"
   )
 endif()
@@ -233,6 +362,10 @@ if(NICXLIVE_BUILD_TESTS)
   target_link_libraries(nicxlive_render_resource_lifetime_test PRIVATE nicxlive::nicxlive)
   add_test(NAME nicxlive_render_resource_lifetime_test COMMAND nicxlive_render_resource_lifetime_test)
   enable_testing()
+  add_executable(nicxlive_texture_readback_test tests/texture_readback_test.cpp)
+  target_link_libraries(nicxlive_texture_readback_test PRIVATE nicxlive::nicxlive)
+  target_compile_features(nicxlive_texture_readback_test PRIVATE cxx_std_20)
+  add_test(NAME nicxlive_texture_readback_test COMMAND nicxlive_texture_readback_test)
   add_executable(nicxlive_vec2array_test tests/vec2array_test.cpp)
   target_link_libraries(nicxlive_vec2array_test PRIVATE nicxlive::nicxlive)
   target_compile_features(nicxlive_vec2array_test PRIVATE cxx_std_20)
@@ -247,7 +380,7 @@ if(NICXLIVE_BUILD_TESTS)
       "SHELL:-sNO_EXIT_RUNTIME=1"
       "SHELL:-sALLOW_TABLE_GROWTH=1"
       "SHELL:-sFORCE_FILESYSTEM=1"
-      "SHELL:-sEXPORTED_FUNCTIONS=['_main','_malloc','_free','_njgRuntimeInit','_njgRuntimeTerm','_njgCreateRenderer','_njgDestroyRenderer','_njgLoadPuppet','_njgUnloadPuppet','_njgBeginFrame','_njgTickPuppet','_njgEmitCommands','_njgGetSharedBuffers','_njgGetRenderTargets','_njgSetLogCallback','_njgFlushCommandBuffer','_njgGetGcHeapSize','_njgGetTextureStats','_njgSetPuppetScale','_njgSetPuppetTranslation','_njgGetParameters','_njgQuery','_njgUpdateParameters','_njgGetPuppetExtData','_njgPlayAnimation','_njgPauseAnimation','_njgStopAnimation','_njgSeekAnimation','_njgGetWasmLayout']"
+      "SHELL:-sEXPORTED_FUNCTIONS=['_main','_malloc','_free','_njgRuntimeInit','_njgRuntimeTerm','_njgCreateRenderer','_njgDestroyRenderer','_njgLoadPuppet','_njgUnloadPuppet','_njgBeginFrame','_njgTickPuppet','_njgEmitCommands','_njgGetSharedBuffers','_njgGetRenderTargets','_njgSetLogCallback','_njgFlushCommandBuffer','_njgGetTextureStats','_njgSetPuppetScale','_njgSetPuppetTranslation','_njgGetParameters','_njgQuery','_njgUpdateParameters','_njgGetPuppetExtData','_njgPlayAnimation','_njgPauseAnimation','_njgStopAnimation','_njgSeekAnimation','_njgGetWasmLayout']"
       "SHELL:-sEXPORTED_RUNTIME_METHODS=['addFunction','removeFunction','ccall','cwrap','UTF8ToString','stringToUTF8','lengthBytesUTF8','FS_createPath','FS_createDataFile','FS_unlink','HEAP8','HEAPU8','HEAP16','HEAPU16','HEAP32','HEAPU32','HEAPF32','HEAPF64']"
     )
   endif()
@@ -255,4 +388,15 @@ if(NICXLIVE_BUILD_TESTS)
   target_compile_features(nicxlive_projectable_texture_offset_test PRIVATE cxx_std_20)
   nicxlive_apply_optimizations(nicxlive_projectable_texture_offset_test)
   add_test(NAME nicxlive_projectable_texture_offset_test COMMAND nicxlive_projectable_texture_offset_test)
+  if(WIN32)
+    get_target_property(nicxlive_json_library_type Boost::json TYPE)
+    if(nicxlive_json_library_type STREQUAL "SHARED_LIBRARY")
+      foreach(test_target nicxlive_rescan_render_test nicxlive_render_resource_lifetime_test
+          nicxlive_texture_readback_test nicxlive_vec2array_test nicxlive_projectable_texture_offset_test)
+        add_custom_command(TARGET ${test_target} POST_BUILD
+          COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            $<TARGET_FILE:Boost::json> $<TARGET_FILE_DIR:${test_target}>)
+      endforeach()
+    endif()
+  endif()
 endif()
