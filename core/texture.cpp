@@ -496,7 +496,9 @@ void Texture::dispose() {
     [[maybe_unused]] const auto receiver = weak_from_this().lock();
     if (sourceInitialized_) {
         if (sourceHandle_) {
-            const auto backend = tryRenderBackend();
+            // TLS owners can outlive renderer shutdown. Disposal must never
+            // invoke the backend factory after its graphics context is gone.
+            const auto backend = getCurrentRenderBackend();
             if (backend) backend->destroyTextureHandle(sourceHandle_);
         }
         sourceHandle_.reset();

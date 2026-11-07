@@ -593,7 +593,8 @@ void Part::runBeginTask(core::RenderContext& ctx) {
     offsetTint = Vec3{1, 1, 1};
     offsetScreenTint = Vec3{0, 0, 0};
     offsetEmissionStrength = 1;
-    syncTextureIds();
+    // Live texture references may be replaced by Projectable render targets.
+    // Serialized slot indices are resolved during loading, not during rendering.
     Drawable::runBeginTask(ctx);
 }
 
@@ -661,7 +662,6 @@ void Part::syncTextureIds() {
 void Part::draw() { drawSelf(false); }
 
 void Part::runRenderTask(core::RenderContext& ctx) {
-    syncTextureIds();
     enqueueRenderCommands(ctx);
 }
 
@@ -894,10 +894,11 @@ void Part::finalize() {
             }
         }
         masks = valid.empty() ? common::SharedArray<MaskBinding>{} : common::SharedArray<MaskBinding>(std::move(valid));
-        // Resolve texture pointers from slot IDs at finalize time.
-        // During node deserialize, puppet texture slots may not be ready yet.
+        // The typed loader already resolves real textures through its loading TLS.
+        // Preserve those owners; the puppet slot table is installed after finalize.
+        // Only legacy nodes without a resolved texture need the slot fallback.
         for (std::size_t i = 0; i < textureIds.size() && i < textures.size(); ++i) {
-            if (textureIds[i] < 0) continue;
+            if (textureIds[i] < 0 || textures[i]) continue;
             textures[i] = pup->resolveTextureSlot(static_cast<uint32_t>(textureIds[i]));
         }
     }

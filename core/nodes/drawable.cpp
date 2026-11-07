@@ -20,6 +20,7 @@
 #include "../compat/system_error.hpp"
 #include "../compat/phobos_stdio.hpp"
 #include "../runtime_state.hpp"
+#include "../dbg.hpp"
 
 #include <algorithm>
 #include <bit>
@@ -847,10 +848,10 @@ void Drawable::drawMeshLines(math::Vec4 color) const {
         points[iy + 4] = point(indices[ix + 2]);
         points[iy + 5] = point(index);
     }
-    if (auto backend = core::getCurrentRenderBackend()) {
-        backend->uploadDebugBuffer(points, {});
-        backend->drawDebugLines(color, trans);
-    }
+    // Use the Source debug path: it creates sequential edge indices and
+    // applies the active camera before drawing the local mesh coordinates.
+    core::dbg::inDbgSetBuffer(std::span<const Vec3>(points));
+    core::dbg::inDbgDrawLines(color, trans);
 }
 
 void Drawable::drawMeshPoints() const {
