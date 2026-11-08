@@ -219,10 +219,36 @@ void Part::updateUVs() {
     sharedUvMarkDirty();
 }
 
-void Part::drawSelf(bool /*isMask*/) {
-    core::RenderContext ctx;
-    ctx.renderBackend = core::getCurrentRenderBackend().get();
-    enqueueRenderCommands(ctx);
+void Part::drawSelf(bool isMask) {
+    if (!renderEnabled()) return;
+    auto backend = core::getCurrentRenderBackend();
+    if (!backend) return;
+    auto emitter = backend->createCommandEmitter();
+    if (!emitter) {
+        if (auto queue = std::dynamic_pointer_cast<core::render::QueueRenderBackend>(backend))
+            emitter = std::make_unique<core::render::QueueCommandEmitter>(queue);
+        else if (std::dynamic_pointer_cast<core::UnityRenderBackend>(backend)) {
+            drawOneImmediate();
+            return;
+        } else {
+            throw std::logic_error("Render backend does not support immediate Part drawing");
+        }
+    }
+    // Editor previews draw individual Parts outside Puppet::draw(). A context
+    // without a render graph silently discards enqueueRenderCommands(), so
+    // give this immediate draw its own command-emitter scope instead.
+    auto state = core::RenderGpuState::init();
+    emitter->beginFrame(backend.get(), state);
+    try {
+        const auto bindings = isMask ? std::vector<MaskBinding>{} : dedupMasks(masks);
+        if (!bindings.empty()) emitMasks(bindings, *emitter);
+        emitter->drawPart(std::dynamic_pointer_cast<Part>(shared_from_this()), isMask);
+        if (!bindings.empty()) emitter->endMask();
+    } catch (...) {
+        emitter->endFrame(backend.get(), state);
+        throw;
+    }
+    emitter->endFrame(backend.get(), state);
 }
 
 void Part::drawSelfPacket(bool isMask) {
@@ -905,10 +931,20 @@ void Part::finalize() {
 }
 
 void Part::setOneTimeTransform(const std::shared_ptr<Mat4>& transform) {
-    Node::setOneTimeTransform(transform);
-    for (auto& m : masks) {
-        if (auto mask = m.maskSrc.lock()) mask->setOneTimeTransform(transform);
+    // Masks may refer back to an ancestor or to another masked Part. Traverse
+    // each active receiver once, including when clearing the transform.
+    if (settingOneTimeTransform_) return;
+    settingOneTimeTransform_ = true;
+    try {
+        Node::setOneTimeTransform(transform);
+        for (auto& m : masks) {
+            if (auto mask = m.maskSrc.lock()) mask->setOneTimeTransform(transform);
+        }
+    } catch (...) {
+        settingOneTimeTransform_ = false;
+        throw;
     }
+    settingOneTimeTransform_ = false;
 }
 
 void Part::normalizeUV(void* dataPtr) {

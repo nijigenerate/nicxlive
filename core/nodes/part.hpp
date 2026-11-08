@@ -177,6 +177,7 @@ public:
     float getValueSource(d_runtime::RetainedString sourceKey) override;
 
 private:
+    bool settingOneTimeTransform_ = false;
     static std::shared_ptr<Part> allocateSourcePartReceiver();
 protected:
     explicit Part(DeferredConstruction) : Drawable(DeferredConstruction{}) {}
