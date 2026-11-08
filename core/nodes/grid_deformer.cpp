@@ -338,6 +338,7 @@ void GridDeformer::sampleGridPointsSource(Vec2Array& dst,
 
 SourceDeformResult GridDeformer::deformChildrenSource(std::shared_ptr<Node> target,
     Vec2Array origVertices, Vec2Array origDeformation, Mat4* origTransform) {
+    auto profile = core::render::profileScope("GridDeformer.deformChildrenSource");
     [[maybe_unused]] const auto receiverLifetime = weak_from_this().lock();
     if (!hasValidGrid()) return {Vec2Array{}, nullptr, false};
     if (auto path = std::dynamic_pointer_cast<PathDeformer>(target)) {

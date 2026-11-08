@@ -1,3 +1,4 @@
+#include "../render/profiler.hpp"
 #include "node.hpp"
 #include "../compat/source_c_string.hpp"
 #include "../dbg.hpp"
@@ -385,6 +386,7 @@ std::shared_ptr<::nicxlive::core::Puppet> Node::puppetRef() const {
 }
 
 void Node::preProcess() {
+    auto profile = core::render::profileScope("Node.preProcess");
     const auto lifetime = weak_from_this().lock();
     if (preProcessed) return;
     preProcessed = true;

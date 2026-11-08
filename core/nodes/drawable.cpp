@@ -1,3 +1,4 @@
+#include "../render/profiler.hpp"
 // Independent nijilive.core.nodes.drawable source adaptation.
 // Copyright (c) 2020, Inochi2D Project; (c) 2024, nijigenerate Project.
 // BSD-2-Clause; full terms and disclaimer are retained in LICENSE.
@@ -799,29 +800,32 @@ void WeldingLink::serialize(::nicxlive::core::serde::TypedJsonWriter& serializer
 }
 
 void Drawable::updateBounds() {
+    auto profile = core::render::profileScope("Drawable.updateBounds");
     if (!gDoGenerateBounds) return;
     const auto matrix = getDynamicMatrix();
-    if (getVertices().empty()) {
+    const auto& vertices = getVertices();
+    const auto count = vertices.size();
+    if (count == 0) {
         const auto worldTransform = transform();
         bounds = std::array<float, 4>{worldTransform.translation.x, worldTransform.translation.y,
             worldTransform.translation.x, worldTransform.translation.y};
         return;
     }
     const auto point = [&](std::size_t index) {
-        const Vec2 vertex = getVertices().at(index);
+        const Vec2 vertex = vertices.at(index);
         const Vec2 offset = deformation.at(index);
         return matrix.transformPoint({vertex.x + offset.x, vertex.y + offset.y, 0});
     };
     const auto first = point(0);
-    bounds = std::array<float, 4>{first.x, first.y, first.x, first.y};
-    auto& currentBounds = *bounds;
-    for (std::size_t index = 1; index < getVertices().size(); ++index) {
+    std::array<float, 4> next{first.x, first.y, first.x, first.y};
+    for (std::size_t index = 1; index < count; ++index) {
         const auto oriented = point(index);
-        if (oriented.x < (*bounds)[0]) (*bounds)[0] = oriented.x;
-        if (oriented.y < (*bounds)[1]) (*bounds)[1] = oriented.y;
-        if (oriented.x > (*bounds)[2]) (*bounds)[2] = oriented.x;
-        if (oriented.y > (*bounds)[3]) (*bounds)[3] = oriented.y;
+        if (oriented.x < next[0]) next[0] = oriented.x;
+        if (oriented.y < next[1]) next[1] = oriented.y;
+        if (oriented.x > next[2]) next[2] = oriented.x;
+        if (oriented.y > next[3]) next[3] = oriented.y;
     }
+    bounds = next;
 }
 
 void Drawable::drawMeshLines(math::Vec4 color) const {

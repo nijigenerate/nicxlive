@@ -1454,6 +1454,7 @@ Mat4 PathDeformer::sourceSafeInverse(Mat4 matrix, const std::string& context) {
 
 SourceDeformResult PathDeformer::deformChildrenSource(std::shared_ptr<Node> target,
     Vec2Array originalVertices, Vec2Array originalDeformation, Mat4* originalTransform) {
+    auto profile = core::render::profileScope("PathDeformer.deformChildrenSource");
     const auto retainedReceiver = weak_from_this().lock();
     if (!originalCurve || getVertices().size() < 2) return {{}, nullptr, false};
     const bool started = sourceBeginDiagnosticFrame();
