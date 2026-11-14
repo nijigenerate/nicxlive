@@ -1,5 +1,8 @@
 #include "../core/nodes/composite.hpp"
+#include "../core/nodes/dynamic_composite.hpp"
 #include "../core/nodes/projectable.hpp"
+#include "../core/render/backend_queue.hpp"
+#include "../core/runtime_state.hpp"
 #include "../core/nodes/simple_physics_driver.hpp"
 #include "../core/serde.hpp"
 #include "../core/timing.hpp"
@@ -98,6 +101,26 @@ void testCompositeTextureOffsetUsesOriginOffset() {
     requireNear("composite textureOffset.y", node->textureOffset.y, 80.0f);
 }
 
+void testFixedDynamicCompositeKeepsInputFrameUnderDeformation() {
+    using nicxlive::core::nodes::DynamicComposite;
+    using nicxlive::core::nodes::MeshData;
+    MeshData mesh;
+    mesh.vertices = {Vec2{10, 20}, Vec2{10, 60}, Vec2{70, 20}, Vec2{70, 60}};
+    mesh.uvs = {Vec2{0, 0}, Vec2{0, 1}, Vec2{1, 0}, Vec2{1, 1}};
+    mesh.indices = {0, 1, 2, 2, 1, 3};
+    mesh.origin = Vec2{5, 7};
+    auto node = DynamicComposite::create(mesh, 123);
+    node->deformation = {};
+    appendUniformDeformation(*node, Vec2{120, -90});
+    node->deformation[3] = Vec2{145, -110};
+
+    requireTrue("fixed DynamicComposite opens its target at a turned pose", node->initTarget());
+    requireNear("fixed DynamicComposite input center x", node->textureOffset.x, 35);
+    requireNear("fixed DynamicComposite input center y", node->textureOffset.y, 33);
+    requireTrue("fixed DynamicComposite input extent", node->texWidth == 61 && node->texHeight == 41);
+    requireNear("fixed DynamicComposite retains output deformation", node->deformation.xAt(3), 145);
+}
+
 void testSimplePhysicsDeserializesDEnumNames() {
     nicxlive::core::serde::Fghj data;
     data.put("model_type", "SpringPendulum");
@@ -159,8 +182,12 @@ void testSimplePhysicsResetIgnoresStaleLengthOffset() {
 } // namespace
 
 int main() {
+    auto backend = std::make_shared<nicxlive::core::render::QueueRenderBackend>();
+    nicxlive::core::inSetRenderBackend(backend);
+    nicxlive::core::initRendererCommon();
     testProjectableTextureOffsetUsesOriginOffset();
     testCompositeTextureOffsetUsesOriginOffset();
+    testFixedDynamicCompositeKeepsInputFrameUnderDeformation();
     testSimplePhysicsDeserializesDEnumNames();
     testSimplePhysicsSpringPendulumRecoversFromZeroLength();
     testSimplePhysicsResetIgnoresStaleLengthOffset();

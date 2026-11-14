@@ -500,14 +500,17 @@ bool Projectable::initTarget() {
     auto prevTexture = textures[0];
     auto prevStencil = stencil;
 
-    updateBounds();
+    // Mesh UVs place the offscreen image. Fixed meshes and screen-space
+    // Composites already express that image rectangle in mesh coordinates.
+    const bool useMeshFrame = !autoResizedMesh || typeId() == "Composite";
+    if (!useMeshFrame) updateBounds();
     std::array<float, 4> b{};
     bool hasBounds = false;
-    if (bounds) {
+    if (!useMeshFrame && bounds) {
         b = *bounds;
         hasBounds = std::isfinite(b[0]) && std::isfinite(b[1]) && std::isfinite(b[2]) && std::isfinite(b[3]);
     }
-    if (!hasBounds) {
+    if (!useMeshFrame && !hasBounds) {
         auto t = transform();
         float minX = t.translation.x;
         float minY = t.translation.y;
@@ -540,7 +543,7 @@ bool Projectable::initTarget() {
             hasBounds = true;
         }
     }
-    if (!hasBounds) {
+    if (!useMeshFrame && !hasBounds) {
         return false;
     }
 
@@ -551,7 +554,7 @@ bool Projectable::initTarget() {
     const std::size_t count = meshVertices.size();
     for (std::size_t i = 0; i < count; ++i) {
         Vec2 pos = meshVertices[i];
-        if (i < deformation.size()) {
+        if (!useMeshFrame && i < deformation.size()) {
             auto d = deformation[i];
             pos.x += d.x;
             pos.y += d.y;
@@ -574,11 +577,16 @@ bool Projectable::initTarget() {
     }
     texWidth = static_cast<uint32_t>(std::ceil(size.x)) + 1;
     texHeight = static_cast<uint32_t>(std::ceil(size.y)) + 1;
-    Vec2 deformOffset = deformationTranslationOffset();
-    auto t = transform();
-    textureOffset = Vec2{(b[0]+b[2])/2.0f, (b[1]+b[3])/2.0f};
-    textureOffset.x += deformOffset.x - t.translation.x;
-    textureOffset.y += deformOffset.y - t.translation.y;
+    if (!useMeshFrame) {
+        Vec2 deformOffset = deformationTranslationOffset();
+        auto t = transform();
+        textureOffset = Vec2{(b[0]+b[2])/2.0f, (b[1]+b[3])/2.0f};
+        textureOffset.x += deformOffset.x - t.translation.x;
+        textureOffset.y += deformOffset.y - t.translation.y;
+    } else {
+        textureOffset = Vec2{(minPos.x + maxPos.x) / 2.0f - mesh->origin.x,
+                             (minPos.y + maxPos.y) / 2.0f - mesh->origin.y};
+    }
     {
         // Source constructs the full literal before replacing any existing fixed-array slot.
         const auto replacement = Texture::createSource(static_cast<int>(texWidth), static_cast<int>(texHeight), 4, false, false);
@@ -658,7 +666,11 @@ void Projectable::dynamicRenderBegin(core::RenderContext& ctx) {
     queuedOffscreenParts.clear();
     if (!renderEnabled() || !ctx.renderGraph) return;
     updateDynamicRenderStateFlags();
-    bool needsRedraw = textureInvalidated || deferred > 0;
+    // A nested projection also depends on the resolved transforms of its
+    // children in this frame. In particular, a neutral key can restore the
+    // children without emitting a deformation-change notification.
+    bool needsRedraw = textureInvalidated || deferred > 0 ||
+                       hasProjectableAncestor(std::static_pointer_cast<Projectable>(shared_from_this()));
     if (!needsRedraw) {
         reuseCachedTextureThisFrame = true;
         loggedFirstRenderAttempt = true;

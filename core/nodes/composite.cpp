@@ -505,12 +505,15 @@ void Composite::dynamicRenderBegin(core::RenderContext& ctx) {
     dynamicScopeActive = false;
     dynamicScopeToken = static_cast<std::size_t>(-1);
     reuseCachedTextureThisFrame = false;
+    // Bounds cached during a descendant's change notification can describe a
+    // partially evaluated pose. Size the pass from the finished draw state.
+    if (autoResizedMesh && textureInvalidated) {
+        invalidateChildrenBounds();
+        boundsDirty = true;
+    }
     updateDynamicRenderStateFlags();
 
     if (!hasValidOffscreenContent) {
-        textureInvalidated = true;
-    }
-    if (autoResizedMesh && createSimpleMesh()) {
         textureInvalidated = true;
     }
     queuedOffscreenParts.clear();
@@ -527,7 +530,10 @@ void Composite::dynamicRenderBegin(core::RenderContext& ctx) {
         return;
     }
 
-    bool needsRedraw = textureInvalidated || deferred > 0;
+    const bool nestedProjection = std::any_of(subParts.begin(), subParts.end(), [](const auto& child) {
+        return std::dynamic_pointer_cast<Projectable>(child) != nullptr;
+    });
+    bool needsRedraw = textureInvalidated || deferred > 0 || nestedProjection;
     if (!needsRedraw) {
         reuseCachedTextureThisFrame = true;
         loggedFirstRenderAttempt = true;
