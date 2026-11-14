@@ -7,7 +7,21 @@ void check(bool value, const char* message) { if (!value) throw std::runtime_err
 int main() {
     auto backend = std::make_shared<render::QueueRenderBackend>();
     setCurrentRenderBackend(backend);
+    {
+        // Source textures have no legacy CPU mirror; host upload must read the backend.
+        SourceTextureBytes pixels(8, 0);
+        pixels[0] = 42; pixels[3] = 255; pixels[4] = 91; pixels[7] = 128;
+        auto source = Texture::createSource(pixels, 2, 1, 4, 4, false, false);
+        check(source->data().empty(), "source unexpectedly has a legacy CPU mirror");
+        auto bytes = source->getSourceTextureData();
+        check(bytes.size() == 8 && bytes[0] == 42 && bytes[4] == 91 && bytes[7] == 128,
+              "opaque source texture lost pixels on queue readback");
+        pixels[0] = 73;
+        source->setData(pixels, 4);
+        check(source->getSourceTextureData()[0] == 73, "opaque source upload did not update pixels");
+    }
     Texture texture(std::vector<uint8_t>{10, 20, 30, 128, 7, 8, 9, 0}, 2, 1);
+    check(texture.getSourceTextureData()[0] == 10, "legacy texture source readback failed");
     auto first = texture.getTextureData();
     check(*first == texture.data(), "initial readback");
     // Exercise real queue storage changes, independent of Texture's CPU mirror.

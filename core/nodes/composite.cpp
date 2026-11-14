@@ -64,6 +64,59 @@ void Composite::copyFrom(const Node& src, bool clone, bool deepCopy) {
 
 bool Composite::mustPropagate() const { return propagateMeshGroup; }
 
+void Composite::serializeSelfImpl(serde::TypedJsonWriter& writer, bool recursive, SerializeNodeFlags flags) const {
+    // A Composite owns compositing state, not an authored mesh or texture.
+    // Its transient render target must not change the saved model signature.
+    Node::serializeSelfImpl(writer,recursive,flags);
+    if (has_flag(flags,SerializeNodeFlags::State)) {
+        writer.putKey("blend_mode");serde::serializeValue(writer,blendMode);
+        const auto vector=[&](const char* key,Vec3 value) {
+            writer.putKey(key);const auto list=writer.listBegin();
+            for(float v:{value.x,value.y,value.z}) {writer.elemBegin();writer.putValue(v);}
+            writer.listEnd(list);
+        };
+        vector("tint",tint);vector("screenTint",screenTint);
+        writer.putField("mask_threshold",maskAlphaThreshold);writer.putField("opacity",opacity);
+        writer.putField("propagate_meshgroup",propagateMeshGroup);
+    }
+    if (has_flag(flags,SerializeNodeFlags::Links) && !masks.empty()) {
+        writer.putKey("masks");const auto list=writer.listBegin();
+        for(const auto& mask:masks) {writer.elemBegin();mask.serialize(writer);}
+        writer.listEnd(list);
+    }
+}
+
+serde::ReadError Composite::deserializeFromFghj(serde::TypedJsonView data) {
+    if(auto error=Node::deserializeFromFghj(data))return error;
+    const auto readOptional = [&](const char* key, auto& value) {
+        const auto field = data.findFirst(key);
+        if (!field.isMissing()) (void)serde::deserializeValue(field, value);
+    };
+    readOptional("opacity", opacity);
+    readOptional("mask_threshold", maskAlphaThreshold);
+    readOptional("blend_mode", blendMode);
+    const auto vector=[&](const char* key,Vec3& value) -> serde::ReadError {
+        const auto input=data.findFirst(key);
+        if(input.isMissing() || input.kind()==serde::JsonKind::Null)return {};
+        if(input.kind()!=serde::JsonKind::Array)throw serde::JsonConversionError("Expected a numeric vector array");
+        const auto elements=input.elements();
+        const std::array<float*,3> coordinates{&value.x,&value.y,&value.z};
+        for(std::size_t i=0;i<elements.size()&&i<coordinates.size();++i)
+            if(auto error=serde::deserializeNumber(elements[i],*coordinates[i]))return error;
+        return {};
+    };
+    if(auto error=vector("tint",tint))return error;
+    if(auto error=vector("screenTint",screenTint))return error;
+    propagateMeshGroup=false;
+    // Older INX files omit this flag and use the default composite behavior.
+    readOptional("propagate_meshgroup", propagateMeshGroup);
+    masks.clear();
+    if(!data.findFirst("masks").isMissing())
+        if(auto error=serde::deserializeValue(data.findFirst("masks"),masks))return error;
+    autoResizedMesh=true;textures={};
+    return {};
+}
+
 void Composite::serializeSelfImpl(::nicxlive::core::serde::InochiSerializer& serializer, bool recursive, SerializeNodeFlags flags) const {
     // Texturesを一時退避して状態のみをシリアライズ（D相当）
     auto savedTextures = textures;

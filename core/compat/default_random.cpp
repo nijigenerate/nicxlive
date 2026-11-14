@@ -9,6 +9,11 @@
 #endif
 #include <windows.h>
 #include <bcrypt.h>
+#elif defined(__EMSCRIPTEN__)
+#include <emscripten.h>
+EM_JS(void, nicxliveFillRandom, (void* data, size_t length), {
+    crypto.getRandomValues(HEAPU8.subarray(data, data + length));
+});
 #elif defined(__linux__)
 #include <sys/random.h>
 #else
@@ -66,6 +71,8 @@ std::uint64_t unpredictableSeed() {
     thread_local BcryptModule module;
     if (!module.generate(seed))
         sourceAssertUnreachable("BCryptGenRandom() failed.", "std/random.d", 1988);
+#elif defined(__EMSCRIPTEN__)
+    nicxliveFillRandom(&seed, sizeof(seed));
 #elif defined(__linux__)
     const auto status = ::getrandom(&seed, sizeof(seed), 0);
 #ifndef NDEBUG

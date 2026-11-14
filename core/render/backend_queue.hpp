@@ -58,6 +58,21 @@ struct TextureCommand {
 
 class QueueRenderBackend : public RenderBackend {
 public:
+    // The host renderer implements blending from emitted commands.
+    bool supportsAdvancedBlend() override { return false; }
+    bool supportsAdvancedBlendCoherent() override { return false; }
+    std::shared_ptr<RenderTextureHandle> createTextureHandle() override;
+    void destroyTextureHandle(std::shared_ptr<RenderTextureHandle>) override;
+    void bindTextureHandle(std::shared_ptr<RenderTextureHandle>, unsigned) override {}
+    std::size_t textureNativeHandle(std::shared_ptr<RenderTextureHandle>) override;
+    void uploadTextureData(std::shared_ptr<RenderTextureHandle>, int, int, int, int, bool, SourceTextureBytes) override;
+    void readTextureData(std::shared_ptr<RenderTextureHandle>, int, bool, SourceTextureBytes) override;
+    void readTextureData(std::uint32_t, int, bool, SourceTextureBytes) override;
+    void generateTextureMipmap(std::shared_ptr<RenderTextureHandle>) override {}
+    void applyTextureFiltering(std::shared_ptr<RenderTextureHandle>, Filtering, bool) override;
+    void applyTextureWrapping(std::shared_ptr<RenderTextureHandle>, Wrapping) override;
+    void applyTextureAnisotropy(std::shared_ptr<RenderTextureHandle>, float) override;
+    float maxTextureAnisotropy() override { return 1.0f; }
     std::size_t textureNativeHandle(std::uint32_t texture) override { return texture; }
     void clear();
     void initializeDrawableResources() override;

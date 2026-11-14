@@ -5,6 +5,7 @@
 #include "binfmt.hpp"
 #include "io.hpp"
 #include "serialize.hpp"
+#include "typed_reader.hpp"
 #include <algorithm>
 #include <cstdint>
 #include <filesystem>
@@ -60,80 +61,18 @@ std::shared_ptr<T> inLoadJSONPuppet(const std::string& data) {
 }
 
 template <typename T>
+std::shared_ptr<T> inLoadPuppetFromMemory(common::SharedArray<uint8_t> data) {
+    const bool binary = data.size() >= MAGIC_BYTES.size() &&
+        std::equal(MAGIC_BYTES.begin(), MAGIC_BYTES.end(), data.begin());
+    inpModeFlag() = binary;
+    if (binary) return inLoadTypedPuppetBinary<T>(data);
+    return inLoadJSONPuppet<T>(
+        data.empty() ? std::string{} : std::string(reinterpret_cast<const char*>(data.data()), data.size()));
+}
+
+template <typename T>
 std::shared_ptr<T> inLoadPuppetFromMemory(const std::vector<uint8_t>& data) {
-    // Detect INP/INX magic
-    auto startsWith = [&](const std::array<uint8_t, 8>& magic) {
-        return data.size() >= magic.size() &&
-               std::equal(magic.begin(), magic.end(), data.begin());
-    };
-    auto readU32 = [&](std::size_t& offset) -> uint32_t {
-        if (offset + 4 > data.size()) throw std::runtime_error("Unexpected EOF");
-        uint32_t v;
-        offset += inInterpretDataFromBuffer(std::span<const uint8_t>(data.data() + offset, 4), v);
-        return v;
-    };
-
-    if (!startsWith(MAGIC_BYTES)) {
-        // Fallback: treat as JSON string
-        return inLoadJsonDataFromMemory<T>(std::string(data.begin(), data.end()));
-    }
-
-    inpModeFlag() = true;
-    std::size_t offset = MAGIC_BYTES.size();
-    uint32_t puppetLen = readU32(offset);
-    if (offset + puppetLen > data.size()) throw std::runtime_error("Invalid INP puppet length");
-    std::string puppetJson(reinterpret_cast<const char*>(data.data() + offset), puppetLen);
-    offset += puppetLen;
-
-    auto puppet = inLoadJsonDataFromMemory<T>(puppetJson);
-
-    // Texture section
-    if (offset + TEX_SECTION.size() <= data.size() &&
-        std::equal(TEX_SECTION.begin(), TEX_SECTION.end(), data.begin() + offset)) {
-        offset += TEX_SECTION.size();
-        uint32_t slotCount = readU32(offset);
-        for (uint32_t i = 0; i < slotCount; ++i) {
-            uint32_t texLen = readU32(offset);
-            if (offset + texLen + 1 > data.size()) throw std::runtime_error("Invalid texture payload");
-            uint8_t texType = data[offset++]; // placeholder, currently ignored
-            (void)texType;
-            std::vector<uint8_t> payload(data.begin() + offset, data.begin() + offset + texLen);
-            offset += texLen;
-            if constexpr (requires(std::shared_ptr<T> p) { p->textureSlots; }) {
-                if (puppet->textureSlots.size() <= i) {
-                    puppet->textureSlots.resize(static_cast<std::size_t>(i) + 1);
-                }
-                if (payload.empty()) {
-                    puppet->textureSlots[i].reset();
-                    continue;
-                }
-                auto shallow = ::nicxlive::core::ShallowTexture(payload);
-                puppet->textureSlots[i] = std::make_shared<::nicxlive::core::Texture>(shallow);
-            }
-        }
-    }
-
-    // EXT section
-    if (offset + EXT_SECTION.size() <= data.size() &&
-        std::equal(EXT_SECTION.begin(), EXT_SECTION.end(), data.begin() + offset)) {
-        offset += EXT_SECTION.size();
-        uint32_t extCount = readU32(offset);
-        for (uint32_t i = 0; i < extCount; ++i) {
-            uint32_t nameLen = readU32(offset);
-            if (offset + nameLen > data.size()) throw std::runtime_error("Invalid ext name length");
-            std::string name(reinterpret_cast<const char*>(data.data() + offset), nameLen);
-            offset += nameLen;
-            uint32_t payloadLen = readU32(offset);
-            if (offset + payloadLen > data.size()) throw std::runtime_error("Invalid ext payload length");
-            std::vector<uint8_t> payload(data.begin() + offset, data.begin() + offset + payloadLen);
-            offset += payloadLen;
-            if constexpr (requires(std::shared_ptr<T> p) { p->extData; }) {
-                puppet->extData[name] = payload;
-            }
-        }
-    }
-
-    return puppet;
+    return inLoadPuppetFromMemory<T>(common::SharedArray<uint8_t>(data));
 }
 
 template <typename T>
@@ -148,7 +87,7 @@ std::shared_ptr<T> inLoadPuppet(const std::string& file) {
         if (!inVerifyMagicBytes(buffer)) {
             throw std::runtime_error("Invalid data format for INP/INX puppet");
         }
-        return inLoadPuppetFromMemory<T>(buffer);
+        return inLoadPuppetFromMemory<T>(common::SharedArray<uint8_t>(std::move(buffer)));
     }
     throw std::runtime_error("Invalid file format for puppet: " + ext);
 }

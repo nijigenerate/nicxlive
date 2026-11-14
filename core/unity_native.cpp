@@ -237,7 +237,7 @@ static void ensurePuppetTextures(RendererCtx& ctx, const std::shared_ptr<Puppet>
                                                     /*renderTarget*/ false, tex->stencil(), ctx.callbacks.userData);
         if (handle != 0) {
             ctx.runtimeTextureHandles[uuid] = handle;
-            const auto& data = tex->data();
+            const auto data = tex->getSourceTextureData();
             if (!data.empty() && ctx.callbacks.updateTexture) {
                 ctx.callbacks.updateTexture(handle, data.data(), data.size(), tex->width(), tex->height(), tex->channels(), ctx.callbacks.userData);
             }
@@ -280,7 +280,7 @@ static size_t ensureDynamicTextureHandle(RendererCtx& ctx, const std::shared_ptr
     }
     if (expected > 0) {
         upload.resize(expected, 0);
-        const auto& data = tex->data();
+        const auto data = tex->getSourceTextureData();
         if (!data.empty()) {
             auto copyLen = (std::min)(expected, data.size());
             std::copy_n(data.begin(), copyLen, upload.begin());
@@ -573,8 +573,8 @@ NjgResult njgCreateRenderer(const UnityRendererConfig* config, const UnityResour
     ctx->emitter = std::make_unique<RenderCommandEmitter>();
     ctx->ctx.renderGraph = ctx->graph.get();
     ctx->ctx.renderBackend = ctx->backend.get();
-    ctx->ctx.gpuState = RenderGpuState::init();
     setCurrentRenderBackend(ctx->backend);
+    ctx->ctx.gpuState = RenderGpuState::init();
     initRendererCommon();
     ctx->backend->initializeRenderer();
     if (config->viewportWidth > 0 && config->viewportHeight > 0) {
@@ -635,6 +635,11 @@ NjgResult njgLoadPuppet(void* renderer, const char* pathUtf8, void** outPuppet) 
             std::function<void(const std::shared_ptr<nodes::Node>&)> markProjectablesIgnorePuppet;
             markProjectablesIgnorePuppet = [&](const std::shared_ptr<nodes::Node>& n) {
                 if (!n) return;
+                // The compatibility INX loader installs the texture section after
+                // node deserialization. Resolve Part slots before building packets.
+                if (auto part = std::dynamic_pointer_cast<nodes::Part>(n)) {
+                    part->syncTextureIds();
+                }
                 if (auto proj = std::dynamic_pointer_cast<nodes::Projectable>(n)) {
                     proj->setIgnorePuppet(true);
                 }
@@ -647,6 +652,12 @@ NjgResult njgLoadPuppet(void* renderer, const char* pathUtf8, void** outPuppet) 
             root->build(true);
         }
         auto ctx = std::make_unique<PuppetCtx>();
+        unityLog("[physics-check] drivers=" + std::to_string(pup->getDrivers().size()) +
+                 " enabled=" + std::to_string(pup->enableDrivers));
+        for (const auto& driver : pup->getDrivers()) {
+            unityLog("[physics-check] active=" + std::to_string(driver->renderEnabled()) +
+                     " parameters=" + std::to_string(driver->getAffectedParameters().size()));
+        }
         ctx->puppet = pup;
         void* handle = ctx.get();
         {

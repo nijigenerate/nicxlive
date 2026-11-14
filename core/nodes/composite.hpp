@@ -43,6 +43,8 @@ public:
     bool mustPropagate() const override;
     void serializeSelfImpl(::nicxlive::core::serde::InochiSerializer& serializer, bool recursive, SerializeNodeFlags flags) const override;
     ::nicxlive::core::serde::SerdeException deserializeFromFghj(const ::nicxlive::core::serde::Fghj& data) override;
+    void serializeSelfImpl(serde::TypedJsonWriter&, bool, SerializeNodeFlags) const override;
+    serde::ReadError deserializeFromFghj(serde::TypedJsonView) override;
     Vec4 getChildrenBounds(bool forceUpdate = true) override;
     void enableMaxChildrenBounds(const std::shared_ptr<Node>& target = nullptr) override;
     bool createSimpleMesh() override;

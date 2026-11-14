@@ -740,39 +740,19 @@ void MeshGroup::setupChildNoRecurse(const std::shared_ptr<Node>& node, bool prep
         deformable->removeDeformPreProcessFilter(kMeshGroupFilterStage, tag);
         deformable->removeDeformPostProcessFilter(kMeshGroupFilterStage, tag);
     }
-    if (deformable && !useNodeFilter) {
-        if (translateChildren || isDeformable) {
-            Node::DeformFilterHook hook{};
-            hook.stage = kMeshGroupFilterStage;
-            hook.tag = tag;
-            hook.func = [this](std::shared_ptr<Node> t,
-                               const Vec2Array& verts,
-                               Vec2Array& def,
-                               const Mat4* mat) {
-                return filterChildren(t, verts, def, mat);
-            };
-            if (dynamic) {
-                deformable->upsertDeformPostProcessFilter(std::move(hook), prepend);
-            } else {
-                deformable->upsertDeformPreProcessFilter(std::move(hook), prepend);
-            }
-        }
-    } else if (translateChildren || isDeformable) {
+    if (translateChildren || isDeformable) {
+        // The scheduler executes Node's filter lists, including for Deformable.
         Node::FilterHook hook{};
         hook.stage = kMeshGroupFilterStage;
         hook.tag = tag;
-        hook.func = [this](std::shared_ptr<Node> t,
-                           const Vec2Array& verts,
-                           Vec2Array def,
-                           const Mat4* mat) {
-            auto result = filterChildren(t, verts, def, mat);
-            return std::make_tuple(result.changed ? def : Vec2Array{}, static_cast<Mat4*>(nullptr), result.changed);
+        hook.func = [this](std::shared_ptr<Node> target, const Vec2Array& vertices,
+                           Vec2Array offsets, const Mat4* matrix) {
+            const auto result = filterChildren(target, vertices, offsets, matrix);
+            return std::make_tuple(result.changed ? offsets : Vec2Array{}, nullptr, result.changed);
         };
-        if (prepend) {
-            pre.insert(pre.begin(), hook);
-        } else {
-            pre.push_back(hook);
-        }
+        auto& filters = isDeformable && !useNodeFilter && dynamic ? post : pre;
+        if (prepend) filters.insert(filters.begin(), hook);
+        else filters.push_back(hook);
     }
 
     if (traceMeshGroupChainEnabled()) {

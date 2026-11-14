@@ -5,6 +5,56 @@
 
 namespace nicxlive::core::render {
 
+namespace {
+struct QueueTextureHandle final : RenderTextureHandle {
+    explicit QueueTextureHandle(uint32_t value) : id(value) {}
+    uint32_t id;
+};
+uint32_t queueTextureId(const std::shared_ptr<RenderTextureHandle>& handle) {
+    auto value = std::dynamic_pointer_cast<QueueTextureHandle>(handle);
+    if (!value) throw std::invalid_argument("Texture belongs to a different backend");
+    return value->id;
+}
+}
+
+std::shared_ptr<RenderTextureHandle> QueueRenderBackend::createTextureHandle() {
+    return std::make_shared<QueueTextureHandle>(createTexture({}, 1, 1, 4, false));
+}
+void QueueRenderBackend::destroyTextureHandle(std::shared_ptr<RenderTextureHandle> handle) {
+    if (handle) disposeTexture(queueTextureId(handle));
+}
+std::size_t QueueRenderBackend::textureNativeHandle(std::shared_ptr<RenderTextureHandle> handle) {
+    return handle ? queueTextureId(handle) : 0;
+}
+void QueueRenderBackend::uploadTextureData(std::shared_ptr<RenderTextureHandle> handle,
+    int width, int height, int input, int output, bool stencil, SourceTextureBytes data) {
+    uploadTextureData(queueTextureId(handle), width, height, input, output, stencil,
+                      std::vector<uint8_t>(data.begin(), data.end()));
+}
+void QueueRenderBackend::readTextureData(std::shared_ptr<RenderTextureHandle> handle,
+    int channels, bool stencil, SourceTextureBytes data) {
+    readTextureData(queueTextureId(handle), channels, stencil, data);
+}
+void QueueRenderBackend::readTextureData(uint32_t id,
+    int channels, bool stencil, SourceTextureBytes data) {
+    std::vector<uint8_t> bytes(data.size());
+    readTextureData(id, channels, stencil, bytes);
+    std::copy_n(bytes.begin(), std::min(bytes.size(), data.size()), data.begin());
+}
+void QueueRenderBackend::applyTextureFiltering(std::shared_ptr<RenderTextureHandle> handle,
+    Filtering filtering, bool) {
+    const auto id = queueTextureId(handle);
+    if (const auto* texture = getTexture(id)) setTextureParams(id, filtering, texture->wrapping, texture->anisotropy);
+}
+void QueueRenderBackend::applyTextureWrapping(std::shared_ptr<RenderTextureHandle> handle, Wrapping wrapping) {
+    const auto id = queueTextureId(handle);
+    if (const auto* texture = getTexture(id)) setTextureParams(id, texture->filtering, wrapping, texture->anisotropy);
+}
+void QueueRenderBackend::applyTextureAnisotropy(std::shared_ptr<RenderTextureHandle> handle, float anisotropy) {
+    const auto id = queueTextureId(handle);
+    if (const auto* texture = getTexture(id)) setTextureParams(id, texture->filtering, texture->wrapping, anisotropy);
+}
+
 void QueueRenderBackend::clear() { queue.clear(); dynamicStack.clear(); lastDynamic.reset(); }
 // resourceQueue は applyTextureCommands 後に caller で明示的に clearResourceQueue される
 void QueueRenderBackend::initializeDrawableResources() {}
