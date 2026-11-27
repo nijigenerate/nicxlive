@@ -1202,9 +1202,12 @@ std::array<float, 4> Node::getCombinedBounds(bool reupdate, bool countPuppet) {
     if (const auto drawable = std::dynamic_pointer_cast<Drawable>(receiver)) {
         if (reupdate) drawable->updateBounds();
         if (!drawable->getVertices().empty() || children.empty()) {
-            // Mapped Source Drawable.bounds is always a four-float value.
-            const auto nan = std::numeric_limits<float>::quiet_NaN();
-            combined = drawable->bounds.value_or(std::array<float, 4>{nan, nan, nan, nan});
+            // An uninitialized cache uses NaNs. Keep the node-origin fallback
+            // until bounds generation supplies a finite rectangle.
+            if (drawable->bounds && std::all_of(drawable->bounds->begin(), drawable->bounds->end(),
+                    [](float value) { return std::isfinite(value); })) {
+                combined = *drawable->bounds;
+            }
             hasCombined = true;
         }
     } else {
@@ -1224,13 +1227,15 @@ std::array<float, 4> Node::getCombinedBounds(bool reupdate, bool countPuppet) {
         }
     }
     if (countPuppet) {
-        const auto firstPuppet = d_runtime::ngRequireObject(puppetRef());
+        const auto firstPuppet = puppetRef();
+        if (!firstPuppet) return combined;
         const auto firstMatrix = firstPuppet->transform.matrix();
         const auto topLeft = nodeSourceMatrixVector(firstMatrix, {combined[0], combined[1], 0, 1});
         const auto secondPuppet = d_runtime::ngRequireObject(puppetRef());
         const auto secondMatrix = secondPuppet->transform.matrix();
         const auto bottomRight = nodeSourceMatrixVector(secondMatrix, {combined[2], combined[3], 0, 1});
-        return {topLeft.x, topLeft.y, bottomRight.x, bottomRight.y};
+        return {std::min(topLeft.x, bottomRight.x), std::min(topLeft.y, bottomRight.y),
+            std::max(topLeft.x, bottomRight.x), std::max(topLeft.y, bottomRight.y)};
     }
     return combined;
 }

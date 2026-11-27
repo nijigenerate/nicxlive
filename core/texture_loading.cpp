@@ -43,7 +43,9 @@ void endTextureLoading(bool checkErrors) {
         d_runtime::RetainedString("Texture loading pass not started!"),
         d_runtime::RetainedString::fromStaticLiteral("nijilive/core/texture.d"), 640);
     textureLoadingStarted = false;
-    textureBindings.resize(0);
+    // A zero-length shared slice still owns its backing and every texture in
+    // it. Release that owner on both success and failure of the loading pass.
+    textureBindings.clear();
 }
 }
 } // namespace nicxlive::core

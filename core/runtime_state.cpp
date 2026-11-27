@@ -19,7 +19,6 @@
 namespace nicxlive::core {
 
 namespace {
-std::shared_ptr<RenderBackend> gCachedRenderBackend{};
 RenderBackendFactory gRenderBackendFactory = nullptr;
 
 // D int arithmetic wraps before conversion to the returned size_t.
@@ -49,29 +48,28 @@ void inSetRenderBackend(const std::shared_ptr<RenderBackend>& backend) {
     // Detach is the existing end-of-renderer lifecycle boundary. Drain while the
     // old backend and its current graphics context are still available.
     if (!backend) inDrainPendingTextureDisposals();
-    gCachedRenderBackend = backend;
     setCurrentRenderBackend(backend);
 }
 
 void ngSetRenderBackendFactory(RenderBackendFactory factory) { gRenderBackendFactory = factory; }
 
 std::shared_ptr<RenderBackend> tryRenderBackend() {
-    if (!gCachedRenderBackend) {
-        gCachedRenderBackend = getCurrentRenderBackend();
-    }
-    if (!gCachedRenderBackend) {
+    // Native renderer scopes and Source calls must use the same current
+    // backend. A second cache survives context switches and routes uploads
+    // (and later disposal) to a different renderer.
+    auto backend = getCurrentRenderBackend();
+    if (!backend) {
         const auto factory = gRenderBackendFactory;
         if (!factory) throw d_runtime::ThrowableException(
             d_runtime::RetainedString::fromStaticLiteral("RenderBackend is not available."),
             d_runtime::RetainedString::fromStaticLiteral("nijilive/core/runtime_state.d"), 187);
-        auto backend = factory();
+        backend = factory();
         if (!backend) throw d_runtime::ThrowableException(
             d_runtime::RetainedString::fromStaticLiteral("RenderBackend is not available."),
             d_runtime::RetainedString::fromStaticLiteral("nijilive/core/runtime_state.d"), 187);
-        gCachedRenderBackend = backend;
         setCurrentRenderBackend(backend);
     }
-    return gCachedRenderBackend;
+    return backend;
 }
 
 std::shared_ptr<RenderBackend> requireRenderBackend() {

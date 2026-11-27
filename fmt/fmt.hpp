@@ -106,8 +106,10 @@ inline std::vector<uint8_t> inWriteINPPuppetMemory(const class Puppet& p) {
     app.insert(app.end(), MAGIC_BYTES.begin(), MAGIC_BYTES.end());
 
     // Puppet JSON
-    std::string puppetJson = inToJson(p);
-    if (puppetJson.empty()) puppetJson = "{}";
+    serde::TypedJsonWriter serializer;
+    p.serialize(serializer);
+    serializer.flush();
+    std::string puppetJson = std::move(serializer).takeString();
     appendU32(static_cast<uint32_t>(puppetJson.size()));
     app.insert(app.end(), puppetJson.begin(), puppetJson.end());
 
@@ -117,13 +119,14 @@ inline std::vector<uint8_t> inWriteINPPuppetMemory(const class Puppet& p) {
     appendU32(slotCount);
     for (auto& tex : p.textureSlots) {
         // length
-        if (!tex || tex->data().empty()) {
+        if (!tex || tex->width() <= 0 || tex->height() <= 0) {
             appendU32(0);
             app.push_back(1); // IN_TEX_TGA
             continue;
         }
-        const auto& data = tex->data();
-        auto tga = encodeTga(data, tex->width(), tex->height(), tex->channels());
+        const auto data = tex->getSourceTextureData();
+        auto tga = encodeTga(std::vector<uint8_t>(data.begin(), data.end()),
+            tex->width(), tex->height(), tex->channels());
         appendU32(static_cast<uint32_t>(tga.size()));
         app.push_back(1); // IN_TEX_TGA
         app.insert(app.end(), tga.begin(), tga.end());

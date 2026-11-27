@@ -44,7 +44,7 @@ using ::nicxlive::core::param::Parameter;
 
 class Puppet : public std::enable_shared_from_this<Puppet> {
 public:
-    virtual ~Puppet() = default;
+    virtual ~Puppet();
     virtual d_runtime::RetainedString toString() const;
     Puppet();
     explicit Puppet(const std::shared_ptr<nodes::Node>& rootNode);

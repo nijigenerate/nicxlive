@@ -1,3 +1,4 @@
+#include "../core/puppet.hpp"
 #include "../core/nodes/composite.hpp"
 #include "../core/nodes/dynamic_composite.hpp"
 #include "../core/nodes/projectable.hpp"
@@ -126,7 +127,9 @@ void testSimplePhysicsDeserializesDEnumNames() {
     data.put("model_type", "SpringPendulum");
     data.put("map_mode", "XY");
 
+    auto owner = nicxlive::core::Puppet::create();
     SimplePhysicsDriver driver;
+    driver.setPuppet(owner);
     auto err = driver.deserializeFromFghj(data);
 
     requireTrue("simple physics deserialize D enum names", !err.has_value());
@@ -141,7 +144,9 @@ void testSimplePhysicsSpringPendulumRecoversFromZeroLength() {
     });
     nicxlive::core::inUpdate();
 
+    auto owner = nicxlive::core::Puppet::create();
     SimplePhysicsDriver driver;
+    driver.setPuppet(owner);
     driver.modelType = PhysicsModel::SpringPendulum;
     driver.anchor = Vec2{0.0f, 0.0f};
     driver.length = 0.0f;
@@ -165,7 +170,9 @@ void testSimplePhysicsResetIgnoresStaleLengthOffset() {
     });
     nicxlive::core::inUpdate();
 
+    auto owner = nicxlive::core::Puppet::create();
     SimplePhysicsDriver driver;
+    driver.setPuppet(owner);
     driver.modelType = PhysicsModel::SpringPendulum;
     driver.anchor = Vec2{0.0f, 0.0f};
     driver.length = 100.0f;
