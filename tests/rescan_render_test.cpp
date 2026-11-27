@@ -12,7 +12,9 @@ using namespace nicxlive::core;
 int main() { try {
     auto queue=std::make_shared<render::QueueRenderBackend>();
     inSetRenderBackend(queue);
-    auto texture=std::make_shared<Texture>(std::vector<uint8_t>{255,255,255,255},1,1,4,4,false,false);
+    initRendererCommon();
+    inSetViewport(640, 480);
+    auto texture=std::make_shared<Texture>(std::vector<uint8_t>(16,255),2,2,4,4,false,false);
     auto root=nodes::Part::createSimple(texture,"parent");
     auto puppet=std::make_shared<Puppet>(root);
     root->setPuppet(puppet);
@@ -67,7 +69,7 @@ int main() { try {
     RenderContext pinContext;
     pinParent->runBeginTask(pinContext);
     pinned->runBeginTask(pinContext);
-    for (auto& vertex : pinParent->getMesh().vertices) { vertex.x *= 100; vertex.y *= 100; }
+    pinParent->getMesh().vertices *= 100.0f;
     pinParent->updateVertices();
     pinParent->deformation.fill({40.0f, 20.0f});
     auto beforePin = pinned->transform().translation;

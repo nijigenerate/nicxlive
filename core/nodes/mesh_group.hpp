@@ -5,8 +5,11 @@
 #include "deformer_base.hpp"
 #include "grid_deformer.hpp"
 #include "path_deformer.hpp"
+#include "../compat/source_allocator.hpp"
 
 #include <cmath>
+#include <functional>
+#include <utility>
 
 namespace nicxlive::core::nodes {
 
@@ -34,6 +37,8 @@ struct TriangleMapping {
 static constexpr int kMeshGroupFilterStage = 0;
 
 class MeshGroup : public Drawable, public NodeFilter {
+    template<class> friend struct d_runtime::SourceAllocator;
+    static std::shared_ptr<MeshGroup> allocateSourceMeshGroupReceiver();
 public:
     std::weak_ptr<Node> owner{};
     std::vector<NodeId> members{};
@@ -50,17 +55,26 @@ public:
     bool precalculated{false};
 
     MeshGroup();
+    using Node::create;
+    static std::shared_ptr<MeshGroup> create(const std::shared_ptr<Node>& parent = {});
+    template<class ParentProducer>
+    static std::shared_ptr<MeshGroup> createSourceDeferred(ParentProducer&& makeParent) {
+        auto result = allocateSourceMeshGroupReceiver();
+        std::shared_ptr<Node> parent = std::invoke(std::forward<ParentProducer>(makeParent));
+        result->constructMeshGroupOwned(parent);
+        return result;
+    }
     explicit MeshGroup(const std::shared_ptr<Node>& parent);
 
-    const std::string& typeId() const override {
-        static const std::string k = "MeshGroup";
-        return k;
+    common::NullableString typeId() const override {
+        return common::NullableString::fromStaticLiteral("MeshGroup");
     }
 
     // NodeFilter
     void captureTarget(const std::shared_ptr<Node>& target) override { addChild(target); }
     void releaseTarget(const std::shared_ptr<Node>& target) override;
-    void applyDeformToChildren(const std::vector<std::shared_ptr<core::param::Parameter>>& params, bool recursive = true) override;
+    void dispose() override;
+    void applyDeformToChildren(common::SharedArray<std::shared_ptr<core::param::Parameter>> params, bool recursive = true) override;
 
     void addChild(const std::shared_ptr<Node>& child);
     void clearChildren();
@@ -74,10 +88,14 @@ public:
     void draw() override;
     void renderMask(bool dodge = false);
 
-    void rebuffer(const MeshData& data);
+    void rebuffer(const MeshData& data) override;
     void switchMode(bool dynamic);
+    virtual bool getTranslateChildren() { return translateChildren; }
     void setTranslateChildren(bool value);
 
+    void serializeSelfImpl(::nicxlive::core::serde::TypedJsonWriter& serializer, bool recursive = true,
+        SerializeNodeFlags flags = SerializeNodeFlags::All) const override;
+    ::nicxlive::core::serde::ReadError deserializeFromFghj(::nicxlive::core::serde::TypedJsonView data) override;
     void serializeSelfImpl(::nicxlive::core::serde::InochiSerializer& serializer, bool recursive, SerializeNodeFlags flags) const override;
     ::nicxlive::core::serde::SerdeException deserializeFromFghj(const ::nicxlive::core::serde::Fghj& data) override;
 
@@ -90,6 +108,13 @@ public:
     void build(bool force = false) override;
     bool coverOthers() const override { return true; }
     bool mustPropagate() const override { return false; }
+
+protected:
+    explicit MeshGroup(DeferredConstruction) : Drawable(DeferredConstruction{}) {}
+    void constructMeshGroupOwned(std::shared_ptr<Node> parent) {
+        constructDrawableOwned(parent);
+        requirePreProcessTask();
+    }
 
 private:
     void precalculate();

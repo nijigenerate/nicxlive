@@ -2,6 +2,7 @@
 
 #include <string>
 #include <chrono>
+#include <cstdint>
 
 namespace nicxlive::core::render {
 
@@ -21,6 +22,7 @@ private:
 };
 
 RenderProfileScope profileScope(const std::string& label);
+void renderProfilerAddSampleUsec(const std::string& label, std::uint64_t usec);
 void renderProfilerFrameCompleted();
 
 } // namespace nicxlive::core::render

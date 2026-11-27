@@ -1,8 +1,16 @@
+// Independent nijilive.math.triangle used-source adaptation.
+// Copyright (c) 2020, Inochi2D Project. BSD-2-Clause: ../../LICENSE.
+// Inmath inverse: David Herberth/Inochi2D, MIT: ../animation/inmath.LICENSE.
 #include "triangle.hpp"
 #include "../nodes/drawable.hpp"
 
 #include <algorithm>
 #include <cmath>
+#include <bit>
+#include <limits>
+#include "inmath_float.hpp"
+#include "../compat/native_access_fault.hpp"
+#include "../compat/static_error.hpp"
 
 namespace nicxlive::core::math {
 namespace {
@@ -30,6 +38,41 @@ Vec2 mul(const Vec2& a, float s) {
     return Vec2{a.x * s, a.y * s};
 }
 
+// Veca indexing forms its proxy before the proxy reads the component lanes.
+Vec2 sourceTrianglePoint(const Vec2Array& values, std::size_t index, bool constIndex = false) {
+#ifndef NDEBUG
+    if (index >= values.size()) throw d_runtime::ngStaticError<d_runtime::AssertError>(
+        "veca index out of range", "source/nijilive/math/veca.d", constIndex ? 144 : 139);
+#endif
+    if (index >= values.size()) throw d_runtime::ngStaticError<d_runtime::ArrayIndexError>(
+        index, values.size(), d_runtime::RetainedString::fromStaticLiteral("source/nijilive/math/veca.d"), 467);
+    return {values.xAt(index), values.yAt(index)};
+}
+
+int& sourceTriangleIndex(common::SharedArray<int>& values, std::size_t index, std::size_t line) {
+    if (index >= values.size()) throw d_runtime::ngStaticError<d_runtime::ArrayIndexError>(
+        index, values.size(), d_runtime::RetainedString::fromStaticLiteral(
+            "source/nijilive/math/triangle.d"), line);
+    return values[index];
+}
+
+long double sourceTriangleLengthSquared(Vec2 value) {
+    long double result = 0;
+    result += static_cast<long double>(value.x * value.x);
+    result += static_cast<long double>(value.y * value.y);
+    return result;
+}
+
+long double sourceTriangleLength(Vec2 value) {
+    return std::sqrt(sourceTriangleLengthSquared(value));
+}
+
+float sourceTriangleDot(Vec2 left, Vec2 right) {
+    float result = 0;
+    result = detail::inmathAccumulate(result, detail::inmathProduct(left.x, right.x));
+    return detail::inmathAccumulate(result, detail::inmathProduct(left.y, right.y));
+}
+
 float calculateAngle(const Vec2& a, const Vec2& b) {
     return std::atan2(b.y - a.y, b.x - a.x);
 }
@@ -44,35 +87,36 @@ Mat3 mulMat(const Mat3& a, const Mat3& b) {
         for (int j = 0; j < 3; ++j) {
             out.m[i][j] = 0.0f;
             for (int k = 0; k < 3; ++k) {
-                out.m[i][j] += a.m[i][k] * b.m[k][j];
+                out.m[i][j] = detail::inmathAccumulate(out.m[i][j],
+                    detail::inmathProduct(a.m[i][k], b.m[k][j]));
             }
         }
     }
     return out;
 }
 
+// inmath 1.0.6 linalg.d1191-1221; MIT, animation/inmath.LICENSE.
 float detMat(const Mat3& a) {
-    return a.m[0][0] * (a.m[1][1] * a.m[2][2] - a.m[1][2] * a.m[2][1])
-         - a.m[0][1] * (a.m[1][0] * a.m[2][2] - a.m[1][2] * a.m[2][0])
-         + a.m[0][2] * (a.m[1][0] * a.m[2][1] - a.m[1][1] * a.m[2][0]);
+    return a.m[0][0] * a.m[1][1] * a.m[2][2]
+         + a.m[0][1] * a.m[1][2] * a.m[2][0]
+         + a.m[0][2] * a.m[1][0] * a.m[2][1]
+         - a.m[0][2] * a.m[1][1] * a.m[2][0]
+         - a.m[0][1] * a.m[1][0] * a.m[2][2]
+         - a.m[0][0] * a.m[1][2] * a.m[2][1];
 }
 
 Mat3 invMat(const Mat3& a) {
     Mat3 out{};
-    const float det = detMat(a);
-    if (std::abs(det) < 1e-8f) {
-        return out;
-    }
-    const float invDet = 1.0f / det;
-    out.m[0][0] =  (a.m[1][1] * a.m[2][2] - a.m[1][2] * a.m[2][1]) * invDet;
-    out.m[0][1] = -(a.m[0][1] * a.m[2][2] - a.m[0][2] * a.m[2][1]) * invDet;
-    out.m[0][2] =  (a.m[0][1] * a.m[1][2] - a.m[0][2] * a.m[1][1]) * invDet;
-    out.m[1][0] = -(a.m[1][0] * a.m[2][2] - a.m[1][2] * a.m[2][0]) * invDet;
-    out.m[1][1] =  (a.m[0][0] * a.m[2][2] - a.m[0][2] * a.m[2][0]) * invDet;
-    out.m[1][2] = -(a.m[0][0] * a.m[1][2] - a.m[0][2] * a.m[1][0]) * invDet;
-    out.m[2][0] =  (a.m[1][0] * a.m[2][1] - a.m[1][1] * a.m[2][0]) * invDet;
-    out.m[2][1] = -(a.m[0][0] * a.m[2][1] - a.m[0][1] * a.m[2][0]) * invDet;
-    out.m[2][2] =  (a.m[0][0] * a.m[1][1] - a.m[0][1] * a.m[1][0]) * invDet;
+    const float d = 1.0f / detMat(a);
+    out.m[0][0] = (a.m[1][1] * a.m[2][2] - a.m[1][2] * a.m[2][1]) * d;
+    out.m[0][1] = (a.m[0][2] * a.m[2][1] - a.m[0][1] * a.m[2][2]) * d;
+    out.m[0][2] = (a.m[0][1] * a.m[1][2] - a.m[0][2] * a.m[1][1]) * d;
+    out.m[1][0] = (a.m[1][2] * a.m[2][0] - a.m[1][0] * a.m[2][2]) * d;
+    out.m[1][1] = (a.m[0][0] * a.m[2][2] - a.m[0][2] * a.m[2][0]) * d;
+    out.m[1][2] = (a.m[0][2] * a.m[1][0] - a.m[0][0] * a.m[1][2]) * d;
+    out.m[2][0] = (a.m[1][0] * a.m[2][1] - a.m[1][1] * a.m[2][0]) * d;
+    out.m[2][1] = (a.m[0][1] * a.m[2][0] - a.m[0][0] * a.m[2][1]) * d;
+    out.m[2][2] = (a.m[0][0] * a.m[1][1] - a.m[0][1] * a.m[1][0]) * d;
     return out;
 }
 
@@ -240,6 +284,176 @@ bool nlCalculateTransformInTriangle(const ::nicxlive::core::nodes::Vec2Array& ve
     const float originalAngleHorz = calculateAngle(target, targetHorz);
     const float transformedAngleHorz = calculateAngle(targetPrime, targetHorzPrime);
     rotHorz = transformedAngleHorz - originalAngleHorz;
+    return true;
+}
+
+bool ngIsPointInTriangleSource(Vec2 point, const Vec2Array triangle) {
+#ifndef NDEBUG
+    if (triangle.size() < 3) throw d_runtime::ngStaticError<d_runtime::AssertError>(
+        "Triangle needs at least 3 vertices", "source/nijilive/math/triangle.d", 13);
+#endif
+    const Vec2 p1 = sourceTrianglePoint(triangle, 0, true);
+    const Vec2 p2 = sourceTrianglePoint(triangle, 1, true);
+    const Vec2 p3 = sourceTrianglePoint(triangle, 2, true);
+    const auto sign = [](Vec2 a, Vec2 b, Vec2 c) {
+        return (a.x - c.x) * (b.y - c.y) - (b.x - c.x) * (a.y - c.y);
+    };
+    const float d1 = sign(point, p1, p2);
+    const float d2 = sign(point, p2, p3);
+    const float d3 = sign(point, p3, p1);
+    return !((d1 < 0 || d2 < 0 || d3 < 0) && (d1 > 0 || d2 > 0 || d3 > 0));
+}
+
+Vec2 ngCalcOffsetInTriangleCoordsSource(Vec2 point, MeshData& mesh,
+        common::SharedArray<int>& triangle) {
+    const auto vertex = [&](std::size_t item, std::size_t line) {
+        const int index = sourceTriangleIndex(triangle, item, line);
+        return sourceTrianglePoint(mesh.vertices, static_cast<std::size_t>(index));
+    };
+    const auto distance = [&](std::size_t item, std::size_t line) {
+        return sourceTriangleLengthSquared(sub(point, vertex(item, line)));
+    };
+    // The second comparison observes the first swap through the actual descriptor.
+    const auto firstDistance = distance(0, 67);
+    const auto secondDistance = distance(1, 67);
+    if (firstDistance > secondDistance) {
+        auto& first = sourceTriangleIndex(triangle, 0, 68);
+        auto& second = sourceTriangleIndex(triangle, 1, 68);
+        std::swap(first, second);
+    }
+    const auto currentDistance = distance(0, 70);
+    const auto thirdDistance = distance(2, 70);
+    if (currentDistance > thirdDistance) {
+        auto& first = sourceTriangleIndex(triangle, 0, 71);
+        auto& third = sourceTriangleIndex(triangle, 2, 71);
+        std::swap(first, third);
+    }
+    const Vec2 p1 = vertex(0, 73);
+    const Vec2 p2 = vertex(1, 74);
+    const Vec2 p3 = vertex(2, 75);
+    Vec2 axis0 = sub(p2, p1);
+    [[maybe_unused]] const float axis0Length = static_cast<float>(sourceTriangleLength(axis0));
+    const float divisor0 = static_cast<float>(sourceTriangleLength(axis0));
+    axis0 = {axis0.x / divisor0, axis0.y / divisor0};
+    Vec2 axis1 = sub(p3, p1);
+    [[maybe_unused]] const float axis1Length = static_cast<float>(sourceTriangleLength(axis1));
+    const float divisor1 = static_cast<float>(sourceTriangleLength(axis1));
+    axis1 = {axis1.x / divisor1, axis1.y / divisor1};
+    const Vec2 relative = sub(point, p1);
+    if (sourceTriangleLengthSquared(relative) == 0) return {0, 0};
+    const float cosA = sourceTriangleDot(axis0, axis1);
+    if (cosA == 0) return {sourceTriangleDot(relative, axis0), sourceTriangleDot(relative, axis1)};
+    // Selected std.math acos(float) promotes to Source real, then stores float.
+    const float argA = static_cast<float>(std::acos(static_cast<long double>(cosA)));
+    const float sinA = std::sin(argA);
+    const float tanA = std::tan(argA);
+    const float cosB = static_cast<float>(sourceTriangleDot(axis0, relative) / sourceTriangleLength(relative));
+    const float argB = static_cast<float>(std::acos(static_cast<long double>(cosB)));
+    const float sinB = std::sin(argB);
+    const Vec2 orthogonal{
+        static_cast<float>(sourceTriangleLength(relative) * cosB),
+        static_cast<float>(sourceTriangleLength(relative) * sinB)};
+    // inmath dynamic-array constructor is row-major; multiplication folds columns.
+    const float matrix[2][2]{{1, -1.0f / tanA}, {0, 1.0f / sinA}};
+    const float input[2]{orthogonal.x, orthogonal.y};
+    float output[2]{0, 0};
+    for (std::size_t column = 0; column < 2; ++column)
+        for (std::size_t row = 0; row < 2; ++row)
+            output[row] = detail::inmathAccumulate(output[row],
+                detail::inmathProduct(matrix[row][column], input[column]));
+    return {output[0], output[1]};
+}
+
+static common::SharedArray<int> findSourceTriangle(Vec2 point, MeshData* mesh) {
+    common::SharedArray<int> triangle(std::vector<int>{0, 1, 2});
+    const auto checked = [](const auto& array, std::size_t index, std::size_t line) -> decltype(auto) {
+        if (index >= array.size()) throw d_runtime::ngStaticError<d_runtime::ArrayIndexError>(
+            index, array.size(), d_runtime::RetainedString::fromStaticLiteral(
+                "source/nijilive/math/triangle.d"), line);
+        return array[index];
+    };
+    std::uint32_t position = 0;
+    while (static_cast<std::size_t>(std::bit_cast<std::int32_t>(position)) <
+            d_runtime::ngRequireObject(mesh)->indices.size()) {
+        const auto first = static_cast<std::size_t>(std::bit_cast<std::int32_t>(position));
+        const auto second = static_cast<std::size_t>(std::bit_cast<std::int32_t>(position + 1));
+        const auto third = static_cast<std::size_t>(std::bit_cast<std::int32_t>(position + 2));
+        triangle[0] = checked(mesh->indices, first, 53);
+        triangle[1] = checked(mesh->indices, second, 54);
+        triangle[2] = checked(mesh->indices, third, 55);
+        const Vec2 p1 = sourceTrianglePoint(mesh->vertices, static_cast<std::size_t>(triangle[0]));
+        const Vec2 p2 = sourceTrianglePoint(mesh->vertices, static_cast<std::size_t>(triangle[1]));
+        const Vec2 p3 = sourceTrianglePoint(mesh->vertices, static_cast<std::size_t>(triangle[2]));
+        const auto sign = [](Vec2 a, Vec2 b, Vec2 c) {
+            return (a.x - c.x) * (b.y - c.y) - (b.x - c.x) * (a.y - c.y);
+        };
+        const auto d1 = sign(point, p1, p2), d2 = sign(point, p2, p3), d3 = sign(point, p3, p1);
+        const bool negative = d1 < 0 || d2 < 0 || d3 < 0;
+        const bool positive = d1 > 0 || d2 > 0 || d3 > 0;
+        if (!(negative && positive)) return triangle;
+        position += 3;
+    }
+    return {};
+}
+
+common::SharedArray<int> ngFindSurroundingTriangleSource(Vec2 point, MeshData& mesh) {
+    return findSourceTriangle(point, &mesh);
+}
+
+common::SharedArray<int> findSurroundingTriangle(Vec2 point, std::shared_ptr<MeshData> mesh) {
+    return findSourceTriangle(point, mesh.get());
+}
+
+bool nlCalculateTransformInTriangle(Vec2Array vertices, common::SharedArray<int> triangle,
+        Vec2Array deformation, Vec2 target, Vec2& targetPrime, float& rotVert, float& rotHorz) {
+    // Source out arguments are initialized on entry, before any failing body access.
+    const float initial = std::numeric_limits<float>::quiet_NaN();
+    targetPrime = {initial, initial};
+    rotVert = rotHorz = initial;
+    const auto checked = [](const auto& array, std::size_t index, std::size_t line) -> decltype(auto) {
+        if (index >= array.size()) throw d_runtime::ngStaticError<d_runtime::ArrayIndexError>(
+            index, array.size(), d_runtime::RetainedString::fromStaticLiteral(
+                "source/nijilive/math/triangle.d"), line);
+        return array[index];
+    };
+    const auto point = [&](const Vec2Array& values, std::size_t item, std::size_t line) -> Vec2 {
+        const auto index = checked(triangle, item, line);
+        return sourceTrianglePoint(values, static_cast<std::size_t>(index));
+    };
+    const Vec2 p0 = point(vertices, 0, 108), p1 = point(vertices, 1, 109), p2 = point(vertices, 2, 110);
+    Mat3 original{};
+    original.m[0][0] = p0.x; original.m[0][1] = p1.x; original.m[0][2] = p2.x;
+    original.m[1][0] = p0.y; original.m[1][1] = p1.y; original.m[1][2] = p2.y;
+    original.m[2][0] = original.m[2][1] = original.m[2][2] = 1;
+    const Vec2 p3 = add(p0, point(deformation, 0, 116));
+    const Vec2 p4 = add(p1, point(deformation, 1, 117));
+    const Vec2 p5 = add(p2, point(deformation, 2, 118));
+    Mat3 transformed{};
+    transformed.m[0][0] = p3.x; transformed.m[0][1] = p4.x; transformed.m[0][2] = p5.x;
+    transformed.m[1][0] = p3.y; transformed.m[1][1] = p4.y; transformed.m[1][2] = p5.y;
+    transformed.m[2][0] = transformed.m[2][1] = transformed.m[2][2] = 1;
+    const auto affine = mulMat(transformed, invMat(original));
+    const auto apply = [&](Vec2 value) {
+        const float input[]{value.x, value.y, 1};
+        Vec2 result{};
+        float* components[]{&result.x, &result.y};
+        for (std::size_t column = 0; column < 3; ++column)
+            for (std::size_t row = 0; row < 2; ++row)
+                *components[row] = detail::inmathAccumulate(*components[row],
+                    detail::inmathProduct(affine.m[row][column], input[column]));
+        return result;
+    };
+    targetPrime = apply(target);
+    const Vec2 vertical = add(target, Vec2{0, 1});
+    const Vec2 verticalPrime = apply(vertical);
+    const Vec2 horizontal = add(target, Vec2{1, 0});
+    const Vec2 horizontalPrime = apply(horizontal);
+    const float originalVertical = calculateAngle(target, vertical);
+    const float transformedVertical = calculateAngle(targetPrime, verticalPrime);
+    rotVert = transformedVertical - originalVertical;
+    const float originalHorizontal = calculateAngle(target, horizontal);
+    const float transformedHorizontal = calculateAngle(targetPrime, horizontalPrime);
+    rotHorz = transformedHorizontal - originalHorizontal;
     return true;
 }
 

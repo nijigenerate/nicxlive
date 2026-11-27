@@ -9,12 +9,19 @@ namespace nicxlive::core::nodes {
 
 Mask::Mask() = default;
 
+std::shared_ptr<Mask> Mask::create(const std::shared_ptr<Node>& parent) {
+    const auto actualParent = parent;
+    ngRegisterModelResourceClassNames();
+    auto result = std::shared_ptr<Mask>(new Mask(DeferredConstruction{}));
+    result->constructMaskOwned(actualParent);
+    return result;
+}
+
 Mask::Mask(const MeshData& data, uint32_t uuidVal)
     : Part(data, std::array<std::shared_ptr<::nicxlive::core::Texture>, 3>{}, uuidVal) {}
 
-const std::string& Mask::typeId() const {
-    static const std::string k = "Mask";
-    return k;
+common::NullableString Mask::typeId() const {
+    return common::NullableString::fromStaticLiteral("Mask");
 }
 
 void Mask::fillDrawPacket(const Node& header, PartDrawPacket& packet, bool isMask) const {
@@ -73,7 +80,7 @@ void Mask::fillMaskDrawPacket(::nicxlive::core::nodes::MaskDrawPacket& packet) c
     if (packet.indexBuffer != 0 && !mesh->indices.empty()) {
         if (auto qb = std::dynamic_pointer_cast<core::render::QueueRenderBackend>(core::getCurrentRenderBackend())) {
             if (!qb->hasDrawableIndices(packet.indexBuffer)) {
-                qb->uploadDrawableIndices(packet.indexBuffer, mesh->indices);
+                qb->uploadDrawableIndices(packet.indexBuffer, std::vector<uint16_t>(mesh->indices.begin(), mesh->indices.end()));
             }
         }
     }
@@ -88,6 +95,15 @@ void Mask::draw() {
     for (auto& child : childrenRef()) {
         if (child) child->draw();
     }
+}
+
+void Mask::serializeSelfImpl(::nicxlive::core::serde::TypedJsonWriter& serializer,
+    bool recursive, SerializeNodeFlags flags) const {
+    Drawable::serializeSelfImpl(serializer, recursive, flags);
+}
+
+::nicxlive::core::serde::ReadError Mask::deserializeFromFghj(::nicxlive::core::serde::TypedJsonView data) {
+    return Drawable::deserializeFromFghj(data);
 }
 
 } // namespace nicxlive::core::nodes

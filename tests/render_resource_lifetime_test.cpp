@@ -8,25 +8,40 @@
 #include "render/backend_queue.hpp"
 #include "unity_native.hpp"
 #include <filesystem>
+#include <algorithm>
 #include <chrono>
 #include <map>
 #include <iostream>
 #include <stdexcept>
 using namespace nicxlive::core;
 namespace r=nicxlive::core::render;
+struct TestDrawable : nodes::Drawable {
+    using nodes::Drawable::Drawable;
+    void renderMask(bool = false) override {}
+};
 void check(bool b,const char* m){if(!b)throw std::runtime_error(m);}
-struct Backend:RenderBackend {
+struct Backend:r::QueueRenderBackend {
     uint32_t next=1;size_t vertex=0,uv=0,deform=0,uploads=0;
-    std::map<uint32_t,std::vector<uint16_t>> indices;
+    std::map<RenderResourceHandle,std::vector<uint16_t>> indices;
     std::map<uint32_t,std::vector<uint8_t>> textures;
     uint32_t createTexture(const std::vector<uint8_t>& data,int,int,int,bool)override {
         auto id=next++;textures[id]=data;return id;
     }
     void updateTexture(uint32_t id,const std::vector<uint8_t>& data,int,int,int)override {textures.at(id)=data;}
+    void readTextureData(uint32_t id,int,bool,std::vector<uint8_t>& out)override {
+        const auto& data=textures.at(id);
+        std::fill(out.begin(),out.end(),uint8_t{0});
+        std::copy_n(data.begin(),std::min(data.size(),out.size()),out.begin());
+    }
+    void uploadTextureData(uint32_t id,int,int,int,int,bool,const std::vector<uint8_t>& data)override {
+        textures.at(id)=data;
+    }
+    void generateTextureMipmap(uint32_t)override {}
     void disposeTexture(uint32_t id)override {textures.erase(id);}
-    void createDrawableBuffers(uint32_t& id)override{id=next++;}
-    void uploadDrawableIndices(uint32_t id,const std::vector<uint16_t>& data)override{indices[id]=data;}
-    void disposeDrawableBuffers(uint32_t id)override{indices.erase(id);}
+    void createDrawableBuffers(RenderResourceHandle& id)override{id=next++;}
+    void uploadDrawableIndices(RenderResourceHandle id,const std::vector<uint16_t>& data)override{indices[id]=data;}
+    void uploadDrawableIndices(RenderResourceHandle id,common::SharedArray<uint16_t> data)override{indices[id]={data.begin(),data.end()};}
+    void disposeDrawableBuffers(RenderResourceHandle id)override{indices.erase(id);}
     void uploadSharedVertexBuffer(const common::Vec2Array& v)override{++uploads;vertex=v.size();}
     void uploadSharedUvBuffer(const common::Vec2Array& v)override{++uploads;uv=v.size();}
     void uploadSharedDeformBuffer(const common::Vec2Array& v)override{++uploads;deform=v.size();}
@@ -39,8 +54,10 @@ void drawFrame(const std::shared_ptr<RenderBackend>& backend) {
     emitter.endFrame(backend.get(), state);
 }
 int main(int argc, char** argv){try{
+    inSetTimingFunc([] { return 0.0; });
     if(argc>1){
         auto queue=std::make_shared<r::QueueRenderBackend>(); inSetRenderBackend(queue);
+        initRendererCommon();
         for(int i=0;i<8;++i){
             std::vector<std::weak_ptr<Texture>> textures;
             std::vector<std::weak_ptr<nodes::Node>> nodes;
@@ -66,6 +83,7 @@ int main(int argc, char** argv){try{
         check(getCurrentRenderBackend()!=nullptr,"standalone Puppet has no default backend");
     }
     auto backend=std::make_shared<Backend>();inSetRenderBackend(backend);
+    initRendererCommon();
     {
         auto puppet=std::make_shared<Puppet>();
         check(getCurrentRenderBackend()==backend,"Puppet construction replaced host backend");
@@ -73,17 +91,17 @@ int main(int argc, char** argv){try{
         auto texture=std::make_shared<Texture>(std::vector<uint8_t>{12,34,56},1,1,3,4,false,false);
         const auto id=texture->backendId();
         check(backend->textures.at(id)==std::vector<uint8_t>({12,34,56,255}),"RGB input was not converted to RGBA");
-        texture->lock();texture->setData({7,8,9,10},-1);
+        texture->lock();texture->setData(std::vector<uint8_t>{7,8,9,10},-1);
         check(backend->textures.at(id)[0]==12,"locked texture updated early");
         texture->unlock();
         check(backend->textures.at(id)==std::vector<uint8_t>({7,8,9,10}),"unlock lost texture data");
-        texture->setData({21,22,23},3);
+        texture->setData(std::vector<uint8_t>{21,22,23},3);
         check(texture->channels()==4 && backend->textures.at(id)==std::vector<uint8_t>({21,22,23,255}),"input channels changed stored format");
-        bool rejected=false;try{texture->setData({1},3);}catch(const std::invalid_argument&){rejected=true;}
+        bool rejected=false;try{texture->setData(std::vector<uint8_t>{1},3);}catch(const std::invalid_argument&){rejected=true;}
         check(rejected,"truncated texture data accepted");
-        texture->setData({37,99},2);
+        texture->setData(std::vector<uint8_t>{37,99},2);
         check(backend->textures.at(id)==std::vector<uint8_t>({37,37,37,99}),"gray alpha expansion lost luminance or alpha");
-        texture->setData({42},1);
+        texture->setData(std::vector<uint8_t>{42},1);
         check(backend->textures.at(id)==std::vector<uint8_t>({42,42,42,255}),"gray expansion lost luminance");
         texture.reset();check(backend->textures.contains(id),"texture destructor disposed synchronously");
         inDrainPendingTextureDisposals();check(backend->textures.empty(),"texture not retired");
@@ -104,7 +122,7 @@ int main(int argc, char** argv){try{
         inDrainPendingTextureDisposals();
     }
     {
-        // A child masking against its ancestor must not own the ancestor back.
+        // Ancestor masks retain their source during use, but not past model unload.
         std::weak_ptr<nodes::Part> parentWeak, childWeak;
         std::weak_ptr<Texture> textureWeak;
         {
@@ -112,25 +130,46 @@ int main(int argc, char** argv){try{
             auto child=std::make_shared<nodes::Part>();
             parentWeak=parent; childWeak=child;
             parent->addChild(child);
+            auto owner=Puppet::create(parent);
             parent->textures[0]=std::make_shared<Texture>(std::vector<uint8_t>{1,2,3,255},1,1,4,4,false,false);
             textureWeak=parent->textures[0];
-            child->masks.push_back({parent->uuid,parent,nodes::MaskingMode::Mask});
+            child->masks.push_back({parent->uuid,std::static_pointer_cast<nodes::Drawable>(parent),nodes::MaskingMode::Mask});
             check(child->maskCount()==1 && child->masks[0].maskSrc.lock()==parent,"live ancestor mask was lost");
             child.reset();
             check(!childWeak.expired(),"parent did not retain its child");
             parent.reset();
         }
+        inUpdate(); // External local owners have now left scope; collect at the host safe point.
         check(parentWeak.expired() && childWeak.expired(),"ancestor mask retained node hierarchy");
         check(textureWeak.expired(),"ancestor mask retained texture");
         inDrainPendingTextureDisposals();
         check(backend->textures.empty(),"ancestor mask retained backend texture");
         auto target=std::make_shared<nodes::Part>();
-        { auto mask=std::make_shared<nodes::Part>(); target->masks.push_back({mask->uuid,mask,nodes::MaskingMode::DodgeMask}); }
-        check(target->maskCount()==0,"expired mask counted as live");
+        { auto mask=std::make_shared<nodes::Part>(); target->masks.push_back({mask->uuid,std::static_pointer_cast<nodes::Drawable>(mask),nodes::MaskingMode::DodgeMask}); }
+        check(target->maskCount()==1,"detached mask lost its retaining reference");
+        std::weak_ptr<nodes::Drawable> retainedMask=target->masks[0].maskSrc.lock();
+        target.reset();
+        check(retainedMask.expired(),"detached mask retained after its owner was released");
+    }
+    {
+        // Detached mask sources may themselves mask against the model root.
+        std::weak_ptr<nodes::Part> rootWeak, detachedWeak;
+        {
+            auto root=nodes::Part::create();
+            auto detached=nodes::Part::create();
+            auto owner=Puppet::create(root);
+            rootWeak=root; detachedWeak=detached;
+            root->masks.push_back({detached->uuid,std::static_pointer_cast<nodes::Drawable>(detached),nodes::MaskingMode::Mask});
+            detached->masks.push_back({root->uuid,std::static_pointer_cast<nodes::Drawable>(root),nodes::MaskingMode::Mask});
+            detached.reset();
+            check(!detachedWeak.expired(),"live model lost its detached mask source");
+        }
+        inUpdate();
+        check(rootWeak.expired() && detachedWeak.expired(),"model unload retained a detached mask cycle");
     }
     nodes::MeshData mesh;mesh.vertices={{0,0},{1,0},{0,1}};mesh.uvs=mesh.vertices;mesh.indices={0,1,2};
     {
-        auto drawable=std::make_shared<nodes::Drawable>(mesh,14,nullptr);
+        auto drawable=std::make_shared<TestDrawable>(mesh,14,nullptr);
         nodes::inSetUpdateBounds(false);
         auto fallback=drawable->getCombinedBounds();
         for(float value:fallback)check(std::isfinite(value),"missing cached bounds returned NaN");
@@ -142,8 +181,8 @@ int main(int argc, char** argv){try{
     }
     inUpdate();
     for(int cycle=0;cycle<8;++cycle){
-        auto first=std::make_shared<nodes::Drawable>(mesh,10,nullptr);
-        auto second=std::make_shared<nodes::Drawable>(mesh,11,nullptr);
+        auto first=std::make_shared<TestDrawable>(mesh,10,nullptr);
+        auto second=std::make_shared<TestDrawable>(mesh,11,nullptr);
         inUpdate();
         check(backend->indices.size()==2,"two drawables not allocated");
         drawFrame(backend);
@@ -157,7 +196,7 @@ int main(int argc, char** argv){try{
         auto remaining=second->ibo;first.reset();
         check(backend->indices.size()==2,"destructor called backend directly");
         inUpdate();
-        check(backend->indices.size()==1&&backend->indices.at(remaining)==mesh.indices,"remaining drawable changed");
+        check(backend->indices.size()==1&&std::ranges::equal(backend->indices.at(remaining),mesh.indices),"remaining drawable changed");
         second.reset();inUpdate();
         check(backend->indices.empty(),"index retirement leak");
         check(!backend->vertex&&!backend->uv&&!backend->deform,"empty atlas was not sent to backend");
@@ -165,9 +204,9 @@ int main(int argc, char** argv){try{
     }
     {
         auto other=std::make_shared<Backend>();
-        auto first=std::make_shared<nodes::Drawable>(mesh,16,nullptr);
+        auto first=std::make_shared<TestDrawable>(mesh,16,nullptr);
         inSetRenderBackend(other);
-        auto second=std::make_shared<nodes::Drawable>(mesh,17,nullptr);
+        auto second=std::make_shared<TestDrawable>(mesh,17,nullptr);
         drawFrame(backend); drawFrame(other);
         first.reset(); inUpdate();
         check(backend->indices.size()==1,"retirement ran on the wrong current context");
@@ -181,7 +220,7 @@ int main(int argc, char** argv){try{
         inSetRenderBackend(backend);
     }
     {
-        auto drawable=std::make_shared<nodes::Drawable>(mesh,18,nullptr);
+        auto drawable=std::make_shared<TestDrawable>(mesh,18,nullptr);
         drawFrame(backend);
         drawable.reset();
         // No extra frame or explicit collection is required at renderer shutdown.
@@ -198,7 +237,7 @@ int main(int argc, char** argv){try{
         nodes::PartDrawPacket packet{};
         puppet->commandEmitter()->drawPartPacket(packet);
         check(queue->queue.size()==1,"Puppet emitter did not adopt the host queue");
-        auto drawable=std::make_shared<nodes::Drawable>(mesh,13,nullptr);
+        auto drawable=std::make_shared<TestDrawable>(mesh,13,nullptr);
         check(queue->drawableIndexBufferCount()==1,"queue geometry not registered");
         drawable.reset();inUpdate();
         check(queue->drawableIndexBufferCount()==0,"queue backend retained retired indices");
@@ -213,7 +252,14 @@ int main(int argc, char** argv){try{
           fixture.textureSlots={nullptr, std::make_shared<Texture>(), std::make_shared<Texture>(std::vector<uint8_t>{3,4,5,255},1,1,4,4,false,false)};
           nicxlive::core::fmt::inWriteINPPuppet(fixture,path.string()); }
         { auto loaded=fmt::inLoadPuppet<Puppet>(path.string());
-          check(loaded->textureSlots.size()==3 && !loaded->textureSlots[0] && !loaded->textureSlots[1] && loaded->textureSlots[2],"empty texture slots failed roundtrip"); }
+          check(loaded->textureSlots.size()==3 && loaded->textureSlots[0]->width()==0 &&
+                loaded->textureSlots[1]->width()==0 && loaded->textureSlots[2]->width()==1,
+                "empty texture slot positions failed roundtrip");
+          const auto resaved=fmt::inWriteINPPuppetMemory(*loaded);
+          auto reloaded=fmt::inLoadPuppetFromMemory<Puppet>(resaved);
+          const auto pixels=reloaded->textureSlots[2]->getSourceTextureData();
+          check(pixels.size()==4 && pixels[0]==3 && pixels[1]==4 && pixels[2]==5 && pixels[3]==255,
+                "resaving a loaded source texture lost its pixels"); }
         inDrainPendingTextureDisposals();
         UnityRendererConfig config{32,32};void* renderer=nullptr;void* puppet=nullptr;
         check(njgCreateRenderer(&config,nullptr,&renderer)==NjgResult::Ok,"C API renderer creation failed");
@@ -235,7 +281,7 @@ int main(int argc, char** argv){try{
         check(njgUnloadPuppet(otherRenderer,puppet)==NjgResult::InvalidArgument,"cross-renderer unload accepted");
         check(otherQueue->queue.size()==1,"invalid unload erased unrelated renderer commands");
         // Queue a real Drawable retirement before unload; no subsequent tick is allowed.
-        { auto drawable=std::make_shared<nodes::Drawable>(mesh,15,nullptr); }
+        { auto drawable=std::make_shared<TestDrawable>(mesh,15,nullptr); }
         check(queue->drawableIndexBufferCount()==1,"C API renderer has no pending retirement");
         check(njgUnloadPuppet(renderer,puppet)==NjgResult::Ok,"C API unload failed");
         check(queue->drawableIndexBufferCount()==0,"last C API puppet unload left pending indices");
@@ -246,9 +292,19 @@ int main(int argc, char** argv){try{
         check(queue->queue.size()==1,"double unload erased renderer commands");
         // A late texture error must retire geometry and earlier valid textures
         // before restoring the caller's backend, without a subsequent tick.
-        const std::string geometry=R"({"nodes":{"type":"Part","uuid":91,"mesh":{"verts":[0,0,1,0,0,1],"uvs":[0,0,1,0,0,1],"indices":[0,1,2]}}})";
+        const std::string geometry=[&] {
+            auto part=std::make_shared<nodes::Part>(mesh,
+                std::array<std::shared_ptr<Texture>,3>{},91);
+            auto fixture=Puppet::create();
+            fixture->root->addChild(part);
+            serde::TypedJsonWriter writer;
+            fixture->serialize(writer);
+            writer.flush();
+            return std::move(writer).takeString();
+        }();
+        inUpdate();
         inSetRenderBackend(queue);
-        { auto probe=fmt::inLoadJSONPuppet<Puppet>(geometry);
+        { auto probe=fmt::inLoadTypedPuppetJson<Puppet>(geometry);
           check(queue->drawableIndexBufferCount()>0,"failure fixture contains no allocated geometry"); }
         inUpdate();
         std::vector<uint8_t> invalid(fmt::MAGIC_BYTES.begin(),fmt::MAGIC_BYTES.end());
@@ -270,7 +326,7 @@ int main(int argc, char** argv){try{
         njgDestroyRenderer(otherRenderer);
         njgDestroyRenderer(renderer);njgRuntimeTerm();inSetRenderBackend(backend);
     }
-    auto last=std::make_shared<nodes::Drawable>(mesh,12,nullptr);
+    auto last=std::make_shared<TestDrawable>(mesh,12,nullptr);
     last.reset();std::weak_ptr<Backend> weak=backend;
     inSetRenderBackend(nullptr);backend.reset();check(weak.expired(),"retirement queue owns backend");
     inUpdate();

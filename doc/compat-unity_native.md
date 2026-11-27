@@ -33,7 +33,7 @@
 | `njgGetRenderTargets` | export 関数あり | あり | ◯ |
 | `njgGetSharedBuffers` | export 関数あり | あり | ◯ |
 | `njgSetLogCallback` | export 関数あり | あり | ◯ |
-| `njgGetGcHeapSize` | export 関数あり | あり（GC未採用のため常に0を返却） | ◯ |
+| `njgGetGcHeapSize` | D-side API only | Removed from C++ declaration, body and WASM exports under the 2026-10-27 no-GC policy; no fabricated zero metric | Not provided |
 | `njgGetParameters` | export 関数あり | あり | ◯ |
 | `njgUpdateParameters` | export 関数あり | あり | ◯ |
 | `njgGetPuppetExtData` | export 関数あり | あり | ◯ |

@@ -1,11 +1,11 @@
 #pragma once
 
-#include "../texture.hpp"
-#include "../puppet.hpp"
+#include <texture.hpp>
+#include <puppet.hpp>
 #include "binfmt.hpp"
 #include "io.hpp"
 #include "serialize.hpp"
-#include "../utils/stb_image_write.h"
+#include "typed_reader.hpp"
 #include <algorithm>
 #include <cstdint>
 #include <filesystem>
@@ -45,7 +45,7 @@ inline std::vector<uint8_t> encodeTga(const std::vector<uint8_t>& data, int widt
 }
 
 inline bool& inpModeFlag() {
-    static bool flag = false;
+    static thread_local bool flag = false;
     return flag;
 }
 
@@ -61,83 +61,18 @@ std::shared_ptr<T> inLoadJSONPuppet(const std::string& data) {
 }
 
 template <typename T>
+std::shared_ptr<T> inLoadPuppetFromMemory(common::SharedArray<uint8_t> data) {
+    const bool binary = data.size() >= MAGIC_BYTES.size() &&
+        std::equal(MAGIC_BYTES.begin(), MAGIC_BYTES.end(), data.begin());
+    inpModeFlag() = binary;
+    if (binary) return inLoadTypedPuppetBinary<T>(data);
+    return inLoadJSONPuppet<T>(
+        data.empty() ? std::string{} : std::string(reinterpret_cast<const char*>(data.data()), data.size()));
+}
+
+template <typename T>
 std::shared_ptr<T> inLoadPuppetFromMemory(const std::vector<uint8_t>& data) {
-    // Detect INP/INX magic
-    auto startsWith = [&](const std::array<uint8_t, 8>& magic) {
-        return data.size() >= magic.size() &&
-               std::equal(magic.begin(), magic.end(), data.begin());
-    };
-    auto readU32 = [&](std::size_t& offset) -> uint32_t {
-        if (offset + 4 > data.size()) throw std::runtime_error("Unexpected EOF");
-        uint32_t v = (static_cast<uint32_t>(data[offset]) << 24) |
-                     (static_cast<uint32_t>(data[offset + 1]) << 16) |
-                     (static_cast<uint32_t>(data[offset + 2]) << 8) |
-                     (static_cast<uint32_t>(data[offset + 3]));
-        offset += 4;
-        return v;
-    };
-
-    if (!startsWith(MAGIC_BYTES)) {
-        // Fallback: treat as JSON string
-        return inLoadJsonDataFromMemory<T>(std::string(data.begin(), data.end()));
-    }
-
-    inpModeFlag() = true;
-    std::size_t offset = MAGIC_BYTES.size();
-    uint32_t puppetLen = readU32(offset);
-    if (offset + puppetLen > data.size()) throw std::runtime_error("Invalid INP puppet length");
-    std::string puppetJson(reinterpret_cast<const char*>(data.data() + offset), puppetLen);
-    offset += puppetLen;
-
-    auto puppet = inLoadJsonDataFromMemory<T>(puppetJson);
-
-    // Texture section
-    if (offset + TEX_SECTION.size() <= data.size() &&
-        std::equal(TEX_SECTION.begin(), TEX_SECTION.end(), data.begin() + offset)) {
-        offset += TEX_SECTION.size();
-        uint32_t slotCount = readU32(offset);
-        for (uint32_t i = 0; i < slotCount; ++i) {
-            uint32_t texLen = readU32(offset);
-            if (offset + texLen + 1 > data.size()) throw std::runtime_error("Invalid texture payload");
-            uint8_t texType = data[offset++]; // placeholder, currently ignored
-            (void)texType;
-            std::vector<uint8_t> payload(data.begin() + offset, data.begin() + offset + texLen);
-            offset += texLen;
-            if constexpr (requires(std::shared_ptr<T> p) { p->textureSlots; }) {
-                if (puppet->textureSlots.size() <= i) {
-                    puppet->textureSlots.resize(static_cast<std::size_t>(i) + 1);
-                }
-                if (payload.empty()) {
-                    puppet->textureSlots[i].reset();
-                    continue;
-                }
-                auto shallow = ::nicxlive::core::ShallowTexture(payload);
-                puppet->textureSlots[i] = std::make_shared<::nicxlive::core::Texture>(shallow);
-            }
-        }
-    }
-
-    // EXT section
-    if (offset + EXT_SECTION.size() <= data.size() &&
-        std::equal(EXT_SECTION.begin(), EXT_SECTION.end(), data.begin() + offset)) {
-        offset += EXT_SECTION.size();
-        uint32_t extCount = readU32(offset);
-        for (uint32_t i = 0; i < extCount; ++i) {
-            uint32_t nameLen = readU32(offset);
-            if (offset + nameLen > data.size()) throw std::runtime_error("Invalid ext name length");
-            std::string name(reinterpret_cast<const char*>(data.data() + offset), nameLen);
-            offset += nameLen;
-            uint32_t payloadLen = readU32(offset);
-            if (offset + payloadLen > data.size()) throw std::runtime_error("Invalid ext payload length");
-            std::vector<uint8_t> payload(data.begin() + offset, data.begin() + offset + payloadLen);
-            offset += payloadLen;
-            if constexpr (requires(std::shared_ptr<T> p) { p->extData; }) {
-                puppet->extData[name] = payload;
-            }
-        }
-    }
-
-    return puppet;
+    return inLoadPuppetFromMemory<T>(common::SharedArray<uint8_t>(data));
 }
 
 template <typename T>
@@ -152,7 +87,7 @@ std::shared_ptr<T> inLoadPuppet(const std::string& file) {
         if (!inVerifyMagicBytes(buffer)) {
             throw std::runtime_error("Invalid data format for INP/INX puppet");
         }
-        return inLoadPuppetFromMemory<T>(buffer);
+        return inLoadPuppetFromMemory<T>(common::SharedArray<uint8_t>(std::move(buffer)));
     }
     throw std::runtime_error("Invalid file format for puppet: " + ext);
 }
@@ -171,8 +106,10 @@ inline std::vector<uint8_t> inWriteINPPuppetMemory(const class Puppet& p) {
     app.insert(app.end(), MAGIC_BYTES.begin(), MAGIC_BYTES.end());
 
     // Puppet JSON
-    std::string puppetJson = inToJson(p);
-    if (puppetJson.empty()) puppetJson = "{}";
+    serde::TypedJsonWriter serializer;
+    p.serialize(serializer);
+    serializer.flush();
+    std::string puppetJson = std::move(serializer).takeString();
     appendU32(static_cast<uint32_t>(puppetJson.size()));
     app.insert(app.end(), puppetJson.begin(), puppetJson.end());
 
@@ -182,13 +119,14 @@ inline std::vector<uint8_t> inWriteINPPuppetMemory(const class Puppet& p) {
     appendU32(slotCount);
     for (auto& tex : p.textureSlots) {
         // length
-        if (!tex || tex->data().empty()) {
+        if (!tex || tex->width() <= 0 || tex->height() <= 0) {
             appendU32(0);
             app.push_back(1); // IN_TEX_TGA
             continue;
         }
-        const auto& data = tex->data();
-        auto tga = encodeTga(data, tex->width(), tex->height(), tex->channels());
+        const auto data = tex->getSourceTextureData();
+        auto tga = encodeTga(std::vector<uint8_t>(data.begin(), data.end()),
+            tex->width(), tex->height(), tex->channels());
         appendU32(static_cast<uint32_t>(tga.size()));
         app.push_back(1); // IN_TEX_TGA
         app.insert(app.end(), tga.begin(), tga.end());
@@ -202,7 +140,7 @@ inline std::vector<uint8_t> inWriteINPPuppetMemory(const class Puppet& p) {
             const auto& name = kv.first;
             const auto& payload = kv.second;
             appendU32(static_cast<uint32_t>(name.size()));
-            app.insert(app.end(), name.begin(), name.end());
+            app.insert(app.end(), name.data(), name.data() + name.size());
             appendU32(static_cast<uint32_t>(payload.size()));
             app.insert(app.end(), payload.begin(), payload.end());
         }

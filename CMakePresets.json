@@ -1,0 +1,21 @@
+{
+  "version": 5,
+  "configurePresets": [
+    {
+      "name": "macos-release",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/macos-compatible",
+      "condition": {"type": "equals", "lhs": "${hostSystemName}", "rhs": "Darwin"},
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "NICXLIVE_BUILD_SHARED": true,
+        "NICXLIVE_BUILD_TESTS": false,
+        "NICXLIVE_ENABLE_FAST_MATH": false,
+        "NICXLIVE_ENABLE_AVX2": false
+      }
+    }
+  ],
+  "buildPresets": [
+    {"name": "macos-release", "configurePreset": "macos-release", "jobs": 4}
+  ]
+}

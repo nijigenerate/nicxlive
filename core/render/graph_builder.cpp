@@ -158,7 +158,7 @@ void RenderGraphBuilder::finalizeDynamicCompositePass(bool autoClose, RenderComm
                  finalizer ? 1 : 0,
                  static_cast<unsigned long long>(childItems.size()),
                  passData.stencil ? passData.stencil->backendId() : 0u);
-    RenderCommandBuilder builder = [childItems, dynamicNode, passData, finalizer](RenderCommandEmitter& emitter) {
+    RenderCommandBuilder builder = [childItems, dynamicNode, passData, finalizer](RenderCommandEmitter& emitter) mutable {
         emitter.beginDynamicComposite(dynamicNode, passData);
         playbackItems(childItems, emitter);
         emitter.endDynamicComposite(dynamicNode, passData);

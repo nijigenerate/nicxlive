@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <limits>
 
 namespace nicxlive::core {
 
@@ -13,7 +14,10 @@ struct RenderScopeHint {
     bool skip{false};
 
     static RenderScopeHint root() { return RenderScopeHint{RenderPassKind::Root, 0, false}; }
-    static RenderScopeHint forDynamic(std::size_t t) { return t == 0 ? root() : RenderScopeHint{RenderPassKind::DynamicComposite, t, false}; }
+    static RenderScopeHint forDynamic(std::size_t token) {
+        if (token == 0 || token == std::numeric_limits<std::size_t>::max()) return root();
+        return RenderScopeHint{RenderPassKind::DynamicComposite, token, false};
+    }
     static RenderScopeHint skipHint() { return RenderScopeHint{RenderPassKind::Root, 0, true}; }
 };
 

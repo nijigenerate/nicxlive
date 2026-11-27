@@ -200,7 +200,7 @@ void QueueCommandEmitter::drawPartPacket(const nodes::PartDrawPacket& packet) {
     }
 }
 
-void QueueCommandEmitter::beginDynamicComposite(const std::shared_ptr<nodes::Projectable>&, const DynamicCompositePass& pass) {
+void QueueCommandEmitter::beginDynamicComposite(const std::shared_ptr<nodes::Projectable>&, DynamicCompositePass& pass) {
     dynDepth_++;
     auto passData = pass;
     int vw = 0;
@@ -242,7 +242,7 @@ void QueueCommandEmitter::beginDynamicComposite(const std::shared_ptr<nodes::Pro
     }
 }
 
-void QueueCommandEmitter::endDynamicComposite(const std::shared_ptr<nodes::Projectable>&, const DynamicCompositePass& pass) {
+void QueueCommandEmitter::endDynamicComposite(const std::shared_ptr<nodes::Projectable>&, DynamicCompositePass& pass) {
     auto passData = pass;
     if (dynDepth_ > 0) {
         dynDepth_--;

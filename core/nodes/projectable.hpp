@@ -34,12 +34,13 @@ public:
     std::size_t dynamicScopeTokenValue() const { return dynamicScopeToken; }
 
     virtual void selfSort();
+    void normalizeUV(void* data) override;
 
     void setIgnorePuppetRecurse(const std::shared_ptr<Node>& node, bool ignore);
     void setIgnorePuppet(bool ignore);
 
     void scanParts();
-    void scanSubParts(const std::vector<std::shared_ptr<Node>>& childNodes);
+    void scanSubParts(Node::ChildArray childNodes);
     void scanPartsRecurse(const std::shared_ptr<Node>& node);
 
     void drawSelf(bool isMask = false) override;
@@ -118,9 +119,32 @@ public:
     // Serialization
     void serializeSelfImpl(::nicxlive::core::serde::InochiSerializer& serializer, bool recursive, SerializeNodeFlags flags) const override;
     ::nicxlive::core::serde::SerdeException deserializeFromFghj(const ::nicxlive::core::serde::Fghj& data) override;
+
+    void copyFrom(const Node& src, bool clone = false, bool deepCopy = true) override;
+
+protected:
+    explicit Projectable(DeferredConstruction) : Part(DeferredConstruction{}) {}
+    void constructProjectableOwned(std::shared_ptr<Node> parent) { constructPartOwned(parent); }
+    void constructProjectableDataOwned(MeshData data, std::uint32_t uuid, std::shared_ptr<Node> parent) {
+        if (!data.indices.empty()) autoResizedMesh = false;
+        constructPartDataOwned(data, uuid, parent);
+    }
+
+public:
+    void registerRenderTasks(std::shared_ptr<core::TaskScheduler> scheduler) override;
+    void registerDelegatedTasks(std::shared_ptr<core::TaskScheduler> scheduler);
+
+    // Independent projectable.d:1315-1320, after accumulation in DeformationStack.
+    void onDeformPushed(Deformation& deform) override {
+        Part::onDeformPushed(deform);
+        textureInvalidated = true;
+        hasValidOffscreenContent = false;
+        loggedFirstRenderAttempt = false;
+    }
 };
 
 // Frame counter helpers (D: advanceProjectableFrame/currentProjectableFrame)
+void ngAdvanceProjectableFrameSource();
 std::size_t advanceProjectableFrame();
 std::size_t currentProjectableFrame();
 

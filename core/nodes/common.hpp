@@ -8,6 +8,9 @@
 #include <string>
 #include <vector>
 
+#include "../common/class_reference.hpp"
+#include "../serde_json.hpp"
+#include "../serde_reader.hpp"
 #include "../math/types.hpp"
 #include "../math/mat4.hpp"
 #include "../math/transform.hpp"
@@ -55,6 +58,39 @@ enum class BlendMode {
     SliceFromLower = 18,
     // Legacy alias kept for old callsites/configs.
     Additive = LinearDodge,
+};
+
+class Drawable;
+
+void setAdvancedBlendCoherent(bool enabled);
+void setLegacyBlendMode(BlendMode mode);
+void setAdvancedBlendEquation(BlendMode mode);
+void issueBlendBarrier();
+bool hasAdvancedBlendSupport();
+bool hasAdvancedBlendCoherentSupport();
+bool inUseMultistageBlending(BlendMode mode);
+void nlApplyBlendingCapabilities();
+void nlSetBlendingCapabilitiesForTesting(bool advancedAvailable, bool coherentAvailable, bool forceFallback);
+void inInitBlending();
+void nlSetTripleBufferFallback(bool enabled);
+bool nlIsTripleBufferFallbackEnabled();
+bool inIsAdvancedBlendMode(BlendMode mode);
+void inSetBlendMode(BlendMode mode, bool legacyOnly = false);
+void inBlendModeBarrier(BlendMode mode);
+
+enum class MaskingMode {
+    Mask,
+    DodgeMask,
+};
+
+struct MaskBinding {
+    NodeId maskSrcUUID{0};
+    // The original field is a retaining class reference, including detached masks.
+    common::ClassReference<Drawable> maskSrc{};
+    MaskingMode mode{MaskingMode::Mask};
+
+    void serialize(::nicxlive::core::serde::TypedJsonWriter& serializer) const;
+    ::nicxlive::core::serde::ReadError deserializeFromFghj(::nicxlive::core::serde::TypedJsonView data);
 };
 
 inline std::optional<BlendMode> parseBlendMode(std::string raw) {
@@ -130,3 +166,13 @@ std::vector<DebugLine>& debugDrawBuffer();
 void clearDebugDrawBuffer();
 
 } // namespace nicxlive::core::nodes
+
+namespace nicxlive::core::serde {
+void serializeValue(TypedJsonWriter& serializer, nodes::BlendMode value);
+void serializeValue(TypedJsonWriter& serializer, nodes::MaskingMode value);
+ReadError deserializeValue(TypedJsonView data, nodes::BlendMode& value);
+ReadError deserializeValue(TypedJsonView data, nodes::MaskingMode& value);
+inline ReadError deserializeValue(TypedJsonView data, nodes::MaskBinding& value) {
+    return value.deserializeFromFghj(data);
+}
+} // namespace nicxlive::core::serde

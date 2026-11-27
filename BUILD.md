@@ -1,4 +1,20 @@
-# Build Guide (Windows)
+# Build Guide
+
+## macOS
+
+Use AppleClang with C++20 support, CMake, Ninja and Boost 1.90 with its JSON
+library installed. From this repository on `nijigenerate-compatible`:
+
+```sh
+cmake --preset macos-release
+cmake --build --preset macos-release
+```
+
+The Release shared library is `build/macos-compatible/libnicxlive.dylib`.
+The preset disables test executables and keeps fast-math and AVX2 disabled.
+It does not change the system compiler or install files globally.
+
+## Windows
 
 This project uses CMake + MSVC and expects Boost headers. The simplest setup on Windows is to install Boost via a classic vcpkg checkout and point CMake at the vcpkg toolchain.
 

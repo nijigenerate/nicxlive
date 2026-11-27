@@ -2,6 +2,7 @@
 #include "../debug_log.hpp"
 
 #include <chrono>
+#include <bit>
 #include <map>
 #include <string>
 #include <vector>
@@ -33,6 +34,15 @@ struct RenderProfiler {
 
     void addSample(const std::string& label, std::chrono::steady_clock::duration sample) {
         accumUsec[label] += std::chrono::duration_cast<std::chrono::microseconds>(sample).count();
+        callCounts[label] += 1;
+    }
+
+    void addSampleUsec(const std::string& label, std::uint64_t usec) {
+        // D Duration stores 100 ns ticks; preserve integral wrapping before total!usecs.
+        const auto ticks = std::bit_cast<std::int64_t>(usec * std::uint64_t{10});
+        const auto sample = ticks / 10;
+        const auto total = static_cast<std::uint64_t>(accumUsec[label]) + static_cast<std::uint64_t>(sample);
+        accumUsec[label] = std::bit_cast<std::int64_t>(total);
         callCounts[label] += 1;
     }
 
@@ -117,6 +127,10 @@ void RenderProfileScope::stop() {
 
 RenderProfileScope profileScope(const std::string& label) {
     return RenderProfileScope(label);
+}
+
+void renderProfilerAddSampleUsec(const std::string& label, std::uint64_t usec) {
+    profiler().addSampleUsec(label, usec);
 }
 
 void renderProfilerFrameCompleted() {
