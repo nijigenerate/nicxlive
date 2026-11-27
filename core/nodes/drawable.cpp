@@ -1221,39 +1221,14 @@ common::SharedArray<std::ptrdiff_t> Drawable::counterWeldingIndices(
     const std::shared_ptr<Drawable>& target, std::span<const std::ptrdiff_t> indices) {
     if (!target || target.get() == this) throw std::runtime_error("Welding requires a distinct target");
     if (indices.size() != getVertices().size()) throw std::runtime_error("Welding vertex count does not match mesh");
-    for (auto index : indices) {
-        if (index == NOINDEX) continue;
-        if (index < 0 || static_cast<std::size_t>(index) >= target->getVertices().size())
-            throw std::runtime_error("Welding target vertex index is out of range");
-    }
     common::SharedArray<std::ptrdiff_t> result(target->getVertices().size(), NOINDEX);
-    std::vector<Vec2> anchors(getVertices().size());
-    for (std::size_t i = 0; i < getVertices().size(); ++i) {
-        const auto vertex = getVertices()[i].toVector();
-        const auto matrix = transform().matrix();
-        float x = 0, y = 0;
-        const float components[4] = {vertex.x, vertex.y, 0, 1};
-        for (std::size_t k = 0; k < 4; ++k) {
-            x += matrix.a.a[0][k] * components[k]; y += matrix.a.a[1][k] * components[k];
-        }
-        anchors[i] = {x, y};
-    }
-    for (std::size_t j = 0; j < target->getVertices().size(); ++j) {
-        const auto vertex = target->getVertices()[j].toVector();
-        const auto matrix = target->transform().matrix();
-        float x = 0, y = 0;
-        const float components[4] = {vertex.x, vertex.y, 0, 1};
-        for (std::size_t k = 0; k < 4; ++k) {
-            x += matrix.a.a[0][k] * components[k]; y += matrix.a.a[1][k] * components[k];
-        }
-        const Vec2 point{x, y};
-        float nearest = 16;
-        for (std::size_t i = 0; i < anchors.size(); ++i) {
-            if (indices[i] == NOINDEX) continue;
-            const Vec2 delta{point.x - anchors[i].x, point.y - anchors[i].y};
-            const float distance = delta.x * delta.x + delta.y * delta.y;
-            if (distance < nearest) { nearest = distance; result[j] = static_cast<std::ptrdiff_t>(i); }
-        }
+    for (std::size_t i = 0; i < indices.size(); ++i) {
+        const auto destination = indices[i];
+        if (destination == NOINDEX) continue;
+        if (destination < 0 || static_cast<std::size_t>(destination) >= result.size())
+            throw std::runtime_error("Welding target vertex index is out of range");
+        auto& source = result[static_cast<std::size_t>(destination)];
+        if (source == NOINDEX) source = static_cast<std::ptrdiff_t>(i);
     }
     return result;
 }
@@ -1267,21 +1242,7 @@ common::SharedArray<std::ptrdiff_t> Drawable::updatedCounterWeldingIndices(
         [&](const WeldingLink& link) { return link.target.lock().get() == this; });
     if (own == weldedLinks.end() || counter == target->weldedLinks.end())
         throw std::runtime_error("Welding requires both endpoint links");
-    auto result = counter->indices.duplicate();
-    for (auto& index : result) {
-        if (index < 0) continue;
-        const auto i = static_cast<std::size_t>(index);
-        if (i >= indices.size() || i >= own->indices.size() || indices[i] < 0 || indices[i] != own->indices[i])
-            index = NOINDEX;
-    }
-    for (std::size_t i = 0; i < indices.size(); ++i) {
-        const auto j = indices[i];
-        if (j == NOINDEX) continue;
-        if (j < 0 || static_cast<std::size_t>(j) >= result.size())
-            throw std::runtime_error("Welding target vertex index is out of range");
-        if (result[static_cast<std::size_t>(j)] < 0) result[static_cast<std::size_t>(j)] = static_cast<std::ptrdiff_t>(i);
-    }
-    return result;
+    return counterWeldingIndices(target, indices);
 }
 
 common::SharedArray<std::ptrdiff_t> Drawable::updatedCounterWeldingIndices(
@@ -1292,12 +1253,6 @@ common::SharedArray<std::ptrdiff_t> Drawable::updatedCounterWeldingIndices(
         if (!condition) throw d_runtime::ThrowableException(
             d_runtime::RetainedString(std::string(message)),
             d_runtime::RetainedString::fromStaticLiteral(sourceFile), line);
-    };
-    const auto checkedLink = [](const common::SharedArray<WeldingLink>& links,
-                               std::size_t index, std::size_t line) -> const WeldingLink& {
-        if (index >= links.size()) throw d_runtime::ngStaticError<d_runtime::ArrayIndexError>(
-            index, links.size(), d_runtime::RetainedString::fromStaticLiteral(sourceFile), line);
-        return links[index];
     };
     enforce(indices.size() == getVertices().size(),
         "Welding vertex count does not match mesh", 737);
@@ -1321,26 +1276,7 @@ common::SharedArray<std::ptrdiff_t> Drawable::updatedCounterWeldingIndices(
         }
     }
     enforce(own >= 0 && counter >= 0, "Welding requires both endpoint links", 740);
-    auto result = checkedLink(d_runtime::ngRequireObject(target)->weldedLinks,
-        static_cast<std::size_t>(counter), 741).indices.duplicate();
-    for (auto& value : result) {
-        if (value < 0) continue;
-        const auto index = static_cast<std::size_t>(value);
-        if (index >= indices.size() ||
-            index >= checkedLink(weldedLinks, static_cast<std::size_t>(own), 744).indices.size() ||
-            indices[index] < 0 ||
-            indices[index] != checkedLink(weldedLinks,
-                static_cast<std::size_t>(own), 745).indices[index]) value = NOINDEX;
-    }
-    for (std::size_t index = 0; index < indices.size(); ++index) {
-        const auto targetIndex = indices[index];
-        if (targetIndex == NOINDEX) continue;
-        enforce(targetIndex >= 0 && static_cast<std::size_t>(targetIndex) < result.size(),
-            "Welding target vertex index is out of range", 750);
-        const auto slot = static_cast<std::size_t>(targetIndex);
-        if (result[slot] < 0) result[slot] = static_cast<std::ptrdiff_t>(index);
-    }
-    return result;
+    return counterWeldingIndices(target, indices);
 }
 
 void Drawable::addWeldedTarget(const std::shared_ptr<Drawable>& target,
@@ -1367,62 +1303,20 @@ void Drawable::addWeldedTarget(const std::shared_ptr<Drawable>& target,
 
 common::SharedArray<std::ptrdiff_t> Drawable::counterWeldingIndices(
     std::shared_ptr<Drawable> target, const common::SharedArray<std::ptrdiff_t> indices) {
-    const auto self = std::static_pointer_cast<Drawable>(shared_from_this());
     static constexpr char sourceFile[] = "source/nijilive/core/nodes/drawable.d";
     const auto enforce = [](bool condition, const char* message, std::size_t line) {
         if (!condition) throw d_runtime::ThrowableException(
             d_runtime::RetainedString(std::string(message)),
             d_runtime::RetainedString::fromStaticLiteral(sourceFile), line);
     };
-    const auto checked = [](auto& values, std::size_t index, std::size_t line) -> decltype(auto) {
-        if (index >= values.size()) throw d_runtime::ngStaticError<d_runtime::ArrayIndexError>(
-            index, values.size(), d_runtime::RetainedString::fromStaticLiteral(sourceFile), line);
-        return values[index];
-    };
     enforce(target && target.get() != this, "Welding requires a distinct target", 684);
     enforce(indices.size() == getVertices().size(), "Welding vertex count does not match mesh", 685);
+    const auto count=target->getVertices().size();
     for (const auto index : indices) {
-        if (index == NOINDEX) continue;
-        enforce(index >= 0 && static_cast<std::size_t>(index) < target->getVertices().size(),
+        enforce(index == NOINDEX || (index >= 0 && static_cast<std::size_t>(index) < count),
             "Welding target vertex index is out of range", 688);
     }
-    common::SharedArray<std::ptrdiff_t> result(target->getVertices().size(), 0);
-    for (auto& value : result) value = NOINDEX;
-    common::SharedArray<Vec2> anchors(getVertices().size(), Vec2{
-        std::numeric_limits<float>::quiet_NaN(), std::numeric_limits<float>::quiet_NaN()});
-    const auto project = [](const Mat4& matrix, const Vec2 vertex) {
-        Vec2 point{0, 0};
-        const float components[4]{vertex.x, vertex.y, 0, 1};
-        for (std::size_t column = 0; column < 4; ++column) {
-            point.x = math::detail::inmathAccumulate(point.x,
-                math::detail::inmathProduct(matrix.a.a[0][column], components[column]));
-            point.y = math::detail::inmathAccumulate(point.y,
-                math::detail::inmathProduct(matrix.a.a[1][column], components[column]));
-        }
-        return point;
-    };
-    getVertices().forEachValue([&](std::size_t index, Vec2 vertex) {
-        const auto matrix = transform().matrix();
-        checked(anchors, index, 694) = project(matrix, vertex);
-        return 0;
-    });
-    target->getVertices().forEachValue([&](std::size_t targetIndex, Vec2 vertex) {
-        const auto matrix = target->transform().matrix();
-        const auto point = project(matrix, vertex);
-        float nearest = 16;
-        for (std::size_t index = 0; index < anchors.size(); ++index) {
-            const auto anchor = anchors[index];
-            if (checked(indices, index, 699) == NOINDEX) continue;
-            const Vec2 delta{point.x - anchor.x, point.y - anchor.y};
-            const float distance = delta.x * delta.x + delta.y * delta.y;
-            if (distance < nearest) {
-                nearest = distance;
-                checked(result, targetIndex, 704) = static_cast<std::ptrdiff_t>(index);
-            }
-        }
-        return 0;
-    });
-    return result;
+    return counterWeldingIndices(target, std::span<const std::ptrdiff_t>(indices.data(), indices.size()));
 }
 
 void Drawable::addWeldedTarget(std::shared_ptr<Drawable> target,

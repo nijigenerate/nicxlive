@@ -355,6 +355,9 @@ if(BUILD_WASM)
 endif()
 
 if(NICXLIVE_BUILD_TESTS)
+  add_executable(nicxlive_welding_indices_test tests/welding_indices_test.cpp)
+  target_link_libraries(nicxlive_welding_indices_test PRIVATE nicxlive::nicxlive)
+  add_test(NAME nicxlive_welding_indices_test COMMAND nicxlive_welding_indices_test)
   add_executable(nicxlive_rescan_render_test tests/rescan_render_test.cpp)
   target_link_libraries(nicxlive_rescan_render_test PRIVATE nicxlive::nicxlive)
   add_test(NAME nicxlive_rescan_render_test COMMAND nicxlive_rescan_render_test)
@@ -392,7 +395,8 @@ if(NICXLIVE_BUILD_TESTS)
     get_target_property(nicxlive_json_library_type Boost::json TYPE)
     if(nicxlive_json_library_type STREQUAL "SHARED_LIBRARY")
       foreach(test_target nicxlive_rescan_render_test nicxlive_render_resource_lifetime_test
-          nicxlive_texture_readback_test nicxlive_vec2array_test nicxlive_projectable_texture_offset_test)
+          nicxlive_texture_readback_test nicxlive_vec2array_test nicxlive_projectable_texture_offset_test
+          nicxlive_welding_indices_test)
         add_custom_command(TARGET ${test_target} POST_BUILD
           COMMAND ${CMAKE_COMMAND} -E copy_if_different
             $<TARGET_FILE:Boost::json> $<TARGET_FILE_DIR:${test_target}>)
