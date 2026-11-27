@@ -1,3 +1,4 @@
+#include "nodes/retained_graph.hpp"
 #include <atomic>
 // Shallow/source factory port: Inochi2D Project 2020; nijigenerate Project 2024.
 // BSD-2-Clause; see licenses/nijilive-shallow-texture.txt.
@@ -85,6 +86,7 @@ namespace {
 struct PendingTextureDisposal {
     std::weak_ptr<RenderBackend> backend;
     uint32_t backendId{0};
+    std::shared_ptr<RenderTextureHandle> sourceHandle;
 };
 
 std::mutex gPendingTextureDisposalsMutex;
@@ -294,8 +296,7 @@ Texture::Texture(const std::vector<uint8_t>& data, int width, int height, int in
 }
 
 Texture::~Texture() noexcept(false) {
-    if (sourceInitialized_) dispose();
-    else disposeDeferred();
+    disposeDeferred();
 }
 
 namespace {
@@ -498,8 +499,9 @@ void Texture::dispose() {
         if (sourceHandle_) {
             // TLS owners can outlive renderer shutdown. Disposal must never
             // invoke the backend factory after its graphics context is gone.
-            const auto backend = getCurrentRenderBackend();
-            if (backend) backend->destroyTextureHandle(sourceHandle_);
+            const auto backend = backend_.lock();
+            if (backend && backend == getCurrentRenderBackend()) backend->destroyTextureHandle(sourceHandle_);
+            else { disposeDeferred(); return; }
         }
         sourceHandle_.reset();
         return;
@@ -516,6 +518,16 @@ void Texture::dispose() {
 }
 
 void Texture::disposeDeferred() {
+    if (sourceInitialized_) {
+        if (sourceHandle_ && gPendingTextureDisposalsAlive.load()) {
+            if (auto backend = backend_.lock()) {
+                std::lock_guard<std::mutex> lock(gPendingTextureDisposalsMutex);
+                gPendingTextureDisposals.push_back({backend, 0, sourceHandle_});
+            }
+        }
+        sourceHandle_.reset(); backend_.reset();
+        return;
+    }
     if (!gPendingTextureDisposalsAlive.load()) {
         backendId_ = 0;
         backend_.reset();
@@ -536,7 +548,15 @@ void Texture::disposeDeferred() {
     backend_.reset();
 }
 
+void inReserveTextureDisposals(std::size_t additional) {
+    {
+        std::lock_guard<std::mutex> lock(gPendingTextureDisposalsMutex);
+        gPendingTextureDisposals.reserve(gPendingTextureDisposals.size() + additional);
+    }
+}
+
 void inDrainPendingTextureDisposals() {
+    nodes::collectRetainedNodeCycles();
     render::detail::drainDrawableReleases();
     std::vector<PendingTextureDisposal> pending;
     {
@@ -547,9 +567,11 @@ void inDrainPendingTextureDisposals() {
     const auto current = getCurrentRenderBackend();
     std::vector<PendingTextureDisposal> deferred;
     for (const auto& item : pending) {
-        if (auto backend = item.backend.lock(); backend && item.backendId != 0) {
-            if (backend == current) backend->disposeTexture(item.backendId);
-            else deferred.push_back(item);
+        if (auto backend = item.backend.lock(); backend && (item.backendId != 0 || item.sourceHandle)) {
+            if (backend == current) {
+                if (item.sourceHandle) backend->destroyTextureHandle(item.sourceHandle);
+                else backend->disposeTexture(item.backendId);
+            } else deferred.push_back(item);
         }
     }
     if (!deferred.empty()) {
@@ -685,6 +707,7 @@ void Texture::constructSource(SourceTextureBytes data, int width, int height,
     useMipmaps_ = useMipmaps;
     {
         const auto backend = currentRenderBackend();
+        backend_ = backend;
         sourceHandle_ = backend->createTextureHandle();
         // A complete real owner exists before these logical-constructor virtual calls.
         setData(data, inChannels);

@@ -106,6 +106,13 @@ template<class K, class V, class Hash, class Equal> class ResourceKeyMap {
         return bucket.entry;
     }
 public:
+    // Lifetime inspection does not copy or mutate entries. Retained map ranges
+    // and mapped references must remain visible as external ownership roots.
+    std::shared_ptr<void> retentionOwner() const noexcept { return storage_; }
+    template<class Visitor> void visitRetainedEntries(Visitor visitor) const {
+        if (storage_) for (const auto& bucket : storage_->buckets)
+            if (bucket.entry) visitor(bucket.entry);
+    }
     class MappedReference {
         std::shared_ptr<Entry> entry_;
     public:

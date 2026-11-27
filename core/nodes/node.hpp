@@ -163,6 +163,10 @@ public:
         }
     }
     static NodeNotifyListener forNode(const std::shared_ptr<Node>& listener);
+    template<auto Method> std::shared_ptr<MethodClass<Method>> retainedMethodContext() const noexcept {
+        if (invoke_ != &invokeMethod<Method>) return {};
+        return std::static_pointer_cast<MethodClass<Method>>(context_);
+    }
     explicit operator bool() const noexcept { return invoke_ != nullptr || direct_ != nullptr; }
     bool operator==(const NodeNotifyListener& other) const noexcept {
         return context_.get() == other.context_.get() && invoke_ == other.invoke_ && direct_ == other.direct_;
@@ -259,6 +263,11 @@ public:
             explicit operator bool() const noexcept {
                 return methodInvoker_ != nullptr || (callable_ && static_cast<bool>(*callable_));
             }
+            std::shared_ptr<void> retentionOwner() const noexcept { return callable_; }
+            template<auto Method> std::shared_ptr<MethodClass<Method>> retainedMethodContext() const noexcept {
+                if (methodInvoker_ != &invokeMethod<Method>) return {};
+                return std::static_pointer_cast<MethodClass<Method>>(methodContext_);
+            }
             friend bool operator==(const Func& left, const Func& right) noexcept {
                 if (left.methodInvoker_ || right.methodInvoker_)
                     return left.methodInvoker_ == right.methodInvoker_
@@ -316,6 +325,7 @@ public:
                 if (function) callable_ = std::make_shared<Function>(std::move(function));
             }
             explicit operator bool() const noexcept { return callable_ && static_cast<bool>(*callable_); }
+            std::shared_ptr<void> retentionOwner() const noexcept { return callable_; }
             template<class Context> Context* target() noexcept {
                 return callable_ ? callable_->template target<Context>() : nullptr;
             }

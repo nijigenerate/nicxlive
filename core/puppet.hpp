@@ -6,6 +6,7 @@
 #include "compat/native_access_fault.hpp"
 #include "compat/switch_error.hpp"
 #include "nodes/node.hpp"
+#include "nodes/retained_graph.hpp"
 #include "nodes/composite.hpp"
 #include "nodes/dynamic_composite.hpp"
 #include "nodes/part.hpp"
@@ -43,6 +44,7 @@ using ::nicxlive::core::param::Parameter;
 
 
 class Puppet : public std::enable_shared_from_this<Puppet> {
+    [[no_unique_address]] nodes::CollectRetainedNodesAfterMembers collectAfterMembers;
 public:
     virtual ~Puppet();
     virtual d_runtime::RetainedString toString() const;

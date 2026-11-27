@@ -139,6 +139,7 @@ int main(int argc, char** argv){try{
             check(!childWeak.expired(),"parent did not retain its child");
             parent.reset();
         }
+        inUpdate(); // External local owners have now left scope; collect at the host safe point.
         check(parentWeak.expired() && childWeak.expired(),"ancestor mask retained node hierarchy");
         check(textureWeak.expired(),"ancestor mask retained texture");
         inDrainPendingTextureDisposals();
@@ -163,6 +164,7 @@ int main(int argc, char** argv){try{
             detached.reset();
             check(!detachedWeak.expired(),"live model lost its detached mask source");
         }
+        inUpdate();
         check(rootWeak.expired() && detachedWeak.expired(),"model unload retained a detached mask cycle");
     }
     nodes::MeshData mesh;mesh.vertices={{0,0},{1,0},{0,1}};mesh.uvs=mesh.vertices;mesh.indices={0,1,2};

@@ -4,6 +4,7 @@
 #include <memory>
 namespace nicxlive::core { class RenderBackend; }
 namespace nicxlive::core::render::detail {
+void reserveDrawableReleases(std::size_t additional);
 void enqueueDrawableRelease(std::weak_ptr<RenderBackend> backend, std::size_t handle);
 void drainDrawableReleases();
 }

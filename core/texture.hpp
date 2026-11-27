@@ -230,6 +230,8 @@ template<bool checkErrors = true> void inEndTextureLoading() {
 }
 
 void inDrainPendingTextureDisposals();
+// Reserve native retirement queues before committing a batch of node releases.
+void inReserveTextureDisposals(std::size_t additional);
 void inTexUnPremuliply(std::vector<std::uint8_t>& data);
 void inTexUnPremuliply(SourceTextureBytes& data);
 void inTexPremultiply(SourceTextureBytes& data, int channels = 4);

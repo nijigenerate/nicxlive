@@ -1,6 +1,5 @@
 #include <stdexcept>
 #include "puppet.hpp"
-#include <unordered_set>
 #include "puppet_root_sort.hpp"
 #include "resource.hpp"
 #include "compat/native_access_fault.hpp"
@@ -223,25 +222,7 @@ void Puppet::constructOwned(std::shared_ptr<Node> rootNode) {
     initializeRenderState();
 }
 
-Puppet::~Puppet() {
-    // Mask references retain detached sources while the model is alive. Break
-    // cycles at the model lifetime boundary, including sources outside its tree.
-    std::vector<std::shared_ptr<Node>> pending;
-    std::unordered_set<Node*> visited;
-    if (root) pending.push_back(root);
-    if (puppetRootNode) pending.push_back(puppetRootNode);
-    for (std::size_t i = 0; i < pending.size(); ++i) {
-        const auto node = pending[i];
-        if (!node || !visited.insert(node.get()).second) continue;
-        for (const auto& child : node->childrenList()) pending.push_back(child);
-        if (const auto part = std::dynamic_pointer_cast<Part>(node)) {
-            for (const auto& mask : part->masks) {
-                if (auto source = mask.maskSrc.lock()) pending.push_back(source);
-            }
-            part->masks.clear();
-        }
-    }
-}
+Puppet::~Puppet() = default;
 
 Puppet::Puppet() {
     puppetRootNode = std::make_shared<Node>();
@@ -286,6 +267,7 @@ void Puppet::initializeRenderState() {
 
 void Puppet::scanPartsRecurse(const std::shared_ptr<Node>& node, bool driversOnly) {
     if (!node) return;
+    nodes::trackRetainedNode(node);
 
     if (auto drv = std::dynamic_pointer_cast<Driver>(node)) {
         drivers.push_back(drv);

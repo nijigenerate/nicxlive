@@ -193,6 +193,7 @@ set(NICXLIVE_SOURCES
     core/render/commands.cpp
     core/dbg.cpp
     core/nodes/node.cpp
+    core/nodes/retained_graph.cpp
     core/nodes/part.cpp
     core/nodes/mask.cpp
     core/nodes/composite.cpp
@@ -355,6 +356,19 @@ if(BUILD_WASM)
 endif()
 
 if(NICXLIVE_BUILD_TESTS)
+  add_executable(nicxlive_node_cycle_lifetime_test tests/node_cycle_lifetime_test.cpp)
+  target_link_libraries(nicxlive_node_cycle_lifetime_test PRIVATE nicxlive::nicxlive)
+  foreach(scenario acyclic ancestor detached self_mask independent_models reparent undo_reattach
+      external_root shared_root cross_model_source root_replacement deleted_subtree mask_snapshot
+      welding_unload welding_remove welding_storage_control inp_cycle_roundtrip
+      inp_cycle_late_failure exception_unwind repeated_unload destructor_allocation_failure
+      external_release delegate_snapshot filter_snapshot children_snapshot map_snapshot
+      map_entry_snapshot welding_after_reset deleted_subtree_live_model allocation_failure_recovery
+      allocation_failure_textured source_texture_backend_switch
+      parameter_cycle binding_snapshot parameter_links grid_filter_cycle grid_delegate_snapshot
+      physics_system_cycle physics_system_snapshot projectable_cache_cycle notification_cycle path_driver_cycle path_driver_snapshot surviving_atlas_after_unload)
+    add_test(NAME nicxlive_cycle_${scenario} COMMAND nicxlive_node_cycle_lifetime_test ${scenario})
+  endforeach()
   add_executable(nicxlive_welding_indices_test tests/welding_indices_test.cpp)
   target_link_libraries(nicxlive_welding_indices_test PRIVATE nicxlive::nicxlive)
   add_test(NAME nicxlive_welding_indices_test COMMAND nicxlive_welding_indices_test)
@@ -396,7 +410,7 @@ if(NICXLIVE_BUILD_TESTS)
     if(nicxlive_json_library_type STREQUAL "SHARED_LIBRARY")
       foreach(test_target nicxlive_rescan_render_test nicxlive_render_resource_lifetime_test
           nicxlive_texture_readback_test nicxlive_vec2array_test nicxlive_projectable_texture_offset_test
-          nicxlive_welding_indices_test)
+          nicxlive_welding_indices_test nicxlive_node_cycle_lifetime_test)
         add_custom_command(TARGET ${test_target} POST_BUILD
           COMMAND ${CMAKE_COMMAND} -E copy_if_different
             $<TARGET_FILE:Boost::json> $<TARGET_FILE_DIR:${test_target}>)

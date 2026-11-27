@@ -1,3 +1,4 @@
+#include "retained_graph.hpp"
 #include "../render/profiler.hpp"
 #include "node.hpp"
 #include "../compat/source_c_string.hpp"
@@ -606,6 +607,7 @@ int Node::depth() const {
 void Node::insertInto(const std::shared_ptr<Node>& node, std::size_t offset) {
     const auto destination = node;
     const auto receiver = shared_from_this();
+    trackRetainedNode(receiver);
     nodePathCache = nullptr;
     if (auto p = parent.lock()) {
         const auto range = p->children;
@@ -632,7 +634,7 @@ void Node::insertInto(const std::shared_ptr<Node>& node, std::size_t offset) {
             if (index == length) throw d_runtime::ngStaticError<d_runtime::ArraySliceError>(1, 0, 0,
                 d_runtime::RetainedString::fromStaticLiteral("std/range/primitives.d"), 2140);
 #endif
-            currentParent->children = current.removed(index);
+            currentParent->children = current.removed(index).duplicate();
         }
     }
 

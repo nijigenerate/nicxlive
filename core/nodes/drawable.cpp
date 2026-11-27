@@ -1,3 +1,5 @@
+#include "retained_graph.hpp"
+#include "deformer_base.hpp"
 #include "../render/profiler.hpp"
 // Independent nijilive.core.nodes.drawable source adaptation.
 // Copyright (c) 2020, Inochi2D Project; (c) 2024, nijigenerate Project.
@@ -124,7 +126,7 @@ common::SharedArray<Element> removeWeldSourceElement(common::SharedArray<Element
     source = source.slice(1, source.size());
     const auto result = range.slice(0, range.size() - 1);
     for (std::size_t index = 0; index < source.size(); ++index) destination[index] = source[index];
-    return result;
+    return result.duplicate();
 }
 
 bool sameWeldCall(const Node::DeformFilterHook& hook, const std::shared_ptr<Drawable>& owner) {
@@ -183,6 +185,40 @@ void removeWeldCall(Node::FilterArray& storage, const std::shared_ptr<Drawable>&
 }
 
 } // namespace
+
+namespace lifetime_detail {
+namespace {
+template<class Call, class Func>
+bool visitCall(Graph& graph, std::size_t at, const Func& function) {
+    const auto* call = function.template target<Call>();
+    if (!call) return false;
+    const auto owner = function.retentionOwner();
+    auto id = graph.add(owner, [call](Graph& graph, std::size_t at) {
+        graph.nodeEdge(at, call->context);
+    });
+    graph.edge(at, id);
+    return true;
+}
+}
+void visitRetainedFilters(Graph& graph, std::size_t at, Node& node) {
+    const auto nodeFilter = [](Graph& graph, auto at, const auto& filter) {
+        const auto method = filter.func.template retainedMethodContext<&SourceDeformation::deformChildrenSource>();
+        if (method) graph.nodeEdge(at, std::dynamic_pointer_cast<Node>(method));
+        if (!visitCall<NodeWeldCall>(graph, at, filter.func))
+            visitCall<NodeAttachCall>(graph, at, filter.func);
+    };
+    graph.array(at, node.preProcessFilters, nodeFilter);
+    graph.array(at, node.postProcessFilters, nodeFilter);
+    if (auto* deformable = dynamic_cast<Deformable*>(&node)) {
+        const auto deformFilter = [](Graph& graph, auto at, const auto& filter) {
+            if (!visitCall<WeldCall>(graph, at, filter.func))
+                visitCall<DeformAttachCall>(graph, at, filter.func);
+        };
+        graph.array(at, deformable->deformPreProcessFilters, deformFilter);
+        graph.array(at, deformable->deformPostProcessFilters, deformFilter);
+    }
+}
+} // namespace lifetime_detail
 
 Drawable::Drawable() : Deformable() {
     bool constructed = false;

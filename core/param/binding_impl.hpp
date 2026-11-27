@@ -1,3 +1,4 @@
+#include "../nodes/retained_graph.hpp"
 #pragma once
 
 #include "parameter.hpp"
@@ -141,6 +142,7 @@ private:
         // Capture a managed owner during construction. Unmanaged native callers
         // remain explicitly borrowed; getParameter never reconstructs an owner.
         auto owner = value ? value->weak_from_this().lock() : std::shared_ptr<Parameter>{};
+        nodes::trackRetainedParameter(owner);
         parameter = std::move(owner);
         borrowedParameter_ = parameter ? nullptr : value;
     }
@@ -149,6 +151,7 @@ public:
     std::shared_ptr<Parameter> parameter;
     std::shared_ptr<Parameter> getParameter() const { return parameter; }
     void setParameter(std::shared_ptr<Parameter> value) {
+        nodes::trackRetainedParameter(value);
         [[maybe_unused]] const auto previous = parameter;
         parameter = std::move(value);
         borrowedParameter_ = nullptr;

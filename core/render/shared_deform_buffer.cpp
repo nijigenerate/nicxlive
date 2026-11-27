@@ -40,6 +40,7 @@ struct SharedVecAtlas {
     std::vector<Binding> bindings{};
     std::unordered_map<Vec2Array*, std::size_t> lookup{};
     bool dirty{false};
+    bool needsRebuild{false};
 
     void registerArray(Vec2Array& target, std::size_t* offsetSink) {
         auto ptr = &target;
@@ -74,7 +75,11 @@ struct SharedVecAtlas {
             std::vector<Binding>().swap(bindings);
             std::unordered_map<Vec2Array*, std::size_t>().swap(lookup);
         }
-        rebuild();
+        // Removal must not allocate from a Drawable destructor. Keep the
+        // surviving arrays at their existing valid offsets until a safe point.
+        needsRebuild = true;
+        dirty = true;
+        if (bindings.empty()) { storage.clear(); needsRebuild = false; }
         if (traceSharedEnabled()) {
             NJCX_DBG_LOG("[nicxlive][shared-atlas] unregister target=%p bindings=%zu stride=%zu\n",
                          static_cast<void*>(ptr), bindings.size(), storage.size());
@@ -96,7 +101,7 @@ struct SharedVecAtlas {
     }
 
     std::size_t stride() const { return storage.size(); }
-    Vec2Array& data() { return storage; }
+    Vec2Array& data() { if (needsRebuild) rebuild(); return storage; }
     bool isDirty() const { return dirty; }
     void markDirty() {
         dirty = true;
@@ -149,6 +154,7 @@ private:
             }
             if (binding.offsetSink) *binding.offsetSink = binding.offset;
         }
+        needsRebuild = false;
         dirty = true;
         if (traceSharedEnabled()) {
             std::size_t maxEnd = 0;
@@ -212,6 +218,10 @@ RetirementQueue& retirements() { static auto* queue=new RetirementQueue;return *
 }
 namespace detail {
 static void uploadDirtySharedBuffers(const std::shared_ptr<RenderBackend>& backend);
+void reserveDrawableReleases(std::size_t additional) {
+    auto& queue=retirements(); std::lock_guard lock(queue.mutex);
+    queue.items.reserve(queue.items.size()+additional);
+}
 void enqueueDrawableRelease(std::weak_ptr<RenderBackend> backend,std::size_t handle) {
     if(!handle || backend.expired())return;
     auto& queue=retirements();std::lock_guard lock(queue.mutex);
